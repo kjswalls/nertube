@@ -228,10 +228,11 @@ async function pressCapture(page: Page): Promise<void> {
 }
 
 /**
- * Capture one idea through the modal, optionally retargeting the channel with a
- * digit first (the digits are only a channel picker while the title is empty —
- * afterwards they are text, which is what makes "10 things I got wrong"
- * typeable).
+ * Capture one idea through the modal, optionally retargeting the channel first.
+ *
+ * Retargeting is Alt+digit, not a bare digit: inside the title field a digit is
+ * always text, so "10 things I got wrong" is typeable and cannot be filed in a
+ * channel nobody asked for.
  */
 async function captureIdea(
   page: Page,
@@ -240,7 +241,7 @@ async function captureIdea(
 ): Promise<void> {
   await pressCapture(page);
   if (options.digit !== undefined) {
-    await page.keyboard.press(String(options.digit));
+    await page.keyboard.press(`Alt+Digit${options.digit}`);
   }
   await page.keyboard.type(title);
   await page.keyboard.press('Enter');
@@ -390,8 +391,13 @@ test('dragging an idea past Packaging is refused, and nothing moves', async ({
   const toast = toastSaying(page, /thumbnail concept/i);
   await expect(toast).toBeVisible();
   await expect(toast).toHaveAttribute('data-tone', 'error');
-  await expect(toast.getByRole('link', { name: 'Fix packaging' })).toBeVisible();
-  await expect(toast.getByRole('link', { name: 'Skip gate…' })).toBeVisible();
+  // One link, and it lands on a page that exists. "Fix packaging" and
+  // "Skip gate…" come back in M2 with the packaging block and the skip flow.
+  await expect(toast.getByRole('link')).toHaveCount(1);
+  await expect(toast.getByRole('link')).toHaveAttribute(
+    'href',
+    /^\/videos\/[0-9a-f-]+$/,
+  );
 
   // Snapped back: not left sitting in the column the database refused.
   await expect(cardIn(page, IDEA, title)).toBeVisible();

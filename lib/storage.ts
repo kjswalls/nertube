@@ -22,7 +22,7 @@ import type { Database } from "@/lib/database.types";
  */
 
 /** The one private bucket. `0001_init.sql` creates it with `public = false`. */
-export const THUMBNAILS_BUCKET = "thumbnails";
+const THUMBNAILS_BUCKET = "thumbnails";
 
 /**
  * The image types a sketch may be, and the extension each one gets.
@@ -33,7 +33,7 @@ export const THUMBNAILS_BUCKET = "thumbnails";
  * to mean anything. `jpeg` folds onto `jpg` so the same picture re-uploaded
  * from a different camera roll lands on the same object instead of beside it.
  */
-export const CONCEPT_SKETCH_TYPES: Readonly<Record<string, string>> = {
+const CONCEPT_SKETCH_TYPES: Readonly<Record<string, string>> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",

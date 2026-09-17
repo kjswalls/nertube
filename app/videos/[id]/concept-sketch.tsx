@@ -109,7 +109,20 @@ export function ConceptSketch({
     }
 
     setBusy("saving");
-    const result = await recordConceptSketch({ videoId, path });
+    let result;
+    try {
+      result = await recordConceptSketch({ videoId, path });
+    } catch {
+      // The bytes are in Storage at a stable path; only the row that names
+      // them did not get written. Say exactly that, rather than letting the
+      // rejection replace the page with an error screen.
+      input.value = "";
+      setBusy(null);
+      setError(
+        "The image uploaded, but the server could not be reached to record it. Choose the file again to finish.",
+      );
+      return;
+    }
     input.value = "";
     setBusy(null);
 
@@ -127,8 +140,23 @@ export function ConceptSketch({
   return (
     <section aria-labelledby={`${inputId}-heading`} className="flex flex-col gap-3">
       <h2 id={`${inputId}-heading`} className="text-sm font-semibold">
-        Thumbnail concept sketch
+        Concept sketch (reference)
       </h2>
+
+      {/*
+        The name matters. BRIEF.md principle 2 separates the thumbnail
+        *concept* from the thumbnail *asset*, and the packaging gate reads the
+        written concept (`videos.thumbnail_concept`) — not this picture. While
+        both were called "thumbnail concept", a card with a sketch on it was
+        refused a move for "a thumbnail concept", which is a refusal nobody can
+        act on. This is the reference image; the written concept is the field
+        the gate wants, and its editor arrives with the packaging block in M2.
+      */}
+      <p className="text-xs text-muted">
+        A reference image for the concept — a sketch, a frame, a photo. The
+        written thumbnail concept is a separate field, and it is the one the
+        packaging gate reads; its editor is M2.
+      </p>
 
       {/*
         One box, one size, whatever is inside it. The frame is 16:9 and sized in

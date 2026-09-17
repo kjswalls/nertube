@@ -10,8 +10,10 @@ import type { BoardCard } from "./types";
  *
  * PLAN.md's card face is: *title, channel chip, target date, concept sketch
  * thumb, `done/total` for the current stage, days in stage (amber when >
- * `stale_days`), "TTH skipped" badge, `waiting_on` chip*. Two of those are
- * other people's M1/M3 work and are marked as slots below rather than faked.
+ * `stale_days`), "TTH skipped" badge, `waiting_on` chip*. All of it is here
+ * except the checklist ratio, which arrives with the checklists in M3 and
+ * renders nothing at all until then — a "0/0" on every card would read as
+ * "nothing to do".
  *
  * ## Why this is an `<article>` in an `<li>` with real buttons
  *
@@ -128,7 +130,7 @@ export function VideoCard({
           aria-hidden="true"
           title={
             card.thumbnailConceptPath
-              ? "Concept sketch uploaded"
+              ? "Concept sketch (reference) uploaded — not the written thumbnail concept the gate reads"
               : "No concept sketch"
           }
           className={[
@@ -225,19 +227,18 @@ export function VideoCard({
         ) : null}
 
         {/*
-          SLOT — checklist ratio (`done/total` for the current stage, M3).
-
-          Left empty on purpose. `checklist_items` are snapshot-copied on stage
-          entry, so a card whose checklist has not been rendered yet would show
-          "0/0", which reads as "nothing to do" rather than as "not built yet" —
-          a misleading number is worse than no number.
+          The checklist ratio (`done/total` for the current stage) belongs here
+          and arrives with the checklists in M3. Nothing is rendered for it
+          until then: `checklist_items` are snapshot-copied on stage entry, so
+          a card would show "0/0" today, which reads as "nothing to do" rather
+          than as "not built yet".
         */}
-        <span data-slot="checklist-ratio" />
       </div>
 
       <div className="flex items-center gap-1">
         <button
           type="button"
+          data-move="back"
           disabled={previousStageName === null || pending}
           onClick={(event) => {
             event.stopPropagation();
@@ -255,6 +256,7 @@ export function VideoCard({
 
         <button
           type="button"
+          data-move="forward"
           disabled={nextStageName === null || pending}
           onClick={(event) => {
             event.stopPropagation();

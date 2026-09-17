@@ -1,0 +1,26 @@
+-- Take `id` and `created_at` out of the client's UPDATE grant on videos and
+-- stages.
+--
+-- 0001_init.sql drops the table-level UPDATE grant on both tables and re-grants
+-- a column list, because a column-level REVOKE cannot carve a hole in a
+-- table-level grant. That list carried `id, user_id, created_at` through from
+-- the table-level grant it replaced, and nothing else protects those two:
+-- `user_id` is held by the RLS WITH CHECK and `channel_id` by the composite
+-- foreign keys, but a client could rewrite a row's primary key and its creation
+-- time over PostgREST:
+--
+--   PATCH /rest/v1/videos?id=eq.<a>   {"id": "<b>"}            -> 204
+--   PATCH /rest/v1/videos?id=eq.<b>   {"created_at": "1999.."} -> 204
+--
+-- It is self-inflicted rather than cross-tenant — RLS keeps the row the
+-- caller's own and the primary key refuses a collision — but a captured idea's
+-- permalink (/videos/[id]) and the video segment of its concept-sketch object
+-- name ({uid}/{video}/concept.{ext}) would change underneath it, and an Idea
+-- video has no checklist_items row whose composite FK would restrict the write.
+--
+-- Neither column is written by any code path: capture_video, create_channel and
+-- the stage seeding all take them from column defaults, and every application
+-- write names its columns (app/actions/). The re-grant here is column-level, so
+-- a plain REVOKE is enough.
+revoke update (id, created_at) on public.videos from anon, authenticated;
+revoke update (id, created_at) on public.stages from anon, authenticated;

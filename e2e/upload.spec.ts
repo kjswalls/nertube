@@ -378,9 +378,17 @@ test('a non-image is refused in the browser, before anything is uploaded', async
 }) => {
   const videoId = await capture(userId, channelId, 'Refuse this');
 
+  // Storage traffic *for this video*. Unscoped, this collects the signed-URL
+  // image requests every other card's sketch makes on whatever board the
+  // session happens to be on, so on a reused stack the run before this one
+  // fails it — the assertion is about what this file does, not about what the
+  // page loads.
   const storageRequests: string[] = [];
   page.on('request', (request) => {
-    if (request.url().includes('/storage/v1/')) storageRequests.push(request.url());
+    const url = request.url();
+    if (url.includes('/storage/v1/') && url.includes(videoId)) {
+      storageRequests.push(url);
+    }
   });
 
   await page.goto(`/videos/${videoId}`);
@@ -391,7 +399,8 @@ test('a non-image is refused in the browser, before anything is uploaded', async
   await expect(status).toHaveText(/has to be an image/);
   await expect(status).toHaveAttribute('role', 'alert');
 
-  // Nothing left the browser, nothing was written, and the frame is untouched.
+  // Nothing left the browser for this video, nothing was written, and the
+  // frame is untouched.
   expect(storageRequests).toEqual([]);
   expect(await storedPath(videoId)).toBeNull();
   expect(await objectsFor(videoId)).toEqual([]);
@@ -493,6 +502,51 @@ test('the working title autosaves on blur and reaches the board', async ({ page 
       hasText: 'After, with the edges trimmed',
     }),
   ).toBeVisible();
+});
+
+test('a title save that never reaches the server keeps the page and the typed title', async ({
+  page,
+}) => {
+  const videoId = await capture(userId, channelId, 'Still here');
+
+  await page.goto(`/videos/${videoId}`);
+  const field = page.getByLabel('Working title');
+  await expect(field).toHaveValue('Still here');
+
+  // Every server-action POST to this route fails to connect. Uncaught, the
+  // rejection is rethrown into the nearest error boundary and the whole route
+  // — with the title being typed inside it — is replaced by Next's error page.
+  await page.route(`**/videos/${videoId}`, (route) =>
+    route.request().method() === 'POST' ? route.abort('failed') : route.fallback(),
+  );
+
+  await field.fill('Typed while the server was gone');
+  await field.press('Enter');
+
+  const status = page.getByTestId('title-status');
+  await expect(status).toHaveText(/could not reach the server/i);
+  await expect(status).toHaveAttribute('role', 'alert');
+
+  // The page is still the page, and the typed title is still in the field.
+  await expect(page.getByText("This page couldn’t load")).toHaveCount(0);
+  await expect(field).toHaveValue('Typed while the server was gone');
+  const unchanged = await db.query<{ title: string }>(
+    'select title from public.videos where id = $1',
+    [videoId],
+  );
+  expect(unchanged.rows[0].title).toBe('Still here');
+
+  // With the network back, the same field saves the same text.
+  await page.unroute(`**/videos/${videoId}`);
+  await field.focus();
+  await field.press('End');
+  await field.press('Enter');
+  await expect(status).toHaveText('Saved');
+  const saved = await db.query<{ title: string }>(
+    'select title from public.videos where id = $1',
+    [videoId],
+  );
+  expect(saved.rows[0].title).toBe('Typed while the server was gone');
 });
 
 test("another user's video is a 404, not a 403 with details", async ({ page }) => {

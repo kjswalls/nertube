@@ -32,6 +32,42 @@ begin
   end loop;
 end $$;
 
+-- Identity columns: a client may not rewrite a row's primary key or its
+-- creation time (0003_identity_columns.sql). RLS and the composite FKs do not
+-- cover these two, so the grant is what has to.
+do $$
+declare
+  rows_ text[] := array['videos', 'stages'];
+  cols text[] := array['id', 'created_at'];
+  target uuid;
+  t text; c text; ok boolean; st text; msg text;
+begin
+  foreach t in array rows_ loop
+    target := case when t = 'videos' then fx.video_a()
+                   else fx.stage(fx.channel('a-main'), 'idea') end;
+    foreach c in array cols loop
+      ok := false;
+      begin
+        execute format(
+          'update public.%I set %I = %s where id = %L',
+          t, c,
+          case when c = 'id' then quote_literal(gen_random_uuid()) || '::uuid'
+               else $q$'1999-01-01T00:00:00Z'::timestamptz$q$ end,
+          target);
+      exception when others then
+        get stacked diagnostics st = returned_sqlstate, msg = message_text;
+        ok := true;
+      end;
+      if not ok then
+        raise exception 'FAILED: a client rewrote %.%', t, c;
+      end if;
+      if st <> '42501' then
+        raise exception 'FAILED: updating %.% gave % (%), expected 42501', t, c, st, msg;
+      end if;
+    end loop;
+  end loop;
+end $$;
+
 do $$
 declare n int;
 begin
@@ -180,7 +216,15 @@ begin
      and privilege_type = 'UPDATE' and grantee = 'authenticated';
   if n < 30 then raise exception 'FAILED: only % video columns are updatable; the re-grant is incomplete', n; end if;
 
-  -- stages: every column but kind is updatable.
+  -- And the identity columns (0003_identity_columns.sql), on both tables.
+  select count(*) into n
+    from information_schema.column_privileges
+   where table_schema = 'public' and table_name in ('videos', 'stages')
+     and privilege_type = 'UPDATE' and grantee = 'authenticated'
+     and column_name in ('id', 'created_at');
+  if n <> 0 then raise exception 'FAILED: % identity columns are still UPDATE-grantable', n; end if;
+
+  -- stages: every column but kind, id and created_at is updatable.
   select count(*) into n
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
@@ -191,7 +235,7 @@ begin
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
      and privilege_type = 'UPDATE' and grantee = 'authenticated';
-  if n <> 7 then raise exception 'FAILED: % stage columns are updatable, expected 7', n; end if;
+  if n <> 5 then raise exception 'FAILED: % stage columns are updatable, expected 5', n; end if;
 end $$;
 
 -- TRUNCATE is not subject to RLS, so a role holding it empties a table for every

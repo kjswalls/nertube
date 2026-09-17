@@ -56,10 +56,32 @@ export function CaptureForm({
   autoFocus?: boolean;
 }) {
   const router = useRouter();
-  const [state, formAction, pending] = useActionState<CaptureState, FormData>(
+  /**
+   * The action is still attached to the <form>, and that is the whole of the
+   * no-JavaScript path: the browser posts, the server runs `captureVideoAction`
+   * and re-renders this component with its result in `state`. Nothing else in
+   * this file is required for a capture to be written and confirmed.
+   */
+  const [state, formAction] = useActionState<CaptureState, FormData>(
     captureVideoAction,
     null,
   );
+  /**
+   * The result of a submit this component made itself.
+   *
+   * With JavaScript running, `onSubmit` cancels the form's own submission and
+   * calls the action here instead. That is not a style preference: an action
+   * driven by `useActionState` that *rejects* — the server is unreachable, the
+   * POST is aborted — is rethrown into the nearest error boundary, and the
+   * whole route is replaced by an error screen with the typed idea inside it.
+   * A capture box is the last thing in the application that may lose what was
+   * typed, so the rejection is caught here and rendered as a message above a
+   * form that still holds the title.
+   */
+  const [clientResult, setClientResult] = useState<CaptureState>(null);
+  const [submitting, setSubmitting] = useState(false);
+  /** Whichever answer is the newer one; only one of the two ever arrives. */
+  const outcome = clientResult ?? state;
 
   const [channelId, setChannelId] = useState(initialChannelId);
   const [title, setTitle] = useState("");
@@ -69,10 +91,16 @@ export function CaptureForm({
    * and `required` alone cannot see that "   " is empty.
    */
   const [clientError, setClientError] = useState<string | null>(null);
-  /** The page variant's "it saved" line; the modal hands this to its host. */
-  const [saved, setSaved] = useState<{ title: string; channelName: string } | null>(
-    null,
-  );
+  /**
+   * Whether the page variant's "Captured …" line has been typed over.
+   *
+   * The line itself is derived from the action's result during render rather
+   * than copied into state by an effect, because effects do not run when
+   * JavaScript never arrives and `/capture` is the one route that has to work
+   * when it does not: without this the no-JS capture is written and the page
+   * comes back looking exactly as it did before, which invites a re-type.
+   */
+  const [confirmationHidden, setConfirmationHidden] = useState(false);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const hookRef = useRef<HTMLInputElement>(null);
@@ -120,9 +148,9 @@ export function CaptureForm({
   // A capture landed. Clear the form either way; who gets told depends on the
   // variant.
   useEffect(() => {
-    if (!state || !state.ok) return;
+    if (!outcome || !outcome.ok) return;
 
-    writeLastChannel(state.channelId);
+    writeLastChannel(outcome.channelId);
     // `useActionState` hands the result back as state rather than to a
     // callback, so clearing the form for the next idea is necessarily a
     // response to that state arriving. Keeping the action attached to the
@@ -132,26 +160,30 @@ export function CaptureForm({
     setTitle("");
     setMore(false);
     setClientError(null);
+    setConfirmationHidden(false);
     formRef.current?.reset();
     // `reset()` also resets the radios to their *rendered* `defaultChecked`,
     // and the channel is React state, so put it back.
-    setChannelId(state.channelId);
+    setChannelId(outcome.channelId);
 
     // The action revalidated the board; this is what re-renders it in place, so
     // the new card shows up without anyone reaching for the reload button.
     router.refresh();
 
     if (variant === "modal") {
-      onSaved?.({ id: state.id, title: state.title, channelName: state.channelName });
+      onSaved?.({
+        id: outcome.id,
+        title: outcome.title,
+        channelName: outcome.channelName,
+      });
     } else {
-      setSaved({ title: state.title, channelName: state.channelName });
       titleRef.current?.focus();
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-    // `state` is a fresh object per submission, which is what makes this fire
+    // `outcome` is a fresh object per submission, which is what makes this fire
     // once per capture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  }, [outcome]);
 
   /** Aim the capture at the nth channel (1-based), if there is one. */
   function retarget(position: number): boolean {
@@ -167,13 +199,15 @@ export function CaptureForm({
    * **Shift+Enter opens the disclosure.** A single-line input submits its form
    * on Enter *whether or not* Shift is held, so this has to run first.
    *
-   * **A bare `1`..`9` retargets the channel while the title is still empty.**
-   * PLAN.md asks for "`1..9` retargets the channel before Enter", and the
-   * literal reading — a digit is always a channel — makes "10 things I got
-   * wrong" untypeable. "While the title is empty" is what "before" can mean
-   * without breaking the field: the digits are live at exactly the moment the
-   * modal opens, and become text the instant there is any. Alt+digit (read off
-   * `event.code`, because Alt+1 is `¡` on a Mac keyboard) works whenever.
+   * **A bare digit is text, always.** PLAN.md asks for "`1..9` retargets the
+   * channel before Enter", and the literal reading — a digit is a channel while
+   * the field is still empty — quietly eats the first character of every title
+   * that starts with a number ("10 things…", "2 years of…") *and* files the
+   * idea in a channel the person was not looking at, with no warning and no
+   * undo. On the most-used path in the product that trade is not close, so
+   * retargeting is: Alt+digit (read off `event.code`, because Alt+1 is `¡` on a
+   * Mac keyboard), the numbered channel chips, which are clickable and are tab
+   * stops, and the header's own `1`..`9` outside any field.
    */
   function onTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" && event.shiftKey) {
@@ -191,14 +225,20 @@ export function CaptureForm({
       if (fromCode && retarget(Number(fromCode[1]))) event.preventDefault();
       return;
     }
-
-    if (title === "" && /^[1-9]$/.test(event.key)) {
-      if (retarget(Number(event.key))) event.preventDefault();
-    }
   }
 
   // The client-side refusal wins while it stands: it is the newer answer.
-  const error = clientError ?? (state && !state.ok ? state.error : null);
+  const error = clientError ?? (outcome && !outcome.ok ? outcome.error : null);
+
+  /**
+   * The page variant's confirmation, derived — not stored. Present on the
+   * server-rendered answer to a no-JS submit, gone again as soon as the next
+   * idea is typed.
+   */
+  const confirmation =
+    outcome?.ok && !confirmationHidden
+      ? `Captured “${outcome.title}” in ${outcome.channelName}.`
+      : "";
   const current = channels.find((channel) => channel.id === channelId);
 
   const field =
@@ -222,6 +262,23 @@ export function CaptureForm({
           return;
         }
         setClientError(null);
+
+        // From here on this handler owns the submission — see `clientResult`.
+        // With no JavaScript none of this runs and the form posts to
+        // `formAction` exactly as it did before.
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        setSubmitting(true);
+        void captureVideoAction(null, data)
+          .then((result) => setClientResult(result))
+          .catch(() =>
+            setClientResult({
+              ok: false,
+              error:
+                "Could not reach the server, so nothing was saved. What you typed is still here — try again.",
+            }),
+          )
+          .finally(() => setSubmitting(false));
       }}
       /* `required` still tells assistive technology the field is required;
          `noValidate` keeps the browser's own bubble out of the way, because it
@@ -250,7 +307,7 @@ export function CaptureForm({
           onChange={(event) => {
             setTitle(event.target.value);
             if (clientError) setClientError(null);
-            if (saved) setSaved(null);
+            if (!confirmationHidden) setConfirmationHidden(true);
           }}
           onKeyDown={onTitleKeyDown}
           aria-invalid={error ? true : undefined}
@@ -262,7 +319,9 @@ export function CaptureForm({
           Enter saves it as an idea
           {current ? ` in ${current.name}` : ""}. Shift+Enter adds a hook, notes
           and tags.
-          {channels.length > 1 ? " 1–9 picks the channel while this is empty." : ""}
+          {channels.length > 1
+            ? " Alt+1–9, or the chips below, pick the channel."
+            : ""}
         </p>
       </div>
 
@@ -376,15 +435,15 @@ export function CaptureForm({
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={pending}
+          disabled={submitting}
           className="min-h-11 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-60"
         >
-          {pending ? "Saving…" : "Capture"}
+          {submitting ? "Saving…" : "Capture"}
         </button>
 
         {variant === "page" ? (
           <p role="status" aria-live="polite" className="text-sm text-muted">
-            {saved ? `Captured “${saved.title}” in ${saved.channelName}.` : ""}
+            {confirmation}
           </p>
         ) : null}
       </div>

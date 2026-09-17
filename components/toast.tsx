@@ -26,7 +26,10 @@ import {
  * - **`error`** renders `role="alert"`: the user just tried to do something and
  *   it did not happen, so it interrupts. A refused drop is the case that
  *   matters — PLAN.md: *a refused drop snaps back with a toast naming the
- *   missing field, a "Fix packaging" link and a "Skip gate…" link*.
+ *   missing field, a "Fix packaging" link and a "Skip gate…" link*. Those two
+ *   links arrive in M2 with the packaging block and the skip flow they point
+ *   at; in M1 the board sends one link to the detail page, because a link to a
+ *   fragment nothing renders is worse than no link (see board.tsx).
  * - **`info`** renders `role="status"`: a capture landed. Announced politely,
  *   after whatever the screen reader is already saying.
  *
@@ -65,9 +68,15 @@ const TIMEOUT_MS: Record<ToastTone, number> = { info: 6_000, error: 12_000 };
 const MAX_VISIBLE = 3;
 
 interface ToastApi {
-  /** Show a message. Returns the id, so a caller can dismiss it early. */
+  /**
+   * Show a message. Returns the id it was given.
+   *
+   * Push is the whole of the API a caller gets: dismissing is the toast's own
+   * business — its timeout and its × button — and an exported `dismiss` that
+   * nothing calls is an invitation to grow a second way of taking messages off
+   * the screen. It comes back when something needs it.
+   */
   push: (input: ToastInput) => number;
-  dismiss: (id: number) => void;
 }
 
 const NOOP: ToastApi = {
@@ -79,7 +88,6 @@ const NOOP: ToastApi = {
     }
     return -1;
   },
-  dismiss: () => {},
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -129,7 +137,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const api = useMemo<ToastApi>(() => ({ push, dismiss }), [push, dismiss]);
+  const api = useMemo<ToastApi>(() => ({ push }), [push]);
 
   const alerts = toasts.filter((toast) => toast.tone === "error");
   const statuses = toasts.filter((toast) => toast.tone === "info");

@@ -63,10 +63,19 @@ const MoveInput = z.object({
 
 export type MoveVideoInput = z.input<typeof MoveInput>;
 
-/** How each gate field reads in a sentence. */
+/**
+ * How each gate field reads in a sentence.
+ *
+ * `thumbnail_concept` is the *written* concept (BRIEF.md principle 2: the
+ * concept is locked at the TTH stage so the right shots get filmed; the image
+ * files come much later). The detail page's upload is a reference sketch and
+ * satisfies nothing, so the refusal says which of the two it means — a card
+ * that visibly carries a sketch being refused for "a thumbnail concept" is the
+ * one refusal a person cannot act on.
+ */
 const GATE_WORDING: Record<GateField, string> = {
   title: "a working title",
-  thumbnail_concept: "a thumbnail concept",
+  thumbnail_concept: "a thumbnail concept written down (the sketch is not it)",
   hook: "exactly one chosen hook",
 };
 

@@ -72,10 +72,35 @@ function videoCount(): Promise<number> {
 /* The app                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Unique per run, so a reused stack never makes one spec see another's row. */
+/**
+ * Unique per run, so a reused stack never makes one spec see another's row —
+ * and remembered, so `afterAll` can take them out again.
+ *
+ * `playwright.config.ts` reuses a stack that is already up, which means the
+ * database is not reset between runs. A spec that only ever adds rows makes
+ * every later run start from a board it did not build: the seeded channels
+ * accumulate ideas until the Idea column's cap, the counts and anything
+ * counting across channels are measuring this file's litter.
+ */
+const captured = new Set<string>();
+
 function uniqueTitle(label: string): string {
-  return `${label} ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const title = `${label} ${Date.now().toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+  captured.add(title);
+  return title;
 }
+
+test.afterAll(async () => {
+  if (captured.size === 0) return;
+  await withDb(async (client) => {
+    await client.query('delete from public.videos where title = any($1::text[])', [
+      [...captured],
+    ]);
+  });
+  captured.clear();
+});
 
 async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
@@ -288,25 +313,38 @@ test('an empty or whitespace-only title is refused, and writes nothing', async (
   expect(await rowsTitled(title)).toHaveLength(1);
 });
 
-test('1–9 retargets the channel before Enter, and is plain text afterwards', async ({
+test('Alt+1–9 retargets the channel, and a bare digit is always text', async ({
   page,
 }) => {
-  const title = uniqueTitle('Retargeted with 2');
+  const title = uniqueTitle('Retargeted with Alt');
   const dialog = await openModal(page);
 
   // The board is Personal's, so that is what the capture is aimed at.
   await expect(dialog.getByRole('radio', { name: 'Personal' })).toBeChecked();
 
-  await page.keyboard.press('2');
+  // A bare digit in an empty field used to retarget the channel *and* be
+  // swallowed, so "10 things I stopped doing" became "0 things I stopped
+  // doing" in a channel nobody was looking at. It is text, first character or
+  // not.
+  await page.keyboard.type('10 things I stopped doing');
+  await expect(titleField(dialog)).toHaveValue('10 things I stopped doing');
+  await expect(dialog.getByRole('radio', { name: 'Personal' })).toBeChecked();
+
+  // Alt+digit retargets, whatever the field holds.
+  await page.keyboard.press('Alt+Digit2');
   await expect(
     dialog.getByRole('radio', { name: 'Sunday Softworks' }),
   ).toBeChecked();
-  await expect(titleField(dialog)).toHaveValue('');
+  await expect(titleField(dialog)).toHaveValue('10 things I stopped doing');
 
-  // Once there is a title, a digit is part of it.
-  await page.keyboard.type('Retargeted with ');
-  await page.keyboard.press('1');
-  await expect(titleField(dialog)).toHaveValue('Retargeted with 1');
+  // And so does clicking the chip, which is the mouse path and a tab stop.
+  await dialog.locator('label', { hasText: 'Personal' }).first().click();
+  await expect(dialog.getByRole('radio', { name: 'Personal' })).toBeChecked();
+
+  // Back in the field — Alt+digit is a key the *title input* handles, so this
+  // is also the check that clicking a chip does not strand the cursor.
+  await titleField(dialog).focus();
+  await page.keyboard.press('Alt+Digit2');
   await expect(
     dialog.getByRole('radio', { name: 'Sunday Softworks' }),
   ).toBeChecked();
@@ -319,6 +357,20 @@ test('1–9 retargets the channel before Enter, and is plain text afterwards', a
   expect(rows).toHaveLength(1);
   expect(rows[0].channel_slug).toBe('sunday-softworks');
   expect(rows[0].stage_kind).toBe('idea');
+
+  // The leading-digit title reaches the database intact, in the channel the
+  // person was looking at.
+  const leading = uniqueTitle('10 things');
+  const second = await openModal(page);
+  await page.keyboard.type(leading);
+  await expect(titleField(second)).toHaveValue(leading);
+  await page.keyboard.press('Enter');
+  await expect(modal(page)).toHaveCount(0);
+
+  const leadingRows = await rowsTitled(leading);
+  expect(leadingRows).toHaveLength(1);
+  expect(leadingRows[0].title).toBe(leading);
+  expect(leadingRows[0].channel_slug).toBe('personal');
 });
 
 test('Shift+Enter opens the disclosure, and its fields are saved too', async ({
@@ -396,4 +448,73 @@ test('/capture is the same form as a standalone, phone-sized page', async ({
   await expect(
     page.getByRole('radio', { name: 'Sunday Softworks' }),
   ).toBeChecked();
+});
+
+test('a capture the server never answers keeps the modal, the message and the typed idea', async ({
+  page,
+}) => {
+  const before = await videoCount();
+  const dialog = await openModal(page);
+  const title = uniqueTitle('Typed while the server was gone');
+
+  // Every server-action POST to this route fails to connect. Driven through
+  // `useActionState` alone, that rejection is rethrown into the nearest error
+  // boundary and the whole route — modal, board and typed idea — is replaced
+  // by Next's "This page couldn’t load" screen.
+  const boardUrl = '**/c/*/board';
+  await page.route(boardUrl, (route) =>
+    route.request().method() === 'POST' ? route.abort('failed') : route.fallback(),
+  );
+
+  await page.keyboard.type(title);
+  await page.keyboard.press('Enter');
+
+  await expect(dialog.getByRole('alert')).toContainText(/could not reach the server/i);
+  await expect(page.getByText('This page couldn’t load')).toHaveCount(0);
+  // Still open, still holding what was typed, and nothing was written.
+  await expect(dialog).toBeVisible();
+  await expect(titleField(dialog)).toHaveValue(title);
+  expect(await videoCount()).toBe(before);
+
+  // With the network back, the same keystroke saves the same idea.
+  await page.unroute(boardUrl);
+  await titleField(dialog).focus();
+  await page.keyboard.press('Enter');
+  await expect(modal(page)).toHaveCount(0);
+  expect(await rowsTitled(title)).toHaveLength(1);
+});
+
+test('/capture writes the idea and says so with JavaScript switched off', async ({
+  page,
+  browser,
+}) => {
+  // The signed-in session, handed to a context that will never run a line of
+  // JavaScript. `/capture` is BRIEF.md's phone bookmark: on a slow or blocked
+  // bundle the POST still works, and a capture that is written but not
+  // confirmed is indistinguishable from a no-op — which invites a re-type.
+  const storageState = await page.context().storageState();
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    storageState,
+    baseURL: new URL(page.url()).origin,
+  });
+  const noJs = await context.newPage();
+
+  try {
+    const title = uniqueTitle('No JS capture');
+    await noJs.goto('/capture?c=sunday-softworks');
+    await noJs.locator('input[name="title"]').fill(title);
+    await noJs.getByRole('button', { name: 'Capture' }).click();
+
+    await expect(
+      noJs.getByText(`Captured “${title}” in Sunday Softworks.`),
+    ).toBeVisible();
+
+    const rows = await rowsTitled(title);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].channel_slug).toBe('sunday-softworks');
+    expect(rows[0].stage_kind).toBe('idea');
+  } finally {
+    await context.close();
+  }
 });

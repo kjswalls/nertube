@@ -6,7 +6,7 @@ import type { DragEvent } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
 import { useToast } from "@/components/toast";
-import { isWipKind, kindOrder } from "@/lib/defaults";
+import { compareKinds, isWipKind } from "@/lib/defaults";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { BoardColumn } from "./board-column";
@@ -99,6 +99,33 @@ export function Board({
   const boardRef = useRef<HTMLDivElement>(null);
 
   /**
+   * The in-flight set again, outside React state.
+   *
+   * `pending` is what the cards render from; this is what the "one move at a
+   * time per card" guard reads. They cannot be the same object: the guard runs
+   * inside a `keydown` handler that closes over the *last rendered* `pending`,
+   * and OS key auto-repeat delivers the next `]` long before React has
+   * committed the previous `setPending`. Read from state, the guard therefore
+   * lets three or four `move_video` calls out for one row; read from a ref, it
+   * sees the write the previous keydown made.
+   */
+  const pendingRef = useRef(new Set<string>());
+
+  /**
+   * Where focus should land once a move has settled.
+   *
+   * A successful move re-creates the card's DOM node inside a different
+   * column, so whatever was focused — the card itself after `j`, or one of its
+   * two move buttons after a click — is removed from the document and focus
+   * falls to `<body>`. That is a keyboard user losing their place on every
+   * single move. This remembers what was focused when the move started and the
+   * effect below puts it back on the re-rendered card.
+   */
+  const refocus = useRef<{ id: string; role: "card" | "back" | "forward" } | null>(
+    null,
+  );
+
+  /**
    * `data-ready="true"` once this component has hydrated.
    *
    * The board renders on the server, so the columns and cards are on screen
@@ -157,7 +184,7 @@ export function Board({
     () =>
       stages
         .filter((stage) => stage.kind !== null)
-        .sort((a, b) => kindOrder(a.kind!) - kindOrder(b.kind!)),
+        .sort((a, b) => compareKinds(a.kind!, b.kind!)),
     [stages],
   );
 
@@ -214,25 +241,53 @@ export function Board({
 
   /**
    * Refusals go through the application's one toast mechanism
-   * (`components/toast.tsx`), mounted by the root layout. PLAN.md wants the two
-   * links out of a gate refusal — "Fix packaging" and "Skip gate…" — and they
-   * are the reason a refusal carries a video id: a refusal with nowhere to go
-   * is just a complaint.
+   * (`components/toast.tsx`), mounted by the root layout.
+   *
+   * PLAN.md wants two links out of a gate refusal — "Fix packaging"
+   * (the detail page scrolled to that field) and "Skip gate…" — and a refusal
+   * with nowhere to go is just a complaint. But in M1 there is nowhere to go
+   * *yet*: the packaging editor, the gate indicator and the skip flow are all
+   * M2, so both links pointed at fragments (`#packaging`, `#packaging-skip`)
+   * that exist on no page in the application and both dropped the user at the
+   * top of a stub with neither field on it. A named missing field plus a link
+   * that lands where it says it lands is honest; two links to nothing is not.
+   * The pair comes back with the packaging block in M2.
    */
   const showToast = useCallback(
-    (message: string, videoId: string | null) => {
+    (message: string, videoId: string | null, title?: string) => {
       toast.push({
         tone: "error",
         message,
         links: videoId
           ? [
-              { label: "Fix packaging", href: `/videos/${videoId}#packaging` },
-              { label: "Skip gate…", href: `/videos/${videoId}#packaging-skip` },
+              {
+                label: title ? `Open “${title}”` : "Open the video",
+                href: `/videos/${videoId}`,
+              },
             ]
           : undefined,
       });
     },
     [toast],
+  );
+
+  /**
+   * What is focused inside this card right now, if anything: the card element
+   * itself, or one of its two move buttons (they carry `data-move`).
+   */
+  const focusRoleFor = useCallback(
+    (cardId: string): { id: string; role: "card" | "back" | "forward" } | null => {
+      const element = cardRefs.current.get(cardId);
+      const active = document.activeElement;
+      if (!element || !(active instanceof HTMLElement)) return null;
+      if (!element.contains(active)) return null;
+      const role = active.getAttribute("data-move");
+      return {
+        id: cardId,
+        role: role === "back" || role === "forward" ? role : "card",
+      };
+    },
+    [],
   );
 
   const requestMove = useCallback(
@@ -247,7 +302,7 @@ export function Board({
       // second `]` pressed before the first has landed is therefore dropped —
       // but said out loud, because a key that silently does nothing reads as a
       // broken board rather than as a busy one.
-      if (pending.includes(card.id)) {
+      if (pendingRef.current.has(card.id)) {
         setAnnouncement(`“${title}” is still moving. Wait for that to finish.`);
         return;
       }
@@ -259,6 +314,12 @@ export function Board({
         daysInStage: card.daysInStage,
       };
 
+      // Remembered before the optimistic write re-creates the node, and put
+      // back after every render the move causes — including the last one.
+      const focusRole = focusRoleFor(card.id);
+      refocus.current = focusRole;
+
+      pendingRef.current.add(card.id);
       setPending((current) => [...current, card.id]);
       setOverrides((current) => ({
         ...current,
@@ -270,40 +331,88 @@ export function Board({
       }));
       setAnnouncement(`Moving “${title}” to ${target.name}…`);
 
-      const result = await moveVideo({
-        videoId: card.id,
-        stageId: target.id,
-        slug: channelSlug,
-      });
+      const where = from ? ` It is still in ${from.name}.` : "";
 
-      if (result.ok) {
-        setOverrides((current) => ({
-          ...current,
-          [card.id]: {
-            stageId: result.stageId,
-            stageEnteredAt: result.stageEnteredAt,
-            daysInStage: 0,
-          },
-        }));
-        setAnnouncement(`Moved “${title}” to ${target.name}.`);
-      } else {
-        // Snap back. The card returns to the column it was in; nothing is left
-        // sitting where the database refused to put it.
+      try {
+        const result = await moveVideo({
+          videoId: card.id,
+          stageId: target.id,
+          slug: channelSlug,
+        });
+
+        if (result.ok) {
+          setOverrides((current) => ({
+            ...current,
+            [card.id]: {
+              stageId: result.stageId,
+              stageEnteredAt: result.stageEnteredAt,
+              daysInStage: 0,
+            },
+          }));
+          setAnnouncement(`Moved “${title}” to ${target.name}.`);
+        } else {
+          // Snap back. The card returns to the column it was in; nothing is
+          // left sitting where the database refused to put it.
+          setOverrides((current) => ({ ...current, [card.id]: before }));
+          showToast(
+            `Could not move “${title}” to ${target.name}. ${result.message}${where}`,
+            result.missing ? card.id : null,
+            title,
+          );
+          setAnnouncement(`“${title}” was not moved. ${result.message}`);
+        }
+      } catch {
+        // The call never reached the server, or its answer never came back:
+        // a dropped connection, a restarted server, an aborted POST. Without
+        // this the rejection escapes `requestMove` before the snap-back and
+        // before `pending` is cleared, and the card sits in a column the
+        // database never accepted, marked "Moving…" and unmovable, for the
+        // life of the page — saying nothing at all.
         setOverrides((current) => ({ ...current, [card.id]: before }));
-        const where = from ? ` It is still in ${from.name}.` : "";
         showToast(
-          `Could not move “${title}” to ${target.name}. ${result.message}${where}`,
-          result.missing ? card.id : null,
+          `Could not move “${title}” to ${target.name}: the server could not be reached.${where}`,
+          null,
         );
         setAnnouncement(
-          `“${title}” was not moved. ${result.message}`,
+          `“${title}” was not moved: the server could not be reached.`,
         );
+      } finally {
+        pendingRef.current.delete(card.id);
+        setPending((current) => current.filter((id) => id !== card.id));
+        // The node is about to be re-created one more time, in whichever
+        // column this move ended in. The role is the one the move started
+        // with: a click on "→ Move forward" ends with that button focused on
+        // the card in its new column, not with focus on the document.
+        refocus.current = focusRole;
       }
-
-      setPending((current) => current.filter((id) => id !== card.id));
     },
-    [channelSlug, pending, showToast, stageById],
+    [channelSlug, focusRoleFor, showToast, stageById],
   );
+
+  // Runs after every render, and does nothing unless a move asked it to: the
+  // card it names has just been re-created somewhere else, so this is the
+  // first moment the new node exists to be focused.
+  useEffect(() => {
+    const wanted = refocus.current;
+    if (!wanted) return;
+    const element = cardRefs.current.get(wanted.id);
+    if (!element) return;
+    refocus.current = null;
+
+    if (wanted.role !== "card") {
+      const button = element.querySelector<HTMLButtonElement>(
+        `[data-move="${wanted.role}"]`,
+      );
+      // A disabled button cannot take focus — the move is still in flight, or
+      // the card has reached the end of the order — so the card takes it.
+      if (button && !button.disabled) {
+        button.focus();
+        return;
+      }
+    }
+    element.focus();
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
 
   const moveBy = useCallback(
     (card: BoardCard, direction: -1 | 1) => {
@@ -315,7 +424,7 @@ export function Board({
         const title = card.title.trim() === "" ? "Untitled" : card.title;
         if (stage && stage.kind === null) {
           showToast(
-            `“${title}” is in ${stage.name}, a stage with no place in the core order. Drag it, or use the arrows on the card.`,
+            `“${title}” is in ${stage.name}, a stage with no place in the core order, so the arrows and the bracket keys have nowhere to send it. Drag it to a column instead.`,
             null,
           );
         } else {
@@ -403,6 +512,9 @@ export function Board({
       description: "Move the selected card back one stage",
       run: (event) => {
         event.preventDefault();
+        // A held key is one move, not four: `repeat` is the OS saying the key
+        // never came up, and nobody means to send a card four stages back.
+        if (event.repeat) return;
         if (selectedCard) moveBy(selectedCard, -1);
       },
     },
@@ -412,6 +524,7 @@ export function Board({
       hint: { keys: "[ / ]", text: "move a stage" },
       run: (event) => {
         event.preventDefault();
+        if (event.repeat) return;
         if (selectedCard) moveBy(selectedCard, 1);
       },
     },
@@ -508,9 +621,18 @@ export function Board({
             isWipKind(stage.kind) &&
             total > wipThreshold;
 
+          /*
+            Counted across every channel, because there is one creator and one
+            camera — but rendered inside one channel's column, directly under
+            that column's own count. When the two numbers disagree the badge
+            has to say why, or it reads as the board miscounting rather than as
+            the signal BRIEF.md principle 4 asks for.
+          */
           const filmingBadge =
             stage.kind === "filming" && filmingTotal >= FILMING_BATCH_THRESHOLD
-              ? `${filmingTotal} in Filming — schedule batch day?`
+              ? filmingTotal > total
+                ? `${filmingTotal} in Filming across all channels — schedule batch day?`
+                : `${filmingTotal} in Filming — schedule batch day?`
               : null;
 
           return (

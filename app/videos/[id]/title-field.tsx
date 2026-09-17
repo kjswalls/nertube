@@ -42,13 +42,26 @@ export function TitleField({
     if (next === savedRef.current) return;
 
     startTransition(async () => {
-      const result = await updateWorkingTitle({ videoId, title: next });
-      if (result.ok) {
-        savedRef.current = result.title;
-        setValue(result.title);
-        setState({ kind: "saved" });
-      } else {
-        setState({ kind: "error", message: result.error });
+      try {
+        const result = await updateWorkingTitle({ videoId, title: next });
+        if (result.ok) {
+          savedRef.current = result.title;
+          setValue(result.title);
+          setState({ kind: "saved" });
+        } else {
+          setState({ kind: "error", message: result.error });
+        }
+      } catch {
+        // The action never reached the server, or its answer never came back.
+        // Uncaught, that rejection is rethrown into the nearest error boundary
+        // and the whole route — including the title being edited — is replaced
+        // by an error screen. Here the typed title stays in the field and the
+        // next blur tries again.
+        setState({
+          kind: "error",
+          message:
+            "Could not reach the server, so this title is not saved yet. It is still here — try again.",
+        });
       }
     });
   }

@@ -406,7 +406,9 @@ test('cards render in the right columns, capped and sorted', async ({ page }) =>
   await expect(dated).toContainText(CHANNEL_A.name);
   await expect(dated.getByTestId('target-date')).toContainText('5 Jan');
   await expect(dated.locator('[data-slot="thumbnail-concept"]')).toHaveCount(1);
-  await expect(dated.locator('[data-slot="checklist-ratio"]')).toBeEmpty();
+  // The checklist ratio is M3 and nothing stands in for it — not even an empty
+  // element. A card must never show "0/0", which reads as "nothing to do".
+  await expect(dated.locator('[data-slot="checklist-ratio"]')).toHaveCount(0);
   await expect(dated).not.toContainText('0/0');
 });
 
@@ -444,17 +446,19 @@ test('the Filming badge counts across all channels and appears at three', async 
   await signInAndOpen(page, CHANNEL_A.slug);
 
   // Channel A has two of the three. The badge still says three, because there
-  // is one creator and one camera.
+  // is one creator and one camera — and it says *where the three are*, because
+  // the column's own count badge directly above it says two and two numbers
+  // that disagree with no explanation read as a miscount.
   await expect(cardsIn(page, FILMING)).toHaveCount(2);
   await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(
-    '3 in Filming — schedule batch day?',
+    '3 in Filming across all channels — schedule batch day?',
   );
 
   // The same badge is on the other channel's board, which holds the third.
   await openBoard(page, CHANNEL_B.slug);
   await expect(cardsIn(page, FILMING)).toHaveCount(1);
   await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(
-    '3 in Filming — schedule batch day?',
+    '3 in Filming across all channels — schedule batch day?',
   );
 
   // Drop below three and it goes: move the one in channel B forward to Editing.
@@ -509,9 +513,19 @@ test('a gated drag is refused, the card snaps back, and the toast names the miss
   await expect(toast).toBeVisible();
   await expect(toast).toContainText(/thumbnail concept/i);
   await expect(toast).toContainText('Gate blocked');
-  // PLAN.md's two links out of the refusal.
-  await expect(toast.getByRole('link', { name: 'Fix packaging' })).toBeVisible();
-  await expect(toast.getByRole('link', { name: 'Skip gate…' })).toBeVisible();
+  // PLAN.md wants "Fix packaging" and "Skip gate…" out of a refusal. Both are
+  // M2 — there is no packaging editor and no skip flow to link to — so M1
+  // offers the one link that lands where it says it does, and neither dead
+  // fragment is rendered.
+  await expect(
+    toast.getByRole('link', { name: 'Open “Gate blocked”' }),
+  ).toBeVisible();
+  await expect(toast.getByRole('link', { name: /Fix packaging/ })).toHaveCount(0);
+  await expect(toast.getByRole('link', { name: /Skip gate/ })).toHaveCount(0);
+  const href = await toast.getByRole('link').first().getAttribute('href');
+  expect(href, 'the refusal must not link to a fragment nothing renders').not.toMatch(
+    /#/,
+  );
 
   // Snapped back: it is in Packaging, it is not in Scripting, and Scripting is
   // the size it was.
@@ -619,4 +633,175 @@ test('Enter opens the selected card', async ({ page }) => {
   // The detail page itself is another agent's M1 work; what the board owes is
   // the navigation.
   await page.waitForURL(`**/videos/${videoId}`);
+});
+
+/* -------------------------------------------------------------------------- */
+/* What happens when the move does not reach the database                      */
+/* -------------------------------------------------------------------------- */
+
+test('a move the server never answers snaps back, says so, and the card still moves afterwards', async ({
+  page,
+}) => {
+  await signInAndOpen(page, CHANNEL_B.slug);
+
+  const card = cardIn(page, PACKAGING, 'Keyboard mover');
+  await expect(card).toBeVisible();
+
+  // Every server-action POST to this board fails to connect. A `moveVideo`
+  // call that rejects used to abort `requestMove` before the snap-back and
+  // before `pending` was cleared: the card stayed drawn in a column the
+  // database never accepted, marked "Moving…", with both buttons disabled for
+  // the life of the page, and nothing was said.
+  const boardUrl = `**/c/${CHANNEL_B.slug}/board`;
+  await page.route(boardUrl, (route) =>
+    route.request().method() === 'POST' ? route.abort('failed') : route.fallback(),
+  );
+
+  await page.keyboard.press('j');
+  await expect(card).toHaveAttribute('data-selected', 'true');
+  await page.keyboard.press(']');
+
+  // Said out loud, in the toast and in the live region.
+  const toast = page.getByTestId('toast');
+  await expect(toast).toContainText(/could not be reached/i);
+  await expect(toast).toContainText('Keyboard mover');
+  await expect(page.getByTestId('board-announcer')).toContainText(
+    /could not be reached/i,
+  );
+
+  // Snapped back to where the database still has it, and no longer busy.
+  const settled = cardIn(page, PACKAGING, 'Keyboard mover');
+  await expect(settled).toBeVisible();
+  await expect(cardIn(page, SCRIPTING, 'Keyboard mover')).toHaveCount(0);
+  await expect(settled).not.toHaveAttribute('aria-busy', 'true');
+  await expect(settled).not.toContainText('Moving…');
+  await expect(
+    settled.getByRole('button', {
+      name: `Move “Keyboard mover” forward to ${SCRIPTING}`,
+    }),
+  ).toBeEnabled();
+
+  // The database never moved it.
+  const row = await db.query<{ kind: string }>(
+    `select s.kind from public.videos v
+       join public.stages s on s.id = v.stage_id
+      where v.title = 'Keyboard mover'`,
+  );
+  expect(row.rows[0].kind).toBe('packaging');
+
+  // With the network back, the same card moves — the failure left nothing
+  // stuck behind it.
+  await page.unroute(boardUrl);
+  await page.keyboard.press(']');
+  await expect(cardIn(page, SCRIPTING, 'Keyboard mover')).toBeVisible();
+});
+
+test('a drop on the column header is a drop on the column', async ({ page }) => {
+  await signInAndOpen(page, CHANNEL_A.slug);
+
+  const card = cardIn(page, IDEA, 'Idea 01');
+  await expect(card).toBeVisible();
+
+  // The header is the column's name, count and badges — 38px of a column the
+  // user is quite reasonably aiming at. It used to swallow the drop silently:
+  // no move, no toast, not even the drop-target highlight.
+  const header = column(page, PACKAGING).locator('header');
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await card.dispatchEvent('dragstart', { dataTransfer });
+  await header.dispatchEvent('dragover', { dataTransfer });
+  await header.dispatchEvent('drop', { dataTransfer });
+  await dataTransfer.dispose();
+
+  await expect(cardIn(page, PACKAGING, 'Idea 01')).toBeVisible();
+  await expect(cardIn(page, IDEA, 'Idea 01')).toHaveCount(0);
+});
+
+test('a held ] is one move, not four', async ({ page }) => {
+  await signInAndOpen(page, CHANNEL_A.slug);
+
+  // Count the server-action POSTs this board makes.
+  let posts = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      request.url().includes(`/c/${CHANNEL_A.slug}/board`)
+    ) {
+      posts += 1;
+    }
+  });
+
+  // "Gate blocked" is the eleventh card in board order: ten ideas, then
+  // Packaging's one. Every `]` on it is refused by the gate, so each attempt
+  // that gets out is one POST and one toast.
+  await page.keyboard.press('j');
+  for (let n = 0; n < 10; n += 1) await page.keyboard.press('j');
+  await expect(cardIn(page, PACKAGING, 'Gate blocked')).toHaveAttribute(
+    'data-selected',
+    'true',
+  );
+
+  // Real OS key auto-repeat, which is the case the closure-read guard missed:
+  // the repeats arrive long before React has committed the previous
+  // `setPending`.
+  const cdp = await page.context().newCDPSession(page);
+  for (let n = 0; n < 4; n += 1) {
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      key: ']',
+      code: 'BracketRight',
+      windowsVirtualKeyCode: 221,
+      nativeVirtualKeyCode: 221,
+      autoRepeat: n > 0,
+    });
+    await page.waitForTimeout(30);
+  }
+  await cdp.detach();
+
+  await expect(page.getByTestId('toast')).toHaveCount(1);
+  await page.waitForTimeout(500);
+  expect(posts, 'a held key must not put four move_video calls on the wire').toBe(1);
+});
+
+test('focus survives a move, by keyboard and by the on-card button', async ({
+  page,
+}) => {
+  await signInAndOpen(page, CHANNEL_B.slug);
+
+  const describeFocus = () =>
+    page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) return { tag: 'none', card: null as string | null, move: null };
+      return {
+        tag: active.tagName,
+        card:
+          active.closest('[data-testid="board-card"]')?.getAttribute('data-video-id') ??
+          null,
+        move: active.getAttribute('data-move'),
+      };
+    });
+
+  // Keyboard: `j` selects and focuses the card; `]` moves it. The card's DOM
+  // node is re-created inside the other column, so without putting focus back
+  // it lands on <body> and the next Tab restarts from the top of the page.
+  await page.keyboard.press('j');
+  const selected = cardIn(page, PACKAGING, 'Keyboard mover');
+  const videoId = await selected.getAttribute('data-video-id');
+  expect((await describeFocus()).card).toBe(videoId);
+
+  await page.keyboard.press(']');
+  await expect(cardIn(page, SCRIPTING, 'Keyboard mover')).toBeVisible();
+  await expect.poll(async () => (await describeFocus()).card).toBe(videoId);
+
+  // The button path: focus ends on the same button, on the card in its new
+  // column, so a second click moves it again without re-finding anything.
+  const back = cardIn(page, SCRIPTING, 'Keyboard mover').getByRole('button', {
+    name: `Move “Keyboard mover” back to ${PACKAGING}`,
+  });
+  await back.click();
+  await expect(cardIn(page, PACKAGING, 'Keyboard mover')).toBeVisible();
+  await expect.poll(async () => await describeFocus()).toMatchObject({
+    tag: 'BUTTON',
+    card: videoId,
+    move: 'back',
+  });
 });

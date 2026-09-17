@@ -290,10 +290,13 @@ divergence is worse than a missing feature. The short version:
 ### What M1 delivers
 
 - **Quick capture.** `c` anywhere signed in opens a modal with one focused
-  title input, a channel chip row and Enter to save; `1`..`9` retargets the
-  channel *while the title is still empty*; Shift+Enter (or "More") reveals
-  hook, notes and tags. `/capture` is the same `CaptureForm` as a standalone,
-  phone-sized page with `?c=<slug>` for a per-channel bookmark.
+  title input, a channel chip row and Enter to save; **Alt**+`1`..`9` (or the
+  numbered chips, which are clickable tab stops) retargets the channel;
+  Shift+Enter (or "More") reveals hook, notes and tags. A bare digit in the
+  title field is text, always — see the review log below. `/capture` is the
+  same `CaptureForm` as a standalone, phone-sized page with `?c=<slug>` for a
+  per-channel bookmark, and it writes *and confirms* a capture with JavaScript
+  switched off.
   `captureVideo` goes through the `capture_video` RPC — `INSERT` on `videos` is
   revoked — and lands every idea in that channel's Idea stage.
 - **The board.** `/c/[slug]/board`: enabled stages as columns in `position`
@@ -306,7 +309,11 @@ divergence is worse than a missing feature. The short version:
   three call `moveVideo` → `move_video`, so the packaging gate, the
   `stage_entered_at` stamp and the checklist snapshot are the database's, not
   the board's. A refusal snaps the card back and raises a toast naming the
-  missing field, with "Fix packaging" and "Skip gate…" links.
+  missing field, with a single "Open “<title>”" link to the detail page.
+  PLAN.md's "Fix packaging" and "Skip gate…" links come back in M2 with the
+  packaging block and the skip flow they point at — see the review log. A move
+  the server never answers is a refusal too: the card snaps back, the toast
+  says the server could not be reached, and the card is movable again.
 - **The detail stub.** `/videos/[id]`: working title autosaved on blur, and the
   concept-sketch upload — browser → Storage with the user's own session, then
   `recordConceptSketch` records the path — with the signed-URL thumb on the
@@ -351,7 +358,9 @@ landed with four collisions. What was done about each:
   landed), each with its own timeout and a dismiss button. `board-toast.tsx` is
   deleted. The only message *not* routed through it is `/capture`'s own inline
   "Captured …" line, which is part of the form and is what the page shows when
-  JavaScript never arrives.
+  JavaScript never arrives. (It is now *derived from the action's result during
+  render* rather than copied into state by an effect, which is what makes that
+  last claim true — see the review log.)
 - **Competing card components.** `components/board-column.tsx` (M0's empty
   shell) was already deleted by the board agent in favour of
   `components/board/board-column.tsx`; nothing imported the old one. The card's
@@ -375,7 +384,7 @@ not wait.)
 |---|---|---|
 | `c` | Capture an idea | the header, so everywhere signed in |
 | `1`..`9` | Switch channel (the digit is drawn on the chip) | the header |
-| `1`..`9` *in the capture modal, title empty* | Retarget the capture | the title field |
+| Alt+`1`..`9` *in the capture modal* | Retarget the capture (a bare digit is text) | the title field |
 | `j` / `k` | Select the next / previous card | the board |
 | `[` / `]` | Move the selected card back / forward by `CORE_KIND_ORDER` | the board |
 | `Enter` | Open the selected card | the board |
@@ -392,7 +401,11 @@ and raises nothing, which is asserted in the suite (`pageerror` count is zero).
 One deliberate limit: a second `]` pressed while the first move for that card is
 still in flight is dropped rather than queued — two `move_video` calls racing
 over one row's `stage_entered_at` is worse — and the board now says so in its
-live region instead of ignoring the key silently.
+live region instead of ignoring the key silently. That guard reads the in-flight
+set from a **ref**, not from React state: under OS key auto-repeat the repeats
+arrive before `setPending` has committed, and a guard read from a closure let
+three or four calls out for one row (review finding 13). A repeat event is also
+ignored outright, so holding `]` is one move.
 
 ### The M1 acceptance, actually walked
 
@@ -409,7 +422,8 @@ with a read of the served database:
    `stage_entered_at` — in the browser *and* in the database.
 2. **Dragging an idea past Packaging is refused.** Idea → Scripting on an idea
    with a title and nothing else: the toast says "Packaging still needs a
-   thumbnail concept", carries both links, the card snaps back, a reload agrees,
+   thumbnail concept written down (the sketch is not it)", carries its one
+   link — to a page that exists — the card snaps back, a reload agrees,
    and `stage_id` *and* `stage_entered_at` are byte-identical to what they were.
    The same video is then moved Idea → Packaging with `]` (allowed) and refused
    again on the next `]` — same RPC, same refusal.
@@ -451,16 +465,146 @@ are the column revoke and the table revoke from `0001_init.sql`, not a broken
 token — and `move_video` / `capture_video` really are the only write paths for a
 stage change and for a new video.
 
+### The adversarial review, and what it changed
+
+Nineteen findings came back against this milestone. Each was reproduced here
+before anything was written; the wording below says what was done, not what was
+suggested.
+
+**Fixed — blockers**
+
+- **Quick capture ate a leading digit and filed the idea in the wrong channel**
+  (finding 1). A bare `1`..`9` in the title field retargeted the channel while
+  the field was empty, so "10 things I stopped doing" was saved as "0 things I
+  stopped doing" in whatever channel the digit named — silently, on the most
+  used path in the product. The binding is gone: inside the field a digit is
+  text. Retargeting is Alt+digit (off `event.code`), the numbered chips, and the
+  header's own `1`..`9` outside any field. `e2e/capture.spec.ts` now types that
+  exact title and reads the row back.
+- **A move that failed on the network left the card in the wrong column for
+  ever** (findings 9 and 15). `requestMove` awaited the server action with no
+  `try`/`catch`, so a rejection aborted it before the snap-back and before
+  `pending` was cleared: the card stayed drawn where the database had never put
+  it, "Moving…", both buttons disabled, `]` answering "is still moving", and
+  nothing said. There is now a `catch` that takes the same branch as a refusal
+  and a `finally` that clears `pending`. Proved in the browser with the
+  server-action POST aborted, then re-tried with it restored
+  (`e2e/board.m1.spec.ts`).
+- **Capture and title autosave replaced the whole page with Next's error screen**
+  (finding 10). Both awaited a server action that can reject; the rejection went
+  to the nearest error boundary and took the typed idea with it. The title field
+  and the sketch recorder now catch and render their existing error state. The
+  capture form keeps the action on the `<form>` — that is the entire no-JS path
+  — but with JavaScript running its `onSubmit` cancels the browser's submission
+  and calls the action itself, so a rejection is a message above a form that
+  still holds the title. Both covered end to end with the POST aborted.
+
+**Fixed — majors**
+
+- **The gate refusal's two links went nowhere** (findings 2, 7 and 12).
+  `#packaging` and `#packaging-skip` exist on no page in M1, and the skip flow
+  does not exist at all, so the toast offered two dead ends. It now carries one
+  link, "Open “<title>”", to a page that exists. PLAN.md's pair returns in M2
+  with the block it points at.
+- **"Packaging still needs a thumbnail concept" fired on a card that visibly had
+  one** (finding 3). The gate reads the written `thumbnail_concept`; the only
+  thing the UI called a thumbnail concept was the *sketch*. The two are named
+  apart everywhere now: the refusal says "a thumbnail concept written down (the
+  sketch is not it)", the upload is "Concept sketch (reference)" with a line
+  saying which field the gate reads, and the card's thumb says the same.
+- **`/capture` with JavaScript off wrote the idea and confirmed nothing**
+  (findings 4 and 17), while this file claimed the opposite. The line came from
+  state written in an effect, and effects do not run without JavaScript. It is
+  derived from the action's result during render, so it survives; the effect
+  keeps only the clear-and-refocus. `e2e/capture.spec.ts` asserts it in a
+  context with `javaScriptEnabled: false`.
+- **Focus was dropped to `<body>` after every successful move** (finding 11).
+  The card's node is re-created in another column, so `j` then `]` — and the
+  on-card button — left a keyboard user with no place. The board remembers what
+  was focused when the move started (the card, or which button) and puts it
+  back on the re-rendered card.
+- **`npm run e2e` was not repeatable** (finding 16). `upload.spec.ts` asserted
+  that *no* `/storage/v1/` request had been made by the whole page, which any
+  other card's sketch thumb broke on a reused stack; the assertion is scoped to
+  the video under test. `capture.spec.ts` had no cleanup and added rows to the
+  seeded channels on every run; it now deletes every title it captured.
+
+**Fixed — minors**
+
+- **The Filming badge put a cross-channel number under a per-channel count**
+  (finding 5). It says "N in Filming across all channels — schedule batch day?"
+  whenever the two numbers differ, and keeps the plain wording when they do not.
+- **A client could rewrite `videos.id` and `videos.created_at`** (finding 6):
+  `id, user_id, created_at` were carried into the re-granted column list in
+  `0001_init.sql`. `0003_identity_columns.sql` revokes `update (id, created_at)`
+  on `videos` and `stages`; `supabase/tests/20_column_privileges.test.sql`
+  asserts both the refusal (42501) and the catalogue.
+- **A `npm run dev` server made the whole suite fail to launch** (finding 8).
+  `scripts/e2e-preflight.mjs` runs before Playwright's app server, reads
+  `.next/dev/lock`, checks the pid is alive and prints one sentence naming the
+  pid to kill; `scripts/dev-stack/README.md` item 32 says so too.
+- **The "one move at a time" guard did not survive key auto-repeat**
+  (finding 13): it is a ref now, and a repeat event is ignored. A held `]` puts
+  exactly one POST on the wire, asserted with real auto-repeat over CDP.
+- **A drop on a column's header did nothing** (finding 14). The drag handlers
+  moved from the inner scroller to the `<section>`, so the whole column — header
+  included — is the drop target.
+- **Residue** (finding 19): the empty `checklist-ratio` span is gone (it returns
+  in M3 with a real ratio), `useToast()` exposes `push` alone,
+  `THUMBNAILS_BUCKET` and `CONCEPT_SKETCH_TYPES` are no longer exported,
+  `coreOrder` uses `compareKinds` from `lib/defaults.ts`, and the inert-stage
+  message no longer points at arrows that are disabled in exactly that case.
+  The branch itself stays: user-added inert stages are M7, and a message that
+  matches the buttons costs nothing.
+
+**Rejected**
+
+- **"The live shortcut hint bar is M9 work"** (finding 18). PLAN.md puts the
+  *full shortcut set and the `?` cheat sheet* in M9; it does not say that the
+  eight keys M1 itself binds must be undiscoverable until then, and a
+  keyboard-first board whose keys are written down only in a plan has no
+  keyboard. The suggested compromise — hard-code three entries in the component
+  — is the one version that would be wrong: the bar's whole claim is that it
+  lists the bindings that are live *on this route*, which the acceptance spec
+  asserts by opening `/videos/[id]` and watching the board's keys disappear
+  from it. The cost is 27 lines in `lib/shortcuts.ts` and a 41-line component.
+  Reconsider in M9 if the `?` sheet makes the bar redundant.
+- **The half of finding 2 that asks for `thumbnail_concept` and hook fields on
+  the M1 stub** — that is the packaging block, which PLAN.md assigns to M2. The
+  honest half of the finding (do not link to anchors that do not exist) was
+  applied instead.
+
+**Deferred, to a named milestone**
+
+- The packaging editor — written concept, title candidates, hooks with one
+  chosen, the live gate indicator and Skip-with-a-reason — and with it the
+  return of the "Fix packaging" and "Skip gate…" links: **M2**.
+- The checklist ratio on the card: **M3**, with the checklists it counts.
+
+**Still not done, and not doable here:** the deploy — see the runbook below.
+It is the only part of M1's plan line that no amount of local work can close.
+
 ### Gates, as of this commit
+
+Re-run after the review fixes, in this order, as the last thing done to this
+milestone:
 
 | Gate | Result |
 |---|---|
 | `npm run typecheck` | clean (both `tsconfig.json` and `tsconfig.harness.json`) |
 | `npm run lint` | clean |
 | `npm run build` | succeeds; all seven routes, `/c/[slug]/board`, `/capture` and `/videos/[id]` dynamic |
-| `./scripts/verify-db.sh m1_check` | OK — migrations applied, 12 test files passed |
+| `./scripts/verify-db.sh m1_final` | OK — three migrations applied, 12 test files passed |
 | `npm run test` | 25 passed (2 files) |
-| `npm run e2e` | 33 passed, 1 skipped of 34 (`session-refresh` skips itself unless the stack was started with a short token TTL — `npm run e2e:refresh`) |
+| `npm run e2e` | 40 passed, 1 skipped of 41, 1.6m (`session-refresh` skips itself unless the stack was started with a short token TTL — `npm run e2e:refresh`) |
+
+The e2e figure is from the **second consecutive run against the same, unreset
+stack**, which is the point of finding 16: before the fix that run failed on
+`upload.spec.ts` while a cold one passed. Seven of the forty are new and exist
+only because of this review — the leading-digit title, the two unreachable-server
+paths for capture and for the title, the unreachable-server move, the drop on a
+column header, the held `]`, and focus after a move — plus the no-JS `/capture`
+confirmation.
 
 ### Deliberately not built
 
@@ -469,9 +613,10 @@ skip flow (M2); checklists, the ratio on the card and `/now` (M3); thumbnail
 roles and the swap log (M4); the idea bank, buckets and the matrix — which is
 why "+K more in Ideas" is plain text and not a link (M5); the calendar (M6);
 settings (M7); brainstorm (M8); the `?` cheat sheet, `g n/b/i/k`, `p` and `x`
-(M9). Two card slots render deliberately empty rather than faked:
-`[data-slot="checklist-ratio"]` (a "0/0" would read as "nothing to do") and the
-thumbnail frame when there is no sketch.
+(M9). The checklist ratio renders *nothing at all* — not even an empty element
+— until M3 puts a real `done/total` there, because a "0/0" would read as
+"nothing to do"; the card's thumbnail frame is the one slot drawn empty, and
+only so that a board of a hundred cards has one layout.
 
 ### The one part of M1 that is NOT done: the deploy
 
@@ -499,11 +644,12 @@ human who has the accounts:
 ```bash
 supabase login
 supabase link --project-ref <ref>
-supabase db push          # applies 0001_init.sql then 0002_create_channel.sql
+supabase db push          # applies 0001_init.sql, 0002_create_channel.sql, 0003_identity_columns.sql
 ```
 
 `supabase db push` is what creates the eight tables, every RLS policy, the
-column revokes, `move_video` / `swap_thumbnail` / `capture_video`, the private
+column revokes (including `0003`'s, which take `id` and `created_at` out of the
+client's UPDATE grant), `move_video` / `swap_thumbnail` / `capture_video`, the private
 `thumbnails` bucket and its owner-only storage policy. Confirm with
 `supabase migration list` that both migrations are applied remotely.
 

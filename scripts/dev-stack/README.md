@@ -323,8 +323,14 @@ either fix it or add it.
     dev:stack:stop && npm run e2e` is the clean run. The *application* server is
     never reused (`E2E_REUSE=1` opts in), because Playwright's `env` block is
     the only thing aiming the app at this origin.
-32. **No Studio, no dashboard, no log explorer, no advisors.**
-33. **`supabase gen types` still cannot run** (it shells out to Docker even with
+32. **A `npm run dev` in this directory blocks `npm run e2e` outright.** Next
+    allows one dev server per directory, so the suite's own app server exits
+    with "Another next dev server is already running" and *nothing runs* — not
+    a failed test, a failed launch. `scripts/e2e-preflight.mjs` (run by
+    `playwright.config.ts` before the app server) now says so in one sentence
+    and names the pid to kill; stop the dev server and run the suite again.
+33. **No Studio, no dashboard, no log explorer, no advisors.**
+34. **`supabase gen types` still cannot run** (it shells out to Docker even with
     `--db-url`), so `lib/database.types.ts` remains hand-written and this
     harness does nothing to verify it beyond the queries the tests happen to
     make.

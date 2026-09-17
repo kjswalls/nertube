@@ -110,7 +110,12 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      command: `npm run dev -- --port ${APP_PORT}`,
+      // The preflight first: Next allows one `next dev` per directory, so a
+      // dev server someone left running makes this command exit 1 and the whole
+      // suite fail to launch. `scripts/e2e-preflight.mjs` says so in one
+      // sentence instead of leaving Next's refusal buried in `[WebServer]`
+      // output below a "✓ Ready" line from the server it is refusing to be.
+      command: `node scripts/e2e-preflight.mjs && npm run dev -- --port ${APP_PORT}`,
       url: `${APP_URL}/login`,
       // Never by default: this entry's `env` block is the only thing aiming the
       // app at the harness, and a reused server never sees it.

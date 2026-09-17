@@ -21,9 +21,13 @@ import type { DragEvent, ReactNode } from "react";
  *   one creator and one camera. Text only in M1; M6 makes it create the
  *   filming day.
  *
- * The column is also the drop target. `onDragOver` must `preventDefault()` or
- * the browser refuses the drop — that one line is the whole of native HTML5
- * drop-target opt-in.
+ * The column is also the drop target — the whole `<section>`, not just the
+ * scrolling list inside it. The header is 38px of a 737px column and the user
+ * aiming at a short column's title bar is aiming at the column; with the
+ * handlers on the inner list that drop was silently ignored and the column did
+ * not even highlight. `onDragOver` must `preventDefault()` or the browser
+ * refuses the drop — that one line is the whole of native HTML5 drop-target
+ * opt-in.
  */
 export function BoardColumn({
   name,
@@ -62,6 +66,10 @@ export function BoardColumn({
       data-testid="board-column"
       data-stage-name={name}
       data-wip-warning={wipWarning ? "true" : "false"}
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={[
         "flex w-72 shrink-0 flex-col self-stretch rounded-lg border bg-surface transition",
         wipWarning
@@ -116,13 +124,12 @@ export function BoardColumn({
         ) : null}
       </header>
 
+      {/* The scrolling list. The drop handlers live on the <section> above,
+          so a drop anywhere on the column — header included — counts; this
+          div is only the part that scrolls. */}
       <div
         data-testid="column-dropzone"
         data-stage-name={name}
-        onDragOver={onDragOver}
-        onDragEnter={onDragEnter}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
         className="flex min-h-40 flex-1 flex-col gap-2 overflow-y-auto p-2"
       >
         {count === 0 ? (
