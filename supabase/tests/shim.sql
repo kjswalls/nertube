@@ -44,19 +44,29 @@ create table if not exists auth.users (
 
 -- Reads the claims a test sets with:
 --   select set_config('request.jwt.claims', json_build_object('sub', <uuid>)::text, true);
+--
+-- Shaped exactly like Supabase's own auth.uid(): the SETTING is nullif'd before
+-- the cast, not the extracted claim after it. PostgREST leaves
+-- request.jwt.claims as the EMPTY STRING on an unauthenticated request, and
+-- `''::json` raises — which would come out of every RLS policy and out of
+-- move_video/swap_thumbnail at variable initialisation, so the logged-out path
+-- could not be tested at all. Empty must read as NULL.
 create or replace function auth.uid() returns uuid
   language sql stable
-  as $$ select nullif(current_setting('request.jwt.claims', true)::json ->> 'sub', '')::uuid $$;
+  as $$ select coalesce(
+       nullif(current_setting('request.jwt.claim.sub', true), ''),
+       nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')::uuid $$;
 
+-- Same empty-string handling as auth.uid() above.
 create or replace function auth.role() returns text
   language sql stable
   as $$ select coalesce(
-       nullif(current_setting('request.jwt.claims', true)::json ->> 'role', ''),
+       nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role',
        current_setting('role', true)) $$;
 
 create or replace function auth.email() returns text
   language sql stable
-  as $$ select nullif(current_setting('request.jwt.claims', true)::json ->> 'email', '') $$;
+  as $$ select nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email' $$;
 
 grant execute on function auth.uid(), auth.role(), auth.email() to anon, authenticated, service_role;
 
@@ -81,6 +91,13 @@ create table if not exists storage.objects (
   metadata jsonb
 );
 alter table storage.objects enable row level security;
+-- Real Supabase ships RLS enabled on storage.buckets with no policy for the
+-- client roles, so listing or changing a bucket from a client is refused. The
+-- harness has to model that: with RLS off, the grant below let an authenticated
+-- user flip the private thumbnails bucket to public, and 80_storage.test.sql
+-- would have been testing a strictly more permissive database than the one it
+-- stands in for.
+alter table storage.buckets enable row level security;
 grant all on storage.objects, storage.buckets to anon, authenticated, service_role;
 
 -- Path helper used by storage policies: 'uid/video/safe.png' -> {uid,video}
