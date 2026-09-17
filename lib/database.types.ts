@@ -75,6 +75,7 @@ export type VideosRow = {
   vertical_axis: string;
   horizontal_axis: string;
   waiting_on: string | null;
+  waiting_since: string | null;
   filming_day_id: string | null;
   target_publish_date: string | null;
   archived_at: string | null;
@@ -405,6 +406,7 @@ export type Database = {
           vertical_axis?: string;
           horizontal_axis?: string;
           waiting_on?: string | null;
+          waiting_since?: string | null;
           filming_day_id?: string | null;
           target_publish_date?: string | null;
           archived_at?: string | null;
@@ -448,6 +450,7 @@ export type Database = {
           vertical_axis?: string;
           horizontal_axis?: string;
           waiting_on?: string | null;
+          waiting_since?: string | null;
           filming_day_id?: string | null;
           target_publish_date?: string | null;
           archived_at?: string | null;

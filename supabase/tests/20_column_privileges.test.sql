@@ -73,10 +73,15 @@ declare n int;
 begin
   -- Positive control: the columns the client is supposed to own still work,
   -- otherwise this test would pass with UPDATE revoked altogether.
+  -- `waiting_since` is paired with `waiting_on` by a CHECK since
+  -- 0004_waiting_since.sql, so the two are written together here; that the
+  -- client may write the new column at all is the point of including it.
+  -- 65_waiting_since.test.sql is where the pairing itself is exercised.
   update public.videos
      set title = 'Working title',
          thumbnail_concept = 'Phone-tile readable',
          waiting_on = 'editor',
+         waiting_since = now(),
          updated_at = now()
    where id = fx.video_a();
   get diagnostics n = row_count;

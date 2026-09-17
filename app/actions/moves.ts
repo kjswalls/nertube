@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { GATE_WORDING, type GateField } from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
@@ -25,8 +26,12 @@ import { requireUser } from "@/lib/supabase/require-user";
  * disagree about the gate.
  */
 
-/** The three fields the TTH gate checks, in the order `move_video` checks them. */
-export type GateField = "title" | "thumbnail_concept" | "hook";
+/**
+ * The three fields the TTH gate checks, in the order `move_video` checks them.
+ * Re-exported so the board keeps importing it from here; the definition itself
+ * lives with the predicate in `lib/packaging.ts`.
+ */
+export type { GateField };
 
 export type MoveVideoResult =
   | {
@@ -63,8 +68,9 @@ const MoveInput = z.object({
 
 export type MoveVideoInput = z.input<typeof MoveInput>;
 
-/**
- * How each gate field reads in a sentence.
+/*
+ * How each gate field reads in a sentence — `GATE_WORDING` in
+ * `lib/packaging.ts`, imported rather than repeated.
  *
  * `thumbnail_concept` is the *written* concept (BRIEF.md principle 2: the
  * concept is locked at the TTH stage so the right shots get filmed; the image
@@ -72,12 +78,12 @@ export type MoveVideoInput = z.input<typeof MoveInput>;
  * satisfies nothing, so the refusal says which of the two it means — a card
  * that visibly carries a sketch being refused for "a thumbnail concept" is the
  * one refusal a person cannot act on.
+ *
+ * M2's packaging block shows the same decision as a live indicator on the
+ * detail page, so the two wordings have to be one wording: the board's refusal
+ * and the page's indicator are describing the same row, and two phrasings for
+ * it is exactly how "the sketch is the concept" got believed the first time.
  */
-const GATE_WORDING: Record<GateField, string> = {
-  title: "a working title",
-  thumbnail_concept: "a thumbnail concept written down (the sketch is not it)",
-  hook: "exactly one chosen hook",
-};
 
 /**
  * `move_video` raises `gate:title`, `gate:thumbnail_concept` or `gate:hook`.

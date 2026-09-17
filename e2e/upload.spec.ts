@@ -486,7 +486,7 @@ test('the working title autosaves on blur and reaches the board', async ({ page 
   // Enter blurs the field, which is what saves — the same path as clicking
   // away.
   await field.press('Enter');
-  await expect(page.getByTestId('title-status')).toHaveText('Saved');
+  await expect(page.getByTestId('packaging-save-status')).toHaveText('Saved');
 
   // Trimmed on the way in, and actually in Postgres.
   await expect(field).toHaveValue('After, with the edges trimmed');
@@ -523,7 +523,7 @@ test('a title save that never reaches the server keeps the page and the typed ti
   await field.fill('Typed while the server was gone');
   await field.press('Enter');
 
-  const status = page.getByTestId('title-status');
+  const status = page.getByTestId('packaging-save-status');
   await expect(status).toHaveText(/could not reach the server/i);
   await expect(status).toHaveAttribute('role', 'alert');
 

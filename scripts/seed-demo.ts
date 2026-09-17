@@ -368,7 +368,10 @@ function weekVideos(): VideoSeed[] {
       thumbnail_concept: "Analytics flatline, face to camera",
       hooks: chosenHook("Fifty videos, nine subscribers."),
       stage_entered_at: daysAgo(4),
+      // Paired by a CHECK since 0004_waiting_since.sql: a block always says
+      // when it started, so /now can show its age rather than guess one.
       waiting_on: "a quiet evening to film",
+      waiting_since: daysAgo(4),
     },
     {
       kind: "editing",

@@ -549,14 +549,22 @@ async function directWrites(
       // 1. A column the client holds: this is the row, and this is a write the
       //    app itself makes. It must succeed, or the two refusals below prove
       //    nothing.
+      //    `waiting_since` rides along because 0004_waiting_since.sql pairs the
+      //    two with a CHECK — writing the text alone is a 400 from the
+      //    constraint, which would look like a permission failure here and
+      //    prove the opposite of what this control is for.
       const control = await attempt(
         `${gateway}/rest/v1/videos?id=eq.${videoId}`,
         'PATCH',
-        { waiting_on: 'a direct write the client is allowed to make' },
+        {
+          waiting_on: 'a direct write the client is allowed to make',
+          waiting_since: new Date().toISOString(),
+        },
       );
       // Put it back, so the fixture is unchanged for whatever runs next.
       await attempt(`${gateway}/rest/v1/videos?id=eq.${videoId}`, 'PATCH', {
         waiting_on: null,
+        waiting_since: null,
       });
 
       // 2. The revoked column, on that same row.

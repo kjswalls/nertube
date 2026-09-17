@@ -5,8 +5,11 @@ import { AppHeader } from "@/components/app-header";
 import { cacheBusted, signedUrlsFor } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
 
+import { FlowFields, type FlowStage } from "@/components/video-detail/flow-fields";
+import { formatAge } from "@/components/video-detail/age";
+import { PackagingBlock } from "@/components/packaging/packaging-block";
+
 import { ConceptSketch } from "./concept-sketch";
-import { TitleField } from "./title-field";
 
 export const metadata = { title: "Video · NerTube" };
 
@@ -49,7 +52,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -64,7 +67,8 @@ export default async function VideoDetailPage({
   // composite foreign keys, and the board page next door already takes the same
   // line for the same reason. They do not depend on each other, so they run
   // together.
-  const [{ data: channel }, { data: stage }, sketchUrls] = await Promise.all([
+  const [{ data: channel }, { data: stage }, { data: stageRows }, sketchUrls] =
+    await Promise.all([
     supabase
       .from("channels")
       .select("name, slug")
@@ -75,6 +79,16 @@ export default async function VideoDetailPage({
       .select("name, kind")
       .eq("id", video.stage_id)
       .maybeSingle(),
+    // The stage select's options: this channel's enabled stages, in the board's
+    // column order. `position` is display order and this is a display list —
+    // behaviour (the gate, "the next stage") compares CORE_KIND_ORDER instead,
+    // and that comparison happens inside `move_video`, not here.
+    supabase
+      .from("stages")
+      .select("id, name, position")
+      .eq("channel_id", video.channel_id)
+      .eq("is_enabled", true)
+      .order("position", { ascending: true }),
     // One path, but through the batching helper the board uses — so there is
     // one signing code path in the app and not two that can drift.
     signedUrlsFor(supabase, [video.thumbnail_concept_path]),
@@ -88,6 +102,24 @@ export default async function VideoDetailPage({
     : null;
 
   const displayTitle = video.title.trim() === "" ? "Untitled" : video.title;
+
+  /*
+    The flow block's server-side reads.
+
+    The clock is read once, here, for the same reason the board reads it once:
+    this is an async Server Component on a dynamic route, so "now" is the
+    request's own time and every label derived from it agrees with every other.
+    A client component that called `Date.now()` while rendering would produce
+    one string on the server and a different one in the browser a moment later,
+    which is a hydration mismatch.
+  */
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+
+  const flowStages: FlowStage[] = (stageRows ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+  }));
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -119,8 +151,24 @@ export default async function VideoDetailPage({
               being typed. */}
           <h1 className="sr-only">{displayTitle}</h1>
 
-          <TitleField videoId={video.id} initialTitle={video.title} />
         </div>
+
+        {/* M2's packaging half. The working title lives inside the block rather
+            than above it: choosing a title candidate writes the candidate list
+            and `videos.title` in one save, and two inputs bound to one column
+            on one page is a race, not a convenience. This replaces M1's
+            `TitleField` stub, which did the narrow version of the same job. */}
+        <PackagingBlock
+          videoId={video.id}
+          initial={{
+            title: video.title,
+            thumbnailConcept: video.thumbnail_concept,
+            titleCandidates: video.title_candidates,
+            hooks: video.hooks,
+            packagingSkippedAt: video.packaging_skipped_at,
+            packagingSkipReason: video.packaging_skip_reason,
+          }}
+        />
 
         <ConceptSketch
           videoId={video.id}
@@ -130,13 +178,47 @@ export default async function VideoDetailPage({
           hasSketch={video.thumbnail_concept_path !== null}
         />
 
+        {/* M2's flow half. The packaging block is a separate section of this
+            page; the two share the route and nothing else. */}
+        <FlowFields
+          videoId={video.id}
+          channelSlug={channel?.slug ?? ""}
+          stages={flowStages}
+          currentStageId={video.stage_id}
+          currentStageName={stage?.name ?? "No stage"}
+          targetPublishDate={video.target_publish_date ?? ""}
+          youtubeUrl={video.youtube_url ?? ""}
+          notes={video.notes ?? ""}
+          waitingOn={video.waiting_on ?? ""}
+          waitingSince={video.waiting_since}
+          waitingAgeLabel={formatAge(video.waiting_since, now)}
+          archivedAt={video.archived_at}
+          publishedAt={video.published_at}
+          publishedLabel={formatPublished(video.published_at)}
+        />
+
         <p className="border-t border-border pt-4 text-xs text-muted">
-          This page is the M1 stub: a working title and the concept sketch. The
-          packaging block (title candidates, hooks, the gate indicator and the
-          skip flow) is M2; the stage checklist and the script are M3; thumbnail
-          roles and the post-publish block are M4.
+          The stage checklist and the script are M3; thumbnail roles and the
+          post-publish block are M4.
         </p>
       </main>
     </div>
   );
+}
+
+/**
+ * `published_at` as a date, in UTC with a fixed locale so the server and the
+ * browser cannot disagree about which day it was — the same treatment the board
+ * gives `target_publish_date`.
+ */
+function formatPublished(value: string | null): string | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
 }
