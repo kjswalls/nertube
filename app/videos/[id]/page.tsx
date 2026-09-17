@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppHeader } from "@/components/app-header";
-import { signedUrlsFor } from "@/lib/storage";
+import { cacheBusted, signedUrlsFor } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
 
 import { ConceptSketch } from "./concept-sketch";
@@ -49,7 +49,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, thumbnail_concept_path")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path")
     .eq("id", id)
     .maybeSingle();
 
@@ -80,8 +80,11 @@ export default async function VideoDetailPage({
     signedUrlsFor(supabase, [video.thumbnail_concept_path]),
   ]);
 
+  // `updated_at` versions the URL. The object path is stable on purpose, so
+  // without a version a replaced sketch would keep being served out of the
+  // browser cache — see `cacheBusted`.
   const sketchUrl = video.thumbnail_concept_path
-    ? (sketchUrls.get(video.thumbnail_concept_path) ?? null)
+    ? cacheBusted(sketchUrls.get(video.thumbnail_concept_path), video.updated_at)
     : null;
 
   const displayTitle = video.title.trim() === "" ? "Untitled" : video.title;
@@ -124,6 +127,7 @@ export default async function VideoDetailPage({
           userId={user.id}
           title={video.title}
           url={sketchUrl}
+          hasSketch={video.thumbnail_concept_path !== null}
         />
 
         <p className="border-t border-border pt-4 text-xs text-muted">

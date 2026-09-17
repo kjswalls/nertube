@@ -1,5 +1,3 @@
-import { deflateSync } from 'node:zlib';
-
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Client } from 'pg';
 
@@ -16,6 +14,7 @@ import {
   SEED_EMAIL,
   SEED_PASSWORD,
 } from '../scripts/dev-stack/shared';
+import { makePng } from './png';
 
 /**
  * M1 — the thumbnail-concept sketch, end to end.
@@ -31,78 +30,16 @@ import {
  *
  * ## The fixture PNG is generated, not committed
  *
- * `makePng()` below writes the eight-byte signature, an IHDR, a zlib-deflated
- * IDAT and an IEND by hand. It is twenty lines, and it means the bytes under
- * test are bytes this file can explain — a base64 blob pasted into a spec is a
- * thing nobody ever reads again, and when a browser refuses to decode it there
- * is no way to tell whether the spec or the app is wrong. Each upload here uses
+ * `makePng()` (in `e2e/png.ts`, shared with the acceptance walk) writes the
+ * eight-byte signature, an IHDR, a zlib-deflated IDAT and an IEND by hand, so
+ * the bytes under test are bytes these specs can explain. Each upload here uses
  * a *differently sized* image, so "the picture changed" is checkable as
  * `naturalWidth`, from the browser's own decoder.
  */
 
 /* -------------------------------------------------------------------------- */
-/* A PNG, written out                                                          */
+/* Fixture files                                                               */
 /* -------------------------------------------------------------------------- */
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n += 1) {
-    let c = n;
-    for (let k = 0; k < 8; k += 1) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-
-function crc32(bytes: Buffer): number {
-  let c = 0xffffffff;
-  for (const byte of bytes) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function pngChunk(type: string, data: Buffer): Buffer {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const typed = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(typed));
-  return Buffer.concat([length, typed, crc]);
-}
-
-/** A solid-colour 8-bit RGB PNG of the given size. */
-function makePng(
-  width: number,
-  height: number,
-  [r, g, b]: [number, number, number],
-): Buffer {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type 2 = truecolour RGB
-  // 10..12: compression 0, filter 0, interlace 0 — all already zero.
-
-  const stride = 1 + width * 3;
-  const raw = Buffer.alloc(height * stride);
-  for (let y = 0; y < height; y += 1) {
-    const row = y * stride;
-    raw[row] = 0; // per-scanline filter: none
-    for (let x = 0; x < width; x += 1) {
-      raw[row + 1 + x * 3] = r;
-      raw[row + 2 + x * 3] = g;
-      raw[row + 3 + x * 3] = b;
-    }
-  }
-
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
 
 /**
  * A GIF, for the one case the path convention has to handle specially: a new
@@ -465,6 +402,68 @@ test('a non-image is refused in the browser, before anything is uploaded', async
   await upload(page, RED_4x2);
   await expect.poll(() => decodedWidth(sketchImage(page))).toBe(4);
   expect(await objectsFor(videoId)).toEqual([`${userId}/${videoId}/concept.png`]);
+});
+
+test('a sketch the app cannot fetch degrades to the empty frame, with no layout shift', async ({
+  page,
+}) => {
+  // Two cards, identical but for the sketch: one has never had one, the other
+  // names an object that is not in the bucket. The row is written the way a
+  // client legitimately can — `thumbnail_concept_path` is in the UPDATE grant —
+  // so this is a state the app can really reach: an object deleted from under
+  // it, or a recording that outlived its upload.
+  await capture(userId, channelId, 'No sketch at all');
+  const dangling = await capture(userId, channelId, 'Sketch that vanished');
+  await asUser(userId, SEED_EMAIL, async () => {
+    await db.query(
+      'update public.videos set thumbnail_concept_path = $2, updated_at = now() where id = $1',
+      [dangling, `${userId}/${dangling}/concept.png`],
+    );
+  });
+  expect(await objectsFor(dangling)).toEqual([]);
+
+  // ---- The detail page names the difference rather than pretending.
+  await page.goto(`/videos/${dangling}`);
+  await expect(sketchImage(page)).toHaveCount(0);
+  await expect(page.getByText('The sketch could not be loaded')).toBeVisible();
+  await expect(page.getByLabel('Replace the sketch')).toBeVisible();
+
+  // ---- The board card just shows the empty frame: no broken-image icon…
+  await page.goto(`/c/${CHANNEL.slug}/board`);
+  const danglingCard = page.locator('[data-testid="board-card"]', {
+    hasText: 'Sketch that vanished',
+  });
+  const plainCard = page.locator('[data-testid="board-card"]', {
+    hasText: 'No sketch at all',
+  });
+  await expect(danglingCard).toBeVisible();
+  await expect(danglingCard.getByTestId('card-sketch')).toHaveCount(0);
+  await expect(
+    danglingCard.locator('[data-slot="thumbnail-concept"]'),
+  ).toHaveAttribute('data-showing-sketch', 'false');
+
+  // …and the box is exactly the box every other card has, so a column of cards
+  // does not reflow around the ones whose pictures are missing.
+  const danglingBox = await danglingCard
+    .locator('[data-slot="thumbnail-concept"]')
+    .boundingBox();
+  const plainBox = await plainCard
+    .locator('[data-slot="thumbnail-concept"]')
+    .boundingBox();
+  expect(danglingBox?.width).toBe(plainBox?.width);
+  expect(danglingBox?.height).toBe(plainBox?.height);
+
+  // The same box a card WITH a picture uses, which is the layout-shift claim.
+  const withSketch = await capture(userId, channelId, 'Sketch present');
+  await page.goto(`/videos/${withSketch}`);
+  await upload(page, RED_4x2);
+  await page.goto(`/c/${CHANNEL.slug}/board`);
+  const filledBox = await page
+    .locator('[data-testid="board-card"]', { hasText: 'Sketch present' })
+    .locator('[data-slot="thumbnail-concept"]')
+    .boundingBox();
+  expect(filledBox?.width).toBe(plainBox?.width);
+  expect(filledBox?.height).toBe(plainBox?.height);
 });
 
 test('the working title autosaves on blur and reaches the board', async ({ page }) => {

@@ -5,11 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
+import { useToast } from "@/components/toast";
 import { isWipKind, kindOrder } from "@/lib/defaults";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { BoardColumn } from "./board-column";
-import { BoardToastRegion, type BoardToast } from "./board-toast";
 import {
   compareCards,
   compareRecency,
@@ -88,15 +88,14 @@ export function Board({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
-  const [toast, setToast] = useState<BoardToast | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const toast = useToast();
 
   // The id is also kept outside React state: `drop` can only read the
   // `DataTransfer` reliably in some browsers, and this is the fallback.
   const draggingIdRef = useRef<string | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const focusOnSelect = useRef(false);
-  const toastKey = useRef(0);
   const boardRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -213,18 +212,46 @@ export function Board({
 
   /* --------------------------------------------------------------- moves -- */
 
-  const showToast = useCallback((message: string, videoId: string | null) => {
-    toastKey.current += 1;
-    setToast({ key: toastKey.current, message, videoId });
-  }, []);
+  /**
+   * Refusals go through the application's one toast mechanism
+   * (`components/toast.tsx`), mounted by the root layout. PLAN.md wants the two
+   * links out of a gate refusal — "Fix packaging" and "Skip gate…" — and they
+   * are the reason a refusal carries a video id: a refusal with nowhere to go
+   * is just a complaint.
+   */
+  const showToast = useCallback(
+    (message: string, videoId: string | null) => {
+      toast.push({
+        tone: "error",
+        message,
+        links: videoId
+          ? [
+              { label: "Fix packaging", href: `/videos/${videoId}#packaging` },
+              { label: "Skip gate…", href: `/videos/${videoId}#packaging-skip` },
+            ]
+          : undefined,
+      });
+    },
+    [toast],
+  );
 
   const requestMove = useCallback(
     async (card: BoardCard, target: BoardStage) => {
       if (card.stageId === target.id) return;
-      if (pending.includes(card.id)) return;
 
       const from = stageById.get(card.stageId);
       const title = card.title.trim() === "" ? "Untitled" : card.title;
+
+      // One move at a time per card: two `move_video` calls in flight for one
+      // row would race over `stage_entered_at` and over which stage wins. A
+      // second `]` pressed before the first has landed is therefore dropped —
+      // but said out loud, because a key that silently does nothing reads as a
+      // broken board rather than as a busy one.
+      if (pending.includes(card.id)) {
+        setAnnouncement(`“${title}” is still moving. Wait for that to finish.`);
+        return;
+      }
+
       // Captured before the optimistic write, so the snap-back is exact.
       const before: Override = {
         stageId: card.stageId,
@@ -357,6 +384,7 @@ export function Board({
     {
       key: "j",
       description: "Select the next card",
+      hint: { keys: "j / k", text: "select a card" },
       run: (event) => {
         event.preventDefault();
         step(1);
@@ -381,6 +409,7 @@ export function Board({
     {
       key: "]",
       description: "Move the selected card forward one stage",
+      hint: { keys: "[ / ]", text: "move a stage" },
       run: (event) => {
         event.preventDefault();
         if (selectedCard) moveBy(selectedCard, 1);
@@ -389,10 +418,26 @@ export function Board({
     {
       key: "Enter",
       description: "Open the selected card",
+      hint: { keys: "Enter", text: "open it" },
       run: (event) => {
         if (!selectedCard) return;
         event.preventDefault();
         router.push(`/videos/${selectedCard.id}`);
+      },
+    },
+    {
+      key: "Escape",
+      description: "Clear the card selection",
+      // No hint: Escape is the key everybody already tries, and the capture
+      // dialog says "Escape to close" on its own face.
+      run: (event) => {
+        // Only when there is a selection to clear. Escape means something to
+        // the browser (stopping a load, closing a native picker) and a
+        // shortcut that swallows it when it has nothing to do is a bug.
+        if (selectedId === null) return;
+        event.preventDefault();
+        setSelectedId(null);
+        setAnnouncement("Selection cleared.");
       },
     },
   ]);
@@ -555,7 +600,6 @@ export function Board({
         {announcement}
       </p>
 
-      <BoardToastRegion toast={toast} onDismiss={() => setToast(null)} />
     </>
   );
 }

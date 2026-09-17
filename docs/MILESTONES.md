@@ -282,3 +282,294 @@ divergence is worse than a missing feature. The short version:
   no hosted project — and there is no hosted project for this app to check
   against. Anything on the list above has to be verified on real Supabase before
   it can be believed.
+
+---
+
+## M1 — Capture, board, drag-and-drop, upload
+
+### What M1 delivers
+
+- **Quick capture.** `c` anywhere signed in opens a modal with one focused
+  title input, a channel chip row and Enter to save; `1`..`9` retargets the
+  channel *while the title is still empty*; Shift+Enter (or "More") reveals
+  hook, notes and tags. `/capture` is the same `CaptureForm` as a standalone,
+  phone-sized page with `?c=<slug>` for a per-channel bookmark.
+  `captureVideo` goes through the `capture_video` RPC — `INSERT` on `videos` is
+  revoked — and lands every idea in that channel's Idea stage.
+- **The board.** `/c/[slug]/board`: enabled stages as columns in `position`
+  order, real counts, WIP warning on `WIP_KINDS` only, cross-channel Filming
+  batch badge at three, days-in-stage with the amber stale treatment past
+  `channels.stale_days`, the Idea column capped at ten with "+K more in Ideas",
+  Published/Repurposed cards dropping off 30 days after `published_at`.
+- **Moving a card, three ways and one gate.** Native HTML5 drag (no library),
+  two real `<button>`s on every card, and `[` / `]` on the selected card. All
+  three call `moveVideo` → `move_video`, so the packaging gate, the
+  `stage_entered_at` stamp and the checklist snapshot are the database's, not
+  the board's. A refusal snaps the card back and raises a toast naming the
+  missing field, with "Fix packaging" and "Skip gate…" links.
+- **The detail stub.** `/videos/[id]`: working title autosaved on blur, and the
+  concept-sketch upload — browser → Storage with the user's own session, then
+  `recordConceptSketch` records the path — with the signed-URL thumb on the
+  board card, signed for the whole board in one `createSignedUrls` call.
+- **One keyboard and one toast** (see the reconciliation log below).
+
+### Running it locally
+
+```bash
+npm install
+npm run dev:stack          # prints the two NEXT_PUBLIC_ values; paste into .env.local
+npm run dev                # http://localhost:3000, sign in as the stack's seed user
+```
+
+`npm run e2e` drives the whole thing in a real browser against its own stack;
+`./scripts/verify-db.sh [dbname]` is still the SQL suite. There is **no hosted
+Supabase project for this app**, so everything below was verified against the
+local stack — `scripts/dev-stack/README.md` lists what that harness does not
+reproduce.
+
+### The reconciliation: three agents, one application
+
+M1 was built by three parallel agents (capture, board, detail-stub + upload) and
+landed with four collisions. What was done about each:
+
+- **Two shortcut implementations, then two listeners.** `lib/shortcuts.ts` was
+  written twice in the same minute and one `Write` overwrote the other; what
+  survived was a hook that attached *its own* `document` listener per call site.
+  Two call sites meant two listeners, no way for a modal to take the keyboard
+  away from the page under it, and no way to see the whole key set. It is now a
+  **single registry**: one `keydown` listener for the entire application,
+  attached when the first binding registers and removed with the last.
+  `useShortcuts(bindings, { enabled, exclusive })` registers; the registry
+  dispatches newest-registration-first, one `run` per keydown. `exclusive` is
+  what the capture dialog uses to make the board's keys inert while it is open —
+  previously `j` pressed with focus on the dialog's close button moved a card
+  behind the dialog.
+- **Two transient-message mechanisms.** The board had `board-toast.tsx`; the
+  capture host had its own `role="status"` line. Both now go through
+  `components/toast.tsx`, mounted once in the root layout: `error` renders
+  `role="alert"` (a refused drop), `info` renders `role="status"` (a capture
+  landed), each with its own timeout and a dismiss button. `board-toast.tsx` is
+  deleted. The only message *not* routed through it is `/capture`'s own inline
+  "Captured …" line, which is part of the form and is what the page shows when
+  JavaScript never arrives.
+- **Competing card components.** `components/board-column.tsx` (M0's empty
+  shell) was already deleted by the board agent in favour of
+  `components/board/board-column.tsx`; nothing imported the old one. The card's
+  thumbnail slot and the board's `BoardCard` type were extended by the upload
+  agent rather than forked, so there is one `VideoCard`.
+- **Type errors across the boundaries.** None survived: `npm run typecheck`
+  (both projects) and `npm run lint` are clean, and `app/actions/videos.ts` —
+  written by capture, appended to by upload — has one owner per export.
+- **A duplicated PNG encoder** in the specs is now `e2e/png.ts`, imported by
+  both files that need real image bytes.
+
+### The keyboard set
+
+One mechanism, one listener, and the keys are listed by the application itself:
+`components/shortcut-hints.tsx` renders the *live registrations*, so the header
+advertises exactly the keys that work on the route being looked at and cannot
+drift from them. (The full `?` cheat sheet is M9; this is the part that could
+not wait.)
+
+| Key | What it does | Where it is bound |
+|---|---|---|
+| `c` | Capture an idea | the header, so everywhere signed in |
+| `1`..`9` | Switch channel (the digit is drawn on the chip) | the header |
+| `1`..`9` *in the capture modal, title empty* | Retarget the capture | the title field |
+| `j` / `k` | Select the next / previous card | the board |
+| `[` / `]` | Move the selected card back / forward by `CORE_KIND_ORDER` | the board |
+| `Enter` | Open the selected card | the board |
+| `Escape` | Close the capture dialog; on the board, clear the selection | the dialog / the board |
+
+Rules the registry enforces for all of them: nothing fires from an `input`,
+`textarea`, `select`, contenteditable or `role="textbox"`/`"searchbox"`/
+`"combobox"`; nothing fires with Ctrl/Meta/Alt; `Enter`/`Space` stand aside on
+natively-activated controls; a `preventDefault()`ed or IME-composing event is
+ignored. Bindings that do not exist on a route are simply not registered —
+pressing `j`, `k`, `[`, `]`, `Enter` or `Escape` on `/videos/[id]` does nothing
+and raises nothing, which is asserted in the suite (`pageerror` count is zero).
+
+One deliberate limit: a second `]` pressed while the first move for that card is
+still in flight is dropped rather than queued — two `move_video` calls racing
+over one row's `stage_entered_at` is worse — and the board now says so in its
+live region instead of ignoring the key silently.
+
+### The M1 acceptance, actually walked
+
+`e2e/m1-acceptance.spec.ts` (5 specs, serial) does PLAN.md's M1 acceptance
+through the pages, with nothing pre-seeded, and pairs every browser assertion
+with a read of the served database:
+
+1. **Two channels, eight ideas, dragged, reloaded, still there.** Both channels
+   are created on `/c/new`; eight ideas are typed into the `c` modal — four on
+   channel A's board, two aimed at B with the retarget digit from A's board, two
+   from B's board. Postgres then says: eight rows, four per channel, every one
+   in its own channel's Idea stage. Three are moved (two drags, one `]`), both
+   boards are reloaded, and the three are in Packaging with a fresh
+   `stage_entered_at` — in the browser *and* in the database.
+2. **Dragging an idea past Packaging is refused.** Idea → Scripting on an idea
+   with a title and nothing else: the toast says "Packaging still needs a
+   thumbnail concept", carries both links, the card snaps back, a reload agrees,
+   and `stage_id` *and* `stage_entered_at` are byte-identical to what they were.
+   The same video is then moved Idea → Packaging with `]` (allowed) and refused
+   again on the next `]` — same RPC, same refusal.
+3. **A sketch uploaded on the detail page shows on the card.** Real bytes
+   through the real picker; the picture on the page comes from a
+   `/storage/v1/object/sign/thumbnails/…` URL and decodes at the fixture's
+   pixel size; `videos.thumbnail_concept_path` names the stable path and
+   `storage.objects` holds exactly one object for that video; the board card
+   then shows the same image from the board's single batched signing call.
+4. **The two revokes, from the browser** (below).
+5. **The keyboard set is one set** — the hint bar lists `c`, `1–9`, `j`/`k`,
+   `[`/`]` on the board and drops the board keys on `/videos/[id]`; a digit
+   switches channel; a digit typed into the capture field is text; `j` in that
+   field is text; Escape closes without writing; `j` selects and Escape clears.
+
+### The revoked writes, proved from a client session
+
+PLAN.md's M1 review line is *`update videos set stage_id` from the browser
+client fails (revoke)*. Spec 4 above signs in inside the page (the same
+`/auth/v1/token?grant_type=password` grant the app uses), then makes three
+requests with that token: a control write to a column the client *is* granted,
+the revoked column, and a direct INSERT. Reproduced by hand against the same
+stack, with the same token, the answers are:
+
+```
+=== PATCH videos SET stage_id ===
+{"code":"42501","details":null,"hint":null,"message":"permission denied for table videos"}
+HTTP 403
+=== POST videos (direct INSERT) ===
+{"code":"42501","details":null,"hint":null,"message":"permission denied for table videos"}
+HTTP 403
+=== control: PATCH videos SET waiting_on ===
+HTTP 204
+```
+
+The control is the point: the session is real, the row is the user's own, and
+the same request shape succeeds on a column the grant allows. So the two 403s
+are the column revoke and the table revoke from `0001_init.sql`, not a broken
+token — and `move_video` / `capture_video` really are the only write paths for a
+stage change and for a new video.
+
+### Gates, as of this commit
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both `tsconfig.json` and `tsconfig.harness.json`) |
+| `npm run lint` | clean |
+| `npm run build` | succeeds; all seven routes, `/c/[slug]/board`, `/capture` and `/videos/[id]` dynamic |
+| `./scripts/verify-db.sh m1_check` | OK — migrations applied, 12 test files passed |
+| `npm run test` | 25 passed (2 files) |
+| `npm run e2e` | 33 passed, 1 skipped of 34 (`session-refresh` skips itself unless the stack was started with a short token TTL — `npm run e2e:refresh`) |
+
+### Deliberately not built
+
+The packaging editor's candidate and hook lists, the live gate indicator and the
+skip flow (M2); checklists, the ratio on the card and `/now` (M3); thumbnail
+roles and the swap log (M4); the idea bank, buckets and the matrix — which is
+why "+K more in Ideas" is plain text and not a link (M5); the calendar (M6);
+settings (M7); brainstorm (M8); the `?` cheat sheet, `g n/b/i/k`, `p` and `x`
+(M9). Two card slots render deliberately empty rather than faked:
+`[data-slot="checklist-ratio"]` (a "0/0" would read as "nothing to do") and the
+thumbnail frame when there is no sketch.
+
+### The one part of M1 that is NOT done: the deploy
+
+PLAN.md's M1 ends with *deploy to Vercel against a hosted project
+(`supabase db push`)*, and *upload a sketch from the deployed app to the hosted
+bucket*. **That has not been done and cannot be done from here**: there is no
+hosted Supabase project for this application, no Vercel credentials, and neither
+may be created in this environment. Nothing in this repository pretends
+otherwise — every green result above is against the local harness in
+`scripts/dev-stack/`, which explicitly *proves nothing about deployment*.
+
+Everything the deploy needs is in place, so here is the runbook, in order, for a
+human who has the accounts:
+
+**1. Create the hosted project.** In the Supabase dashboard, create a project
+(one region, any name). From *Project Settings → API* copy:
+
+- the **Project URL** (`https://<ref>.supabase.co`) → `NEXT_PUBLIC_SUPABASE_URL`
+- the **anon / publishable key** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- the **service role key** → `SUPABASE_SERVICE_ROLE_KEY` (local shell only —
+  never a Vercel variable, never anything the browser can reach)
+
+**2. Push the schema.** From the repository root, with the Supabase CLI:
+
+```bash
+supabase login
+supabase link --project-ref <ref>
+supabase db push          # applies 0001_init.sql then 0002_create_channel.sql
+```
+
+`supabase db push` is what creates the eight tables, every RLS policy, the
+column revokes, `move_video` / `swap_thumbnail` / `capture_video`, the private
+`thumbnails` bucket and its owner-only storage policy. Confirm with
+`supabase migration list` that both migrations are applied remotely.
+
+**3. Create the one user.** There is no sign-up screen by design. Either
+*Authentication → Users → Add user* in the dashboard (tick "auto-confirm"), or,
+from a shell that is pointed at the hosted project:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://<ref>.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key> \
+SEED_EMAIL=<you@example.com> SEED_PASSWORD=<a real password> \
+npm run seed:demo
+```
+
+`scripts/seed-demo.ts` creates the user *and* the two-channel, 8-video fixture
+every milestone review starts from. It needs GoTrue and PostgREST, so a hosted
+project is the first place it can actually run — it has never been executed,
+only typechecked and linted (see M0's caveat). Skip it and use the dashboard if
+you do not want the fixture in your real data.
+
+**4. Regenerate the types (optional, recommended).**
+
+```bash
+NERTUBE_DB_URL=<the project's connection string> npm run db:types
+```
+
+`lib/database.types.ts` is hand-written here because `supabase gen types` needs
+Docker; against a hosted project it can be generated for real. If it changes,
+`npm run typecheck` is the check that it still matches the app.
+
+**5. Deploy.**
+
+```bash
+npm i -g vercel        # or use the dashboard
+vercel link
+vercel env add NEXT_PUBLIC_SUPABASE_URL production
+vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
+# repeat both for `preview` if preview deployments should work
+vercel deploy --prod
+```
+
+Only those **two** variables belong in Vercel. `ANTHROPIC_API_KEY` is M8 and
+`SUPABASE_SERVICE_ROLE_KEY` is never deployed. With neither set the app answers
+every page with the readable 503 setup page rather than a 500, so a missing
+variable is visible rather than mysterious.
+
+**6. Walk the acceptance on the deployed app**, because that is the part of M1
+this repository cannot sign off:
+
+1. Sign in; create two channels; capture eight ideas (`c`, and `/capture` from a
+   phone); drag one; refresh; confirm it persisted.
+2. Drag an idea past Packaging and confirm the refusal names the missing field.
+3. **Upload a concept sketch from the deployed app** and confirm it appears on
+   the detail page and on the card — this is the one behaviour with a real
+   dependency the harness only approximates (`createSignedUrls` token shape,
+   `upsert` semantics, `Cache-Control`; `scripts/dev-stack/README.md` items
+   21–27). Re-upload the same sketch and confirm the storage browser shows
+   **one** object at `{user_id}/{video_id}/concept.{ext}`, then upload a
+   different format and confirm the old object is gone.
+4. `curl` the REST endpoint with the anon key and confirm zero rows, and repeat
+   the two revoked writes above against the hosted project.
+
+**Known gap to close on the hosted project**, flagged rather than papered over:
+`0001_init.sql` does not set `file_size_limit` or `allowed_mime_types` on the
+`thumbnails` bucket row, so the server-side rule is *ownership only* — the 5 MB
+and image-type checks are in the browser and are courtesy, not security. A
+determined caller can put a large non-image at their own `concept.png`. Closing
+it is a migration (or the bucket settings in the dashboard) and belongs to M7 or
+a follow-up; it is not something M1 built and hid.

@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useShortcuts } from "@/lib/shortcuts";
+
 /**
  * The dialog the `c` shortcut opens.
  *
@@ -28,7 +30,12 @@ import { createPortal } from "react-dom";
  * - focus **returns** to whatever had it when the dialog closes, so `c`,
  *   Escape leaves the board exactly as it was;
  * - Escape closes, from anywhere inside — including from a text field, where
- *   the global shortcut hook deliberately does not listen;
+ *   the global shortcut registry deliberately does not listen;
+ * - **the page underneath goes quiet**: the dialog registers an `exclusive`
+ *   scope with `useShortcuts`, so `j`, `[`, `]`, `Enter` and `1..9` are not
+ *   board or header keys while it is open. Without it, a key pressed while
+ *   focus sat on the dialog's close button would move a card behind the
+ *   dialog;
  * - a click on the backdrop closes it, and a click inside never does.
  *
  * The rest of the page is not `inert`: that is one attribute, but it needs the
@@ -54,6 +61,14 @@ export function CaptureModal({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
+
+  /*
+    An empty exclusive registration: it binds no key of its own, and while it
+    is mounted no non-exclusive binding fires. Escape and Tab are handled below
+    as React events, because both have to work from inside a text field — which
+    is exactly where the registry, correctly, does not listen.
+  */
+  useShortcuts(EMPTY, { exclusive: true });
   // What to give focus back to, fixed at mount.
   const opener = useRef<Element | null>(null);
 
@@ -144,6 +159,9 @@ export function CaptureModal({
     document.body,
   );
 }
+
+/** No keys of its own: the registration exists to silence the page behind it. */
+const EMPTY: never[] = [];
 
 /**
  * The dialog's tab stops, in document order.

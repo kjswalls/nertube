@@ -1,62 +1,106 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 /**
- * The one keyboard-shortcut hook (PLAN.md "Shortcuts": *one `useShortcuts` hook
+ * The one keyboard mechanism (PLAN.md "Shortcuts": *one `useShortcuts` hook
  * that ignores events from inputs*).
  *
- * **Provenance.** M1's board needed `j`/`k`/`[`/`]`/`Enter` before this file
- * existed, so this is the *minimal* interface the board needs, written to the
- * shape PLAN.md describes rather than to the board's convenience. It is
- * deliberately small: a flat list of `{ key, description, run }`, one document
- * listener, and the "not while typing" rule. Whoever builds the full set (`c`,
- * `g n/b/i/k`, `1..9`, `p`, `x`, `?`) should be able to grow this file —
- * chords, a cheat sheet built from `description`, a provider — without the
- * board changing.
+ * ## Why this is a registry and not a hook that adds a listener
  *
- * ## What it guarantees
+ * M1 landed from three directions at once, and two of them ended up calling
+ * this file: the header (`c`, `1..9`) and the board (`j`/`k`, `[`/`]`,
+ * `Enter`). A hook that attached its own `keydown` listener per call site gave
+ * one listener per mounted component, no way to see the whole set, and no way
+ * for a modal to take the keyboard away from the page underneath it — three
+ * separate bugs waiting for the fourth call site.
+ *
+ * So there is exactly one `keydown` listener in the application. It is attached
+ * to `document` when the first binding registers and removed when the last one
+ * leaves. Call sites register a list of bindings; the registry dispatches.
+ *
+ * ## The rules a binding can rely on
  *
  * - Matching is on `KeyboardEvent.key`, case-sensitively, so `j` and `J` are
  *   different bindings and `[` works on any layout that produces `[`.
- * - Nothing fires while the user is typing: a target that is an `input`,
- *   `textarea`, `select`, `contenteditable`, or anything with
- *   `role="textbox"`/`role="searchbox"`, is left alone. `c` must not eat the
- *   `c` in a title.
+ * - **Nothing fires while the user is typing.** An event whose target is an
+ *   `input`, `textarea`, `select`, `contenteditable` or an element with
+ *   `role="textbox"`/`"searchbox"`/`"combobox"` is left alone. `c` must not eat
+ *   the `c` in a title, and `1` must not switch channel while a title is being
+ *   written.
  * - Nothing fires with Ctrl/Meta/Alt held — those belong to the browser and the
- *   OS. Shift is allowed, because `?` needs it.
- * - `Enter` and `Space` are left alone when focus is on a control that already
- *   does something with them (a button, a link, a checkbox…), so a shortcut
- *   never double-fires with a native activation.
+ *   OS. Shift is allowed, because `?` needs it (M9).
+ * - `Enter`/`Space` stand aside when focus is on a control the browser already
+ *   activates with them (a button, a link, a checkbox), so a shortcut never
+ *   double-fires with a native activation.
  * - An event another handler has already called `preventDefault()` on is
- *   ignored.
- * - IME composition (`event.isComposing`, `keyCode === 229`) is ignored.
+ *   ignored, and IME composition (`isComposing`, `keyCode === 229`) is ignored.
+ * - **A binding registered while an `exclusive` scope is open is the only kind
+ *   that fires.** That is how the capture modal makes the board's keys inert
+ *   while it is open, without the board knowing the modal exists.
+ * - Two bindings on one key: the most recently registered wins, and only one
+ *   `run` is called per keydown.
+ * - `run` receives the raw event and does its own `preventDefault()` — the
+ *   board does, so `[` cannot reach a browser history binding and `j` does not
+ *   start find-as-you-type.
  *
- * `run` is called with the raw `KeyboardEvent`; it is the binding's own job to
- * `preventDefault()` if it wants to (the board does, so `[`/`]` do not reach a
- * browser back/forward binding and `j` does not start a find-as-you-type).
+ * Registering nothing, on a route where a shortcut does not exist, is a no-op:
+ * this file never assumes a board, a channel or a modal is on the page.
  */
+export interface ShortcutHint {
+  /** How the key is written in the hint bar, e.g. `"j / k"` or `"1–9"`. */
+  readonly keys: string;
+  /** Two or three words, lower case: "select a card". */
+  readonly text: string;
+}
+
 export interface Shortcut {
   /** The `KeyboardEvent.key` to match, e.g. `"j"`, `"["`, `"Enter"`, `"?"`. */
   readonly key: string;
-  /** Human wording for the `?` cheat sheet (M9). Never rendered by this hook. */
+  /** Human wording, for assistive technology and the M9 `?` sheet. */
   readonly description: string;
+  /**
+   * What the hint bar shows for this binding, or nothing when a sibling
+   * binding speaks for it (`k` says nothing; `j` says "j / k — select a card").
+   */
+  readonly hint?: ShortcutHint;
   /** What the key does. Called at most once per keydown. */
   readonly run: (event: KeyboardEvent) => void;
 }
 
 export interface UseShortcutsOptions {
   /**
-   * Bind the listener at all. Defaults to `true`. A page that opens a modal
-   * passes `false` while it is open rather than unmounting its bindings.
+   * Bind at all. Defaults to `true`. A component that has nothing to bind to
+   * yet passes `false` rather than calling the hook conditionally.
    */
   readonly enabled?: boolean;
   /**
-   * Where to listen. Defaults to the document. Passing an element scopes the
-   * shortcuts to that subtree (the event still has to bubble to it).
+   * While this registration is mounted, only `exclusive` registrations receive
+   * keys. The capture modal uses it: with the dialog open, `j` is not a board
+   * key any more — it is either text or nothing.
    */
-  readonly target?: Document | HTMLElement | null;
+  readonly exclusive?: boolean;
 }
+
+interface Registration {
+  shortcuts: readonly Shortcut[];
+  enabled: boolean;
+  exclusive: boolean;
+  /** Registration order; higher is newer and wins a key conflict. */
+  order: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The registry                                                                */
+/* -------------------------------------------------------------------------- */
+
+const registrations = new Set<Registration>();
+let nextOrder = 0;
+
+/** Subscribers to the *hint* list (the visible legend), not to the keys. */
+const hintSubscribers = new Set<() => void>();
+/** Cached so `useSyncExternalStore` sees a stable value between changes. */
+let hintSnapshot: readonly Shortcut[] = [];
 
 /** True when the event started in something the user is typing into. */
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -67,11 +111,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true;
 
   const role = target.getAttribute("role");
-  if (role === "textbox" || role === "searchbox" || role === "combobox") {
-    return true;
-  }
-
-  return false;
+  return role === "textbox" || role === "searchbox" || role === "combobox";
 }
 
 /**
@@ -91,51 +131,146 @@ function isNativelyActivated(key: string, target: EventTarget | null): boolean {
   return role === "button" || role === "link" || role === "checkbox";
 }
 
+/** The registrations that may fire, newest first. */
+function activeRegistrations(): Registration[] {
+  const enabled = [...registrations].filter((entry) => entry.enabled);
+  const exclusive = enabled.filter((entry) => entry.exclusive);
+  const live = exclusive.length > 0 ? exclusive : enabled;
+  return live.sort((a, b) => b.order - a.order);
+}
+
+function onKeyDown(event: Event): void {
+  const keyEvent = event as KeyboardEvent;
+
+  if (keyEvent.defaultPrevented) return;
+  if (keyEvent.isComposing || keyEvent.keyCode === 229) return;
+  if (keyEvent.ctrlKey || keyEvent.metaKey || keyEvent.altKey) return;
+  if (isTypingTarget(keyEvent.target)) return;
+  if (isNativelyActivated(keyEvent.key, keyEvent.target)) return;
+
+  for (const entry of activeRegistrations()) {
+    for (const shortcut of entry.shortcuts) {
+      if (shortcut.key === keyEvent.key) {
+        shortcut.run(keyEvent);
+        return;
+      }
+    }
+  }
+}
+
+let listening = false;
+
+function syncListener(): void {
+  if (typeof document === "undefined") return;
+  const wanted = [...registrations].some((entry) => entry.enabled);
+  if (wanted && !listening) {
+    document.addEventListener("keydown", onKeyDown);
+    listening = true;
+  } else if (!wanted && listening) {
+    document.removeEventListener("keydown", onKeyDown);
+    listening = false;
+  }
+}
+
+/** Recompute the visible legend and tell whoever renders it. */
+function publish(): void {
+  syncListener();
+
+  const seen = new Set<string>();
+  const hints: Shortcut[] = [];
+  // Oldest first, so the legend reads c · 1–9 · j/k · [ ] · Enter: the header
+  // registers before the page underneath it does.
+  for (const entry of [...activeRegistrations()].reverse()) {
+    for (const shortcut of entry.shortcuts) {
+      if (!shortcut.hint) continue;
+      if (seen.has(shortcut.hint.keys)) continue;
+      seen.add(shortcut.hint.keys);
+      hints.push(shortcut);
+    }
+  }
+
+  const changed =
+    hints.length !== hintSnapshot.length ||
+    hints.some((shortcut, index) => shortcut !== hintSnapshot[index]);
+  if (!changed) return;
+
+  hintSnapshot = hints;
+  for (const notify of hintSubscribers) notify();
+}
+
+/* -------------------------------------------------------------------------- */
+/* The hooks                                                                   */
+/* -------------------------------------------------------------------------- */
+
 /**
  * Bind `shortcuts` for as long as the calling component is mounted.
  *
- * The list may be rebuilt on every render — it is read through a ref, so the
- * listener is attached once and the bindings are always the current ones. That
- * matters for the board, whose `run` closures capture the selected card.
+ * The list may be rebuilt on every render — it is read through the
+ * registration, which an effect keeps current — so the listener is attached
+ * once and the bindings are always the newest ones. That matters for the board,
+ * whose `run` closures capture the selected card.
  */
 export function useShortcuts(
   shortcuts: readonly Shortcut[],
   options: UseShortcutsOptions = {},
 ): void {
-  const { enabled = true, target } = options;
+  const { enabled = true, exclusive = false } = options;
 
-  const latest = useRef(shortcuts);
-  // Updated in an effect, not during render: a render that React throws away
-  // must not leave its bindings behind in a ref. (It also keeps
-  // `react-hooks/refs` happy, which flags a write during render.)
+  const registration = useRef<Registration | null>(null);
+  if (registration.current === null) {
+    registration.current = { shortcuts, enabled, exclusive, order: 0 };
+  }
+
+  // The bindings and the flags are written in an effect rather than during
+  // render: a render React throws away must not leave its bindings behind.
   useEffect(() => {
-    latest.current = shortcuts;
+    const entry = registration.current;
+    if (!entry) return;
+    entry.shortcuts = shortcuts;
+    entry.enabled = enabled;
+    entry.exclusive = exclusive;
+    publish();
   });
 
   useEffect(() => {
-    if (!enabled) return;
-    if (typeof document === "undefined") return;
+    const entry = registration.current;
+    if (!entry) return;
+    nextOrder += 1;
+    entry.order = nextOrder;
+    registrations.add(entry);
+    publish();
+    return () => {
+      registrations.delete(entry);
+      publish();
+    };
+  }, []);
+}
 
-    const node: Document | HTMLElement = target ?? document;
+function subscribeToHints(notify: () => void): () => void {
+  hintSubscribers.add(notify);
+  return () => {
+    hintSubscribers.delete(notify);
+  };
+}
 
-    function onKeyDown(event: Event): void {
-      const keyEvent = event as KeyboardEvent;
+function readHints(): readonly Shortcut[] {
+  return hintSnapshot;
+}
 
-      if (keyEvent.defaultPrevented) return;
-      if (keyEvent.isComposing || keyEvent.keyCode === 229) return;
-      if (keyEvent.ctrlKey || keyEvent.metaKey || keyEvent.altKey) return;
-      if (isTypingTarget(keyEvent.target)) return;
-      if (isNativelyActivated(keyEvent.key, keyEvent.target)) return;
+/** Nothing is bound on the server, so the legend starts empty and fills in. */
+const NO_HINTS: readonly Shortcut[] = [];
+function readServerHints(): readonly Shortcut[] {
+  return NO_HINTS;
+}
 
-      for (const shortcut of latest.current) {
-        if (shortcut.key === keyEvent.key) {
-          shortcut.run(keyEvent);
-          return;
-        }
-      }
-    }
-
-    node.addEventListener("keydown", onKeyDown);
-    return () => node.removeEventListener("keydown", onKeyDown);
-  }, [enabled, target]);
+/**
+ * The bindings that are live *right now*, for the visible legend.
+ *
+ * Derived from the registry rather than written out by hand anywhere, so the
+ * hint bar cannot advertise a key that no longer exists or miss one that was
+ * added — including the case that matters, where a key means something on one
+ * route and nothing on another.
+ */
+export function useShortcutHints(): readonly Shortcut[] {
+  return useSyncExternalStore(subscribeToHints, readHints, readServerHints);
 }

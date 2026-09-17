@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useToast } from "@/components/toast";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { CaptureForm, type CaptureChannel } from "./capture-form";
@@ -9,14 +10,15 @@ import { CaptureModal } from "./capture-modal";
 
 /**
  * What makes `c` work anywhere: the global binding, the modal it opens, and the
- * line that says where the idea went.
+ * toast that says where the idea went.
  *
  * It is mounted by the app header, so every signed-in page has it without each
  * page remembering to — and the header is already the component that knows the
  * channel list and which channel the route is about, which is exactly what
  * capture needs (PLAN.md: "Channel = route channel if any, else last-used").
  *
- * Nothing is rendered until `c` is pressed, apart from the confirmation line.
+ * Nothing is rendered until `c` is pressed, apart from the button that says the
+ * key exists. The confirmation is a toast, so it survives the modal closing.
  */
 export function CaptureHost({
   channels,
@@ -36,10 +38,7 @@ export function CaptureHost({
    * focus into the dialog, so the modal would "restore" focus to its own input.
    */
   const returnFocus = useRef<HTMLElement | null>(null);
-  const [saved, setSaved] = useState<{ title: string; channelName: string } | null>(
-    null,
-  );
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toast = useToast();
 
   const routeChannel = currentSlug
     ? channels.find((channel) => channel.slug === currentSlug)
@@ -50,6 +49,7 @@ export function CaptureHost({
       {
         key: "c",
         description: "Capture an idea",
+        hint: { keys: "c", text: "capture" },
         run: (event) => {
           event.preventDefault();
           openCapture();
@@ -60,12 +60,6 @@ export function CaptureHost({
     // events from inputs anyway; this makes it true of the whole dialog.
     { enabled: !open && channels.length > 0 },
   );
-
-  useEffect(() => {
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, []);
 
   // Says out loud that the shortcut is live — it is bound by an effect, so
   // between the server's HTML and hydration the `c` hint would be a promise the
@@ -79,7 +73,6 @@ export function CaptureHost({
   function openCapture() {
     returnFocus.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setSaved(null);
     setOpen(true);
   }
 
@@ -102,16 +95,6 @@ export function CaptureHost({
         Capture <kbd className="font-sans text-xs text-muted">c</kbd>
       </button>
 
-      {/* The modal closes on save, so this is where the confirmation lives —
-          and it is a live region, so it is spoken as well as seen. */}
-      <p
-        role="status"
-        aria-live="polite"
-        className="w-full text-sm text-muted empty:hidden"
-      >
-        {saved ? `Captured “${saved.title}” in ${saved.channelName}.` : ""}
-      </p>
-
       {open ? (
         <CaptureModal
           title="Capture an idea"
@@ -125,10 +108,13 @@ export function CaptureHost({
             variant="modal"
             onSaved={(result) => {
               setOpen(false);
-              setSaved({ title: result.title, channelName: result.channelName });
-              if (timer.current) clearTimeout(timer.current);
-              // Long enough to read, short enough not to become furniture.
-              timer.current = setTimeout(() => setSaved(null), 6000);
+              // The modal closes on save, so the confirmation has to outlive it
+              // — and it goes through the application's one toast mechanism
+              // rather than a second line of its own. It says *where* the idea
+              // went, because `1..9` can have retargeted it.
+              toast.push({
+                message: `Captured “${result.title}” in ${result.channelName}.`,
+              });
             }}
           />
         </CaptureModal>

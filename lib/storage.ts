@@ -153,6 +153,81 @@ export function parseConceptSketchPath(
 export const SIGNED_URL_TTL_SECONDS = 3600;
 
 /**
+ * Stamp a signed URL with the version of the object behind it.
+ *
+ * The stable path is what keeps the bucket clean, and it is also what makes
+ * this necessary. Replace a sketch and the new signed URL can come back
+ * *character for character identical* to the old one — same path, and a token
+ * whose only moving part is an expiry measured in whole seconds. An identical
+ * `src` is not an update: React does not touch the attribute, so the browser
+ * never asks for anything, and even if it did, objects are served with
+ * `Cache-Control: max-age=3600` and it would be handed back what it already
+ * has. The page keeps showing the old picture.
+ *
+ * The window is one second wide, which is why this is easy to miss by hand and
+ * why the e2e spec caught it on the first run: replacing an image straight
+ * after uploading it is exactly what someone comparing two sketches does.
+ *
+ * `cacheNonce` is storage-js's own query parameter for this. The version passed
+ * in is `videos.updated_at`, which `recordConceptSketch` bumps to the
+ * millisecond on every successful upload. It also moves when anything else on
+ * the row is edited, which is the right way round to be wrong: the worst that
+ * costs is re-fetching bytes the browser already had, whereas a version that
+ * missed an upload would show the wrong picture.
+ */
+export function cacheBusted(
+  url: string | null | undefined,
+  version: string | null | undefined,
+): string | null {
+  if (!url) return null;
+  if (!version) return url;
+  return `${url}&cacheNonce=${encodeURIComponent(version)}`;
+}
+
+/**
+ * Put the bytes at `path`, replacing whatever is there.
+ *
+ * Called from the browser and only from the browser — see this file's header.
+ * It lives here rather than in the component so that `supabase.storage` is
+ * named in exactly one file: the bucket, the upsert and the cache header are
+ * one decision, not three that drift, and the cost of ever moving off Supabase
+ * Storage stays the width of this module.
+ */
+export async function uploadSketch(
+  supabase: SupabaseClient<Database>,
+  path: string,
+  file: File,
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.storage
+    .from(THUMBNAILS_BUCKET)
+    .upload(path, file, {
+      // A stable path plus upsert is what makes a re-upload a replacement
+      // rather than an orphan — see `conceptSketchPath`.
+      upsert: true,
+      contentType: file.type,
+      cacheControl: String(SIGNED_URL_TTL_SECONDS),
+    });
+  return { error: error ? error.message : null };
+}
+
+/**
+ * Delete objects, best effort.
+ *
+ * Deliberately returns nothing. The only caller deletes a *superseded* object
+ * — one the row no longer points at — and there is nothing useful a person
+ * could do about a failure to delete it: the picture they uploaded is fine,
+ * and the leftover is invisible. Reporting it would turn a successful upload
+ * into an error message about housekeeping.
+ */
+export async function removeSketches(
+  supabase: SupabaseClient<Database>,
+  paths: readonly string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+  await supabase.storage.from(THUMBNAILS_BUCKET).remove([...paths]);
+}
+
+/**
  * Sign a batch of object paths in one request.
  *
  * **Batched, never one at a time.** A board can hold a hundred cards with a

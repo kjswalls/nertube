@@ -478,7 +478,7 @@ test('dragging an idea into Packaging moves it, and it survives a reload', async
   await expect(cardIn(page, PACKAGING, 'Idea 01')).toBeVisible();
   await expect(cardIn(page, IDEA, 'Idea 01')).toHaveCount(0);
   await expect(cardsIn(page, PACKAGING)).toHaveCount(2);
-  await expect(page.getByTestId('board-toast')).toHaveCount(0);
+  await expect(page.getByTestId('toast')).toHaveCount(0);
 
   // No full reload was needed to see that; and a real one agrees, so the RPC
   // wrote it rather than the board pretending.
@@ -505,7 +505,7 @@ test('a gated drag is refused, the card snaps back, and the toast names the miss
   await dragCardTo(page, blocked, SCRIPTING);
 
   // The toast names what is missing — not "could not move".
-  const toast = page.getByTestId('board-toast');
+  const toast = page.getByTestId('toast');
   await expect(toast).toBeVisible();
   await expect(toast).toContainText(/thumbnail concept/i);
   await expect(toast).toContainText('Gate blocked');
@@ -541,7 +541,7 @@ test('the same gate refuses the keyboard move, on a video with no packaging', as
 
   await page.keyboard.press(']');
 
-  await expect(page.getByTestId('board-toast')).toContainText(/thumbnail concept/i);
+  await expect(page.getByTestId('toast')).toContainText(/thumbnail concept/i);
   await expect(cardIn(page, PACKAGING, 'Gate blocked')).toBeVisible();
   await expect(cardIn(page, SCRIPTING, 'Gate blocked')).toHaveCount(0);
 });
@@ -568,7 +568,7 @@ test('] moves the selected card forward and [ moves it back', async ({ page }) =
   await expect(page.getByTestId('board-announcer')).toContainText(
     `Moved “Keyboard mover” to ${SCRIPTING}.`,
   );
-  await expect(page.getByTestId('board-toast')).toHaveCount(0);
+  await expect(page.getByTestId('toast')).toHaveCount(0);
 
   // And back.
   await page.keyboard.press('[');

@@ -8,7 +8,7 @@ import {
   type BoardStage,
 } from "@/components/board/types";
 import { isStageKind, type StageKind } from "@/lib/defaults";
-import { signedUrlsFor } from "@/lib/storage";
+import { cacheBusted, signedUrlsFor } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
 
 export async function generateMetadata({
@@ -155,8 +155,13 @@ export default async function BoardPage({
       targetPublishDate: video.target_publish_date,
       targetPublishLabel: formatTargetDate(video.target_publish_date),
       thumbnailConceptPath: video.thumbnail_concept_path,
+      // `updated_at` versions the URL: the path is stable by design, so
+      // without it a replaced sketch can be served from the browser cache.
       thumbnailConceptUrl: video.thumbnail_concept_path
-        ? (sketchUrls.get(video.thumbnail_concept_path) ?? null)
+        ? cacheBusted(
+            sketchUrls.get(video.thumbnail_concept_path),
+            video.updated_at,
+          )
         : null,
       packagingSkipped: video.packaging_skipped_at !== null,
       waitingOn: video.waiting_on,
@@ -196,12 +201,12 @@ export default async function BoardPage({
           <h1 className="text-lg font-semibold tracking-tight">
             {channel.name}
           </h1>
+          {/* The keys themselves are listed once, in the header, from the
+              live shortcut registry — repeating them here is how the two get
+              to disagree. */}
           <p className="text-xs text-muted">
-            Drag a card between columns, or select one with{" "}
-            <kbd className="font-sans">j</kbd>/<kbd className="font-sans">k</kbd>{" "}
-            and move it with <kbd className="font-sans">[</kbd>/
-            <kbd className="font-sans">]</kbd>. Every card also carries its own
-            move buttons.
+            Drag a card between columns, or use the move buttons on a card. The
+            keys in the header do the same thing.
           </p>
         </div>
 

@@ -10,7 +10,7 @@ import {
   describeSketchRejection,
   MAX_SKETCH_LABEL,
   sketchExtensionFor,
-  THUMBNAILS_BUCKET,
+  uploadSketch,
 } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/client";
 
@@ -45,6 +45,7 @@ export function ConceptSketch({
   userId,
   title,
   url,
+  hasSketch,
 }: {
   videoId: string;
   /** The signed-in user's id: the first segment of every path they may write. */
@@ -53,6 +54,15 @@ export function ConceptSketch({
   title: string;
   /** A signed URL for the current sketch, or null when there is none. */
   url: string | null;
+  /**
+   * Whether the row names a sketch at all.
+   *
+   * Separate from `url` because they mean different things: no path is "you
+   * have not uploaded one", while a path with no URL is "there is one, and the
+   * app could not get at it" — a signing failure, a deleted object. Saying "no
+   * sketch yet" to the second would be a lie the person cannot act on.
+   */
+  hasSketch: boolean;
 }) {
   const inputId = useId();
   const router = useRouter();
@@ -86,21 +96,14 @@ export function ConceptSketch({
     const path = conceptSketchPath(userId, videoId, extension);
 
     setBusy("uploading");
-    const supabase = createClient();
-    const { error: uploadError } = await supabase.storage
-      .from(THUMBNAILS_BUCKET)
-      .upload(path, file, {
-        // Stable path + upsert: a re-upload replaces the object instead of
-        // orphaning it. A *format* change is a different name, which is what
-        // `recordConceptSketch` cleans up.
-        upsert: true,
-        contentType: file.type,
-        cacheControl: "3600",
-      });
+    // The browser's own session does the writing. `uploadSketch` is the one
+    // place that names the bucket and the upsert; a *format* change lands on a
+    // different object name, which is what `recordConceptSketch` cleans up.
+    const { error: uploadError } = await uploadSketch(createClient(), path, file);
 
     if (uploadError) {
       setBusy(null);
-      setError(`The upload did not finish: ${uploadError.message}`);
+      setError(`The upload did not finish: ${uploadError}`);
       input.value = "";
       return;
     }
@@ -164,16 +167,16 @@ export function ConceptSketch({
           />
         ) : (
           <p className="flex h-full w-full items-center justify-center px-3 text-center text-xs text-muted">
-            {url === null
-              ? "No sketch yet"
-              : "The sketch could not be loaded — try uploading it again."}
+            {hasSketch
+              ? "The sketch could not be loaded — try uploading it again."
+              : "No sketch yet"}
           </p>
         )}
       </div>
 
       <div className="flex flex-col gap-1">
         <label htmlFor={inputId} className="text-xs font-medium text-muted">
-          {url === null ? "Upload a sketch" : "Replace the sketch"}
+          {hasSketch ? "Replace the sketch" : "Upload a sketch"}
         </label>
         <input
           id={inputId}
