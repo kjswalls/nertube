@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/supabase/require-user";
 import { FlowFields, type FlowStage } from "@/components/video-detail/flow-fields";
 import { formatAge } from "@/components/video-detail/age";
 import { PackagingBlock } from "@/components/packaging/packaging-block";
+import { VideoVersionProvider } from "@/components/video-version";
 
 import { ConceptSketch } from "./concept-sketch";
 
@@ -17,15 +18,23 @@ export const metadata = { title: "Video · NerTube" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * `/videos/[id]` — the M1 detail stub.
+ * `/videos/[id]` — the video detail page.
  *
- * PLAN.md gives M1 exactly two things here: *title + concept-sketch upload
- * (browser → Storage, `recordUpload`) + signed-URL thumb on the card*. The
- * packaging block that this page is eventually mostly made of — title
- * candidates, the hook list, the live gate indicator, the skip flow — is M2 and
- * is deliberately absent rather than half-present. The note at the bottom says
- * so on the page, because a page that is quietly missing its main feature reads
- * as broken.
+ * ## The order of it
+ *
+ * The packaging block comes first and reads as what it is: the gate. BRIEF.md
+ * principle 1 is that the title, the thumbnail concept and the hook are decided
+ * *before* the script and the shoot, and a page that opened on dates and notes
+ * would quietly say the opposite. The flow fields — stage, target date,
+ * waiting on, URL, notes, archive — follow it.
+ *
+ * The concept **sketch** M1 built is not a section of its own any more. It is
+ * rendered inside the packaging block, beside the *written* concept, because
+ * the two are a pair: a description of a thumbnail and a reference picture of
+ * it. Apart, they read as two fields either of which might satisfy the gate,
+ * which is exactly the misreading M1's review caught. Together, under one
+ * heading, the written one is plainly the field and the picture is plainly the
+ * reference.
  *
  * ## Why another user's video is a 404
  *
@@ -69,36 +78,39 @@ export default async function VideoDetailPage({
   // together.
   const [{ data: channel }, { data: stage }, { data: stageRows }, sketchUrls] =
     await Promise.all([
-    supabase
-      .from("channels")
-      .select("name, slug")
-      .eq("id", video.channel_id)
-      .maybeSingle(),
-    supabase
-      .from("stages")
-      .select("name, kind")
-      .eq("id", video.stage_id)
-      .maybeSingle(),
-    // The stage select's options: this channel's enabled stages, in the board's
-    // column order. `position` is display order and this is a display list —
-    // behaviour (the gate, "the next stage") compares CORE_KIND_ORDER instead,
-    // and that comparison happens inside `move_video`, not here.
-    supabase
-      .from("stages")
-      .select("id, name, position")
-      .eq("channel_id", video.channel_id)
-      .eq("is_enabled", true)
-      .order("position", { ascending: true }),
-    // One path, but through the batching helper the board uses — so there is
-    // one signing code path in the app and not two that can drift.
-    signedUrlsFor(supabase, [video.thumbnail_concept_path]),
-  ]);
+      supabase
+        .from("channels")
+        .select("name, slug")
+        .eq("id", video.channel_id)
+        .maybeSingle(),
+      supabase
+        .from("stages")
+        .select("name, kind")
+        .eq("id", video.stage_id)
+        .maybeSingle(),
+      // The stage select's options: this channel's enabled stages, in the board's
+      // column order. `position` is display order and this is a display list —
+      // behaviour (the gate, "the next stage") compares CORE_KIND_ORDER instead,
+      // and that comparison happens inside `move_video`, not here.
+      supabase
+        .from("stages")
+        .select("id, name, position")
+        .eq("channel_id", video.channel_id)
+        .eq("is_enabled", true)
+        .order("position", { ascending: true }),
+      // One path, but through the batching helper the board uses — so there is
+      // one signing code path in the app and not two that can drift.
+      signedUrlsFor(supabase, [video.thumbnail_concept_path]),
+    ]);
 
   // `updated_at` versions the URL. The object path is stable on purpose, so
   // without a version a replaced sketch would keep being served out of the
   // browser cache — see `cacheBusted`.
   const sketchUrl = video.thumbnail_concept_path
-    ? cacheBusted(sketchUrls.get(video.thumbnail_concept_path), video.updated_at)
+    ? cacheBusted(
+        sketchUrls.get(video.thumbnail_concept_path),
+        video.updated_at,
+      )
     : null;
 
   const displayTitle = video.title.trim() === "" ? "Untitled" : video.title;
@@ -150,56 +162,58 @@ export default async function VideoDetailPage({
               two visible copies of one title would just disagree while it is
               being typed. */}
           <h1 className="sr-only">{displayTitle}</h1>
-
         </div>
 
-        {/* M2's packaging half. The working title lives inside the block rather
-            than above it: choosing a title candidate writes the candidate list
-            and `videos.title` in one save, and two inputs bound to one column
-            on one page is a race, not a convenience. This replaces M1's
-            `TitleField` stub, which did the narrow version of the same job. */}
-        <PackagingBlock
-          videoId={video.id}
-          initial={{
-            title: video.title,
-            thumbnailConcept: video.thumbnail_concept,
-            titleCandidates: video.title_candidates,
-            hooks: video.hooks,
-            packagingSkippedAt: video.packaging_skipped_at,
-            packagingSkipReason: video.packaging_skip_reason,
-          }}
-        />
+        {/* The gate. The working title lives inside the block rather than
+            above it: choosing a title candidate writes the candidate list and
+            `videos.title` in one save, and two inputs bound to one column on
+            one page is a race, not a convenience. The sketch goes in as a
+            slot, next to the written concept it illustrates. */}
+        <VideoVersionProvider updatedAt={video.updated_at}>
+          <PackagingBlock
+            videoId={video.id}
+            initial={{
+              title: video.title,
+              thumbnailConcept: video.thumbnail_concept,
+              titleCandidates: video.title_candidates,
+              hooks: video.hooks,
+              packagingSkippedAt: video.packaging_skipped_at,
+              packagingSkipReason: video.packaging_skip_reason,
+            }}
+            sketch={
+              <ConceptSketch
+                videoId={video.id}
+                userId={user.id}
+                title={video.title}
+                url={sketchUrl}
+                hasSketch={video.thumbnail_concept_path !== null}
+              />
+            }
+          />
 
-        <ConceptSketch
-          videoId={video.id}
-          userId={user.id}
-          title={video.title}
-          url={sketchUrl}
-          hasSketch={video.thumbnail_concept_path !== null}
-        />
-
-        {/* M2's flow half. The packaging block is a separate section of this
-            page; the two share the route and nothing else. */}
-        <FlowFields
-          videoId={video.id}
-          channelSlug={channel?.slug ?? ""}
-          stages={flowStages}
-          currentStageId={video.stage_id}
-          currentStageName={stage?.name ?? "No stage"}
-          targetPublishDate={video.target_publish_date ?? ""}
-          youtubeUrl={video.youtube_url ?? ""}
-          notes={video.notes ?? ""}
-          waitingOn={video.waiting_on ?? ""}
-          waitingSince={video.waiting_since}
-          waitingAgeLabel={formatAge(video.waiting_since, now)}
-          archivedAt={video.archived_at}
-          publishedAt={video.published_at}
-          publishedLabel={formatPublished(video.published_at)}
-        />
+          {/* Everything about the video's flow rather than its packaging. */}
+          <FlowFields
+            videoId={video.id}
+            channelSlug={channel?.slug ?? ""}
+            stages={flowStages}
+            currentStageId={video.stage_id}
+            currentStageName={stage?.name ?? "No stage"}
+            targetPublishDate={video.target_publish_date ?? ""}
+            youtubeUrl={video.youtube_url ?? ""}
+            notes={video.notes ?? ""}
+            waitingOn={video.waiting_on ?? ""}
+            waitingSince={video.waiting_since}
+            waitingAgeLabel={formatAge(video.waiting_since, now)}
+            archivedAt={video.archived_at}
+            publishedAt={video.published_at}
+            publishedLabel={formatPublished(video.published_at)}
+          />
+        </VideoVersionProvider>
 
         <p className="border-t border-border pt-4 text-xs text-muted">
           The stage checklist and the script are M3; thumbnail roles and the
-          post-publish block are M4.
+          post-publish block are M4; the brainstorm panel joins the packaging
+          block in M8.
         </p>
       </main>
     </div>

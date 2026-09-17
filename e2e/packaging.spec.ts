@@ -280,10 +280,21 @@ test('filling the three gate fields turns the indicator to ready, and move_video
   expect(await tryMove(videoId, 'packaging')).toBeNull();
   expect(await tryMove(videoId, 'scripting')).toBeNull();
 
+  /*
+    Those two moves are *out-of-band writes*: `move_video` over SQL, not through
+    this page, and it stamps `updated_at` like every other write. Since the M2
+    review, a save from an editor that was rendered against an older version of
+    the row is refused rather than allowed to overwrite it (finding 7), and this
+    SQL is exactly the "something else changed it" the precondition is about. So
+    the page is reloaded, which is what the refusal tells a person to do.
+  */
+  await page.reload();
+  const conceptAfterMove = page.getByTestId('thumbnail-concept');
+
   // Cleared afterwards: PLAN.md's "clear the title afterwards and see
   // 'Complete packaging'". The indicator goes back, and so does the function.
-  await concept.fill('');
-  await concept.blur();
+  await conceptAfterMove.fill('');
+  await conceptAfterMove.blur();
   await expectSaved(page);
   await expect(gate(page)).toHaveAttribute('data-gate', 'thumbnail_concept');
 

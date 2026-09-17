@@ -26,10 +26,11 @@ import {
  * - **`error`** renders `role="alert"`: the user just tried to do something and
  *   it did not happen, so it interrupts. A refused drop is the case that
  *   matters — PLAN.md: *a refused drop snaps back with a toast naming the
- *   missing field, a "Fix packaging" link and a "Skip gate…" link*. Those two
- *   links arrive in M2 with the packaging block and the skip flow they point
- *   at; in M1 the board sends one link to the detail page, because a link to a
- *   fragment nothing renders is worse than no link (see board.tsx).
+ *   missing field, a "Fix packaging" link and a "Skip gate…" link*. M1 sent one
+ *   link to the detail page because a link to a fragment nothing renders is
+ *   worse than no link; M2 built the fields, so the board now sends both, each
+ *   carrying the anchor of a control the detail page focuses on arrival (see
+ *   board.tsx and `components/packaging/hash-focus.ts`).
  * - **`info`** renders `role="status"`: a capture landed. Announced politely,
  *   after whatever the screen reader is already saying.
  *

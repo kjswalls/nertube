@@ -37,7 +37,18 @@ const RecordInput = z.object({
 export type RecordConceptSketchInput = z.input<typeof RecordInput>;
 
 export type RecordConceptSketchResult =
-  | { ok: true; path: string }
+  | {
+      ok: true;
+      path: string;
+      /**
+       * The `updated_at` this write stamped, for the detail page's version
+       * token — recording a sketch is one of the five things on that page that
+       * writes the row, and a token that did not hear about it would turn the
+       * next packaging save into a conflict that is not one. See
+       * `components/video-version.tsx`.
+       */
+      updatedAt: string | null;
+    }
   | { ok: false; error: string };
 
 export async function recordConceptSketch(
@@ -96,10 +107,12 @@ export async function recordConceptSketch(
     await removeSketches(supabase, [previous]);
   }
 
-  const { error: updateError } = await supabase
+  const { data: written, error: updateError } = await supabase
     .from("videos")
     .update({ thumbnail_concept_path: path, updated_at: new Date().toISOString() })
-    .eq("id", videoId);
+    .eq("id", videoId)
+    .select("updated_at")
+    .maybeSingle();
 
   if (updateError) {
     return {
@@ -123,5 +136,5 @@ export async function recordConceptSketch(
     revalidatePath(`/c/${channel.slug}/board`);
   }
 
-  return { ok: true, path };
+  return { ok: true, path, updatedAt: written?.updated_at ?? null };
 }

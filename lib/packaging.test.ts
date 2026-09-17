@@ -6,6 +6,8 @@ import {
   HookSchema,
   MAX_CANDIDATES,
   MAX_HOOKS,
+  MIN_SKIP_REASON_LENGTH,
+  PG_BOOLEAN_STRINGS,
   SkipReasonSchema,
   TitleCandidateListSchema,
   describeGate,
@@ -222,6 +224,101 @@ describe("SkipReasonSchema", () => {
 
   it("trims what it accepts, so the CHECK never sees a blank", () => {
     expect(SkipReasonSchema.parse("  sponsor deadline  ")).toBe("sponsor deadline");
+  });
+
+  it("refuses a reason that is not one", () => {
+    // `packaging_skip_reason <> ''` is all the database can say, and a review
+    // used it to skip the gate in four clicks and one keystroke by typing `x`.
+    // The app's floor is higher on purpose: the asymmetry BRIEF.md principle 1
+    // asks for only exists while a reason costs more than a keypress.
+    expect(SkipReasonSchema.safeParse("x").success).toBe(false);
+    expect(SkipReasonSchema.safeParse("no time").success).toBe(false);
+    const refusal = SkipReasonSchema.safeParse("x");
+    expect(refusal.success ? "" : refusal.error.issues[0].message).toContain(
+      "not a reason yet",
+    );
+  });
+
+  it("accepts a reason of MIN_SKIP_REASON_LENGTH characters, measured after trimming", () => {
+    const shortest = "a".repeat(MIN_SKIP_REASON_LENGTH);
+    expect(SkipReasonSchema.parse(`   ${shortest}   `)).toBe(shortest);
+    expect(SkipReasonSchema.safeParse("a".repeat(MIN_SKIP_REASON_LENGTH - 1)).success).toBe(
+      false,
+    );
+  });
+
+  it("says the two mistakes apart", () => {
+    const empty = SkipReasonSchema.safeParse("   ");
+    expect(empty.success ? "" : empty.error.issues[0].message).toContain(
+      "A reason is required",
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe("asChosen, through readHooks", () => {
+  /*
+    `move_video` reads this column with `(h ->> 'chosen')::boolean`, so the set
+    of strings the browser calls "chosen" has to be the set Postgres calls true.
+    The first version of the reader stopped at true/t/yes/on/1 and missed `y`,
+    which meant a row holding `{"chosen":"y"}` read as *not* chosen in the
+    indicator ("none is chosen yet") while the gate counted it and let the video
+    straight past Packaging.
+
+    These two lists are the output of, on PostgreSQL 16:
+      select ('y')::boolean, ('ye')::boolean, ('tr')::boolean, ('fals')::boolean,
+             ('n')::boolean, ('no')::boolean, ('off')::boolean, ('On')::boolean;
+      -> t | t | t | f | f | f | f | t
+  */
+  it("accepts exactly what Postgres' boolean input accepts as true", () => {
+    for (const text of PG_BOOLEAN_STRINGS.true) {
+      expect(readHooks([{ id: "h", text: "x", chosen: text }])[0].chosen).toBe(true);
+      expect(
+        readHooks([{ id: "h", text: "x", chosen: text.toUpperCase() }])[0].chosen,
+      ).toBe(true);
+      expect(readHooks([{ id: "h", text: "x", chosen: `  ${text} ` }])[0].chosen).toBe(
+        true,
+      );
+    }
+  });
+
+  it("reads everything Postgres calls false as false", () => {
+    for (const text of PG_BOOLEAN_STRINGS.false) {
+      expect(readHooks([{ id: "h", text: "x", chosen: text }])[0].chosen).toBe(false);
+    }
+  });
+
+  it("covers the whole accepted set, including the prefixes", () => {
+    expect(PG_BOOLEAN_STRINGS.true).toEqual([
+      "t",
+      "tr",
+      "tru",
+      "true",
+      "y",
+      "ye",
+      "yes",
+      "on",
+      "1",
+    ]);
+    expect(PG_BOOLEAN_STRINGS.false).toEqual([
+      "f",
+      "fa",
+      "fal",
+      "fals",
+      "false",
+      "n",
+      "no",
+      "off",
+      "0",
+    ]);
+  });
+
+  it("reads a value Postgres cannot cast as not chosen", () => {
+    // `('maybe')::boolean` raises, so `move_video` errors rather than counting
+    // it. A renderer cannot raise; not-chosen is the closest it can get.
+    expect(readHooks([{ id: "h", text: "x", chosen: "maybe" }])[0].chosen).toBe(false);
+    expect(readHooks([{ id: "h", text: "x", chosen: 7 }])[0].chosen).toBe(false);
   });
 });
 

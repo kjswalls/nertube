@@ -72,6 +72,20 @@ export const MAX_CANDIDATE_NOTE_LENGTH = 300;
 /** The typed skip reason. Long enough to be a real sentence. */
 export const MAX_SKIP_REASON_LENGTH = 500;
 
+/**
+ * And short enough not to be one. `packaging_skip_reason <> ''` is the CHECK;
+ * this is the floor the *app* keeps, and it is deliberately higher.
+ *
+ * BRIEF.md principle 1 asks the app to make skipping the gate structurally
+ * awkward, and the disclosure's argument is an asymmetry: skipping costs three
+ * deliberate acts, satisfying the gate costs one sentence in a box already on
+ * screen. A reason of `x` cleared the old `min(1)` floor, which put the
+ * asymmetry the other way round — four clicks and one keystroke to skip — and
+ * left behind a column that explains nothing to whoever reads the badge a month
+ * later. Twelve characters is roughly "no time" plus a because.
+ */
+export const MIN_SKIP_REASON_LENGTH = 12;
+
 /* -------------------------------------------------------------------------- */
 /* Element schemas                                                             */
 /* -------------------------------------------------------------------------- */
@@ -220,14 +234,27 @@ export const HookListSchema = z
   )
   .superRefine(listRules("hook", "hooks"));
 
-/** The typed skip reason. `packaging_skip_reason <> ''` is a CHECK; this is its sentence. */
+/**
+ * The typed skip reason. `packaging_skip_reason <> ''` is a CHECK; this is its
+ * sentence, and a stricter floor than the CHECK on purpose — see
+ * `MIN_SKIP_REASON_LENGTH`. The two messages are different because the two
+ * mistakes are different: nothing typed at all, and something typed that is not
+ * a reason.
+ */
+export const SKIP_REASON_EMPTY =
+  "A reason is required — that is the whole point of skipping deliberately.";
+
+export const SKIP_REASON_TOO_SHORT =
+  `That is not a reason yet — write a sentence someone reading the badge in a month could act on (at least ${MIN_SKIP_REASON_LENGTH} characters).`;
+
 export const SkipReasonSchema = z
   .string()
   .transform((value) => value.trim())
   .pipe(
     z
       .string()
-      .min(1, "Say why packaging is being skipped — a reason is the whole point.")
+      .min(1, SKIP_REASON_EMPTY)
+      .min(MIN_SKIP_REASON_LENGTH, SKIP_REASON_TOO_SHORT)
       .max(
         MAX_SKIP_REASON_LENGTH,
         `Keep the reason under ${MAX_SKIP_REASON_LENGTH} characters.`,
@@ -249,14 +276,37 @@ function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * Every string Postgres' own boolean input accepts as true, and as false.
+ *
+ * `move_video` reads `chosen` with `(h ->> 'chosen')::boolean`, so the set this
+ * reader accepts has to be *that* set and not a plausible-looking subset of it.
+ * The first version of this function stopped at `true/t/yes/on/1` and missed
+ * `y` — which meant a row holding `{"chosen":"y"}` read as not-chosen in the
+ * browser (indicator: "none is chosen yet") while `move_video` counted it and
+ * let the video straight through. That is precisely the indicator/refusal
+ * disagreement this file exists to prevent, so the lists are written out in
+ * full and pinned by a test in `lib/packaging.test.ts`.
+ *
+ * Postgres accepts any unambiguous prefix of `true`/`false` as well as
+ * `y/ye/yes`, `n/no`, `on`, `off`, `1` and `0`, case-insensitively and with
+ * surrounding whitespace ignored.
+ */
+const PG_TRUE = new Set(["t", "tr", "tru", "true", "y", "ye", "yes", "on", "1"]);
+const PG_FALSE = new Set(["f", "fa", "fal", "fals", "false", "n", "no", "off", "0"]);
+
 function asChosen(value: unknown): boolean {
-  // Postgres round-trips booleans, but a jsonb written by hand may hold
-  // `"true"`. `move_video` casts with `(h ->> 'chosen')::boolean`, which accepts
-  // the string too — so this accepts exactly what the gate accepts.
+  // Postgres round-trips booleans, but a jsonb written by hand, by the seed or
+  // by a future brainstorm import may hold `"true"` or `"y"`.
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
     const text = value.trim().toLowerCase();
-    return text === "true" || text === "t" || text === "yes" || text === "on" || text === "1";
+    if (PG_TRUE.has(text)) return true;
+    // Anything outside both lists is a value `(h ->> 'chosen')::boolean` cannot
+    // cast: `move_video` does not read it as false, it *raises* — and a move
+    // that errors out is a refusal the user sees, not a silent disagreement.
+    // Reading it as not-chosen here is the closest a renderer can get.
+    return false;
   }
   // `(h ->> 'chosen')::boolean` on a JSON number reads the digit, so 1 is true
   // and 0 is false there too. Anything else Postgres would raise on, and this
@@ -264,6 +314,12 @@ function asChosen(value: unknown): boolean {
   if (value === 1) return true;
   return false;
 }
+
+/** Exported for the test that pins the accepted set against Postgres'. */
+export const PG_BOOLEAN_STRINGS = {
+  true: [...PG_TRUE] as readonly string[],
+  false: [...PG_FALSE] as readonly string[],
+};
 
 function readList<T>(
   raw: unknown,
@@ -332,6 +388,38 @@ export function readHooks(raw: unknown): Hook[] {
     chosen: asChosen(entry.chosen),
   }));
 }
+
+/* -------------------------------------------------------------------------- */
+/* Anchors                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The `id` of the control a gate refusal links to, per missing field.
+ *
+ * PLAN.md: *a refused drop snaps back with a toast naming the missing field, a
+ * "Fix packaging" link (detail scrolled to that field) and a "Skip gate…"
+ * link*. M1 shipped neither, on purpose — the block did not exist and both
+ * fragments pointed at nothing — and the M1 review recorded that as the reason.
+ * These are the ids that make the links real, and they live here rather than in
+ * the components so the board can build an href without importing a client
+ * component, and so a renamed field cannot leave a link pointing at nothing.
+ *
+ * Each one names a **focusable control**, not the section around it: a link
+ * that scrolls near a field and leaves the caret somewhere else is a link that
+ * still has to be followed by a click. `components/packaging/hash-focus.ts`
+ * does the focusing.
+ */
+export const GATE_ANCHOR: Record<GateField, string> = {
+  title: "packaging-title",
+  thumbnail_concept: "packaging-concept",
+  hook: "packaging-hook",
+};
+
+/** Where "Skip gate…" lands: the reason box, with the disclosure opened. */
+export const SKIP_ANCHOR = "packaging-skip";
+
+/** The block itself, for a link that means "the packaging fields" generally. */
+export const PACKAGING_ANCHOR = "packaging";
 
 /* -------------------------------------------------------------------------- */
 /* The gate                                                                    */

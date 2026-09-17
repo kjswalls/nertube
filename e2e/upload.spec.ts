@@ -525,7 +525,13 @@ test('a title save that never reaches the server keeps the page and the typed ti
 
   const status = page.getByTestId('packaging-save-status');
   await expect(status).toHaveText(/could not reach the server/i);
-  await expect(status).toHaveAttribute('role', 'alert');
+  // The politeness lives on the element that holds the save state. The field's
+  // permanent hint is a sibling of it rather than its content — a live region
+  // that also holds help text announces the help text every time typing
+  // resumes (M2 review finding 14).
+  await expect(status.getByRole('alert')).toContainText(
+    /could not reach the server/i,
+  );
 
   // The page is still the page, and the typed title is still in the field.
   await expect(page.getByText("This page couldn’t load")).toHaveCount(0);

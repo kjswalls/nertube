@@ -43,7 +43,7 @@ set local role authenticated;
 do $$
 declare v public.videos;
 begin
-  -- Set: both columns, one statement. This is the write `updateVideoFlow`
+  -- Set: both columns, one statement. This is the write `updateVideo`
   -- makes, so if the grant on waiting_since were missing this fails with 42501.
   update public.videos
      set waiting_on = 'the editor', waiting_since = now(), updated_at = now()

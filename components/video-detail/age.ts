@@ -2,8 +2,8 @@
  * How long ago something was, in words.
  *
  * Used for `waiting_on` — PLAN.md's `/now` rule 4 is *"`waiting_on` set →
- * **Waiting**, with age"* — and for the archive line. Pure, and it takes `now`
- * as an argument rather than reading the clock, for two reasons:
+ * **Waiting**, with age"*. Pure, and it takes `now` as an argument rather than
+ * reading the clock, for two reasons:
  *
  * - **Hydration.** The detail page renders on the server. A component that
  *   calls `Date.now()` while rendering produces one string there and a

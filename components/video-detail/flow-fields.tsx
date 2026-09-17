@@ -1,16 +1,23 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useState, useTransition } from "react";
+import { useId, useState } from "react";
 
+import { updateVideo, type VideoState } from "@/app/actions/videos";
 import {
-  setVideoArchived,
-  updateVideoFlow,
-  type VideoFlowSnapshot,
-} from "@/app/actions/videos";
+  SaveStatus,
+  useAutosave,
+  useSaveQueue,
+  type SaveOutcome,
+} from "@/components/autosave";
+import { useVideoVersion, type VideoVersion } from "@/components/video-version";
+import {
+  MAX_NOTES_LENGTH,
+  MAX_URL_LENGTH,
+  MAX_WAITING_ON_LENGTH,
+} from "@/lib/video-fields";
 
 import { formatAge } from "./age";
-import { SaveStatus, useAutosave, type SaveOutcome } from "./autosave";
 import { StageSelect, type FlowStage } from "./stage-select";
 
 /**
@@ -25,10 +32,10 @@ import { StageSelect, type FlowStage } from "./stage-select";
  *
  * ## Every field saves the same way
  *
- * On blur, through `useAutosave` — the pattern M1 shipped for the working
- * title, factored out so all of them cannot drift. Nothing is sent when nothing
- * changed, a failure keeps what was typed, and the value is re-read from what
- * the server confirmed rather than assumed.
+ * On blur, through `useAutosave` in `components/autosave.tsx` — the one
+ * autosave pattern on this page, shared with the packaging block above.
+ * Nothing is sent when nothing changed, a failure keeps what was typed, and the
+ * value is re-read from what the server confirmed rather than assumed.
  *
  * Two controls are not text and do not wait for a blur: the stage select and
  * the archive button save the moment they are used, because a click *is* the
@@ -70,38 +77,79 @@ export interface FlowFieldsProps {
   publishedLabel: string | null;
 }
 
+/** The parts of the row that more than one control on this block renders. */
+interface Shared {
+  readonly archivedAt: string | null;
+  readonly publishedAt: string | null;
+  readonly publishedLabel: string | null;
+  readonly waitingSince: string | null;
+  readonly waitingAgeLabel: string | null;
+}
+
 export function FlowFields(props: FlowFieldsProps) {
   const router = useRouter();
 
+  const version = useVideoVersion();
+
   /**
-   * The parts of the row that more than one control renders.
+   * The parts of the row that more than one control renders — and which of the
+   * two sources of them is currently the newer.
    *
    * `archived_at` is written by the archive button and read by the banner;
    * `waiting_since` is written by the waiting field and read by its age line;
-   * `published_at` decides how the URL is presented. Every action returns the
-   * whole flow snapshot, so any save keeps all of them honest — and the page's
-   * own server render replaces this state entirely on the next navigation.
+   * `published_at` decides how the URL is presented, and is written *only* by
+   * `move_video`.
+   *
+   * These used to be seeded into `useState` from the props and updated from
+   * save answers alone. A `useState` initialiser does not re-run, so a
+   * `router.refresh()` — which is exactly what the stage select does after a
+   * move — updated the server-rendered chip and left this copy behind: moving a
+   * video to Published from this very page left the URL block saying "Saved,
+   * but not live: this video has not reached a Published stage yet" about a
+   * video the user had just published. `published_at` is a column no save on
+   * this block can change, so the client copy could never catch up at all.
+   *
+   * So the props are authoritative again. What is kept is only the *delta* a
+   * save on this page produced, tagged with the props it was computed over: the
+   * moment a fresh server render arrives, the tag stops matching and the new
+   * props win.
    */
-  const [shared, setShared] = useState({
-    archivedAt: props.archivedAt,
-    publishedAt: props.publishedAt,
-    publishedLabel: props.publishedLabel,
-    waitingSince: props.waitingSince,
-    waitingAgeLabel: props.waitingAgeLabel,
-  });
+  const propsVersion = `${props.archivedAt}|${props.publishedAt}|${props.waitingSince}`;
+  const [applied, setApplied] = useState<{ over: string; value: Shared } | null>(
+    null,
+  );
+
+  const shared: Shared =
+    applied && applied.over === propsVersion
+      ? applied.value
+      : {
+          archivedAt: props.archivedAt,
+          publishedAt: props.publishedAt,
+          publishedLabel: props.publishedLabel,
+          waitingSince: props.waitingSince,
+          waitingAgeLabel: props.waitingAgeLabel,
+        };
 
   /** Apply what an action just confirmed. Called from every save. */
-  function absorb(video: VideoFlowSnapshot): void {
-    setShared((current) => ({
-      ...current,
-      archivedAt: video.archivedAt,
-      publishedAt: video.publishedAt,
-      waitingSince: video.waitingSince,
-      // Recomputed here rather than on the server because this is a save the
-      // user just made: the clock is read inside an event handler, never while
-      // rendering, so there is no hydration mismatch to have.
-      waitingAgeLabel: formatAge(video.waitingSince, Date.now()),
-    }));
+  function absorb(video: VideoState): void {
+    version.adopt(video.updatedAt);
+    setApplied({
+      over: propsVersion,
+      value: {
+        archivedAt: video.archivedAt,
+        publishedAt: video.publishedAt,
+        // Recomputed alongside the value it labels, rather than left pointing
+        // at the old one: `absorb` used to update `publishedAt` and not
+        // `publishedLabel`, so even the save path could leave the two out of
+        // step.
+        publishedLabel: formatPublishedDate(video.publishedAt),
+        waitingSince: video.waitingSince,
+        // Recomputed here rather than on the server because this is a save the
+        // user just made: the clock is read inside an event handler, never while
+        // rendering, so there is no hydration mismatch to have.
+        waitingAgeLabel: formatAge(video.waitingSince, Date.now()),
+      },
+    });
   }
 
   return (
@@ -199,27 +247,47 @@ const INPUT_CLASS =
 function flowSaver(
   videoId: string,
   key: keyof Pick<
-    VideoFlowSnapshot,
+    VideoState,
     "targetPublishDate" | "youtubeUrl" | "notes" | "waitingOn"
   >,
-  onSaved: (video: VideoFlowSnapshot) => void,
-): (next: string) => Promise<SaveOutcome> {
+  onSaved: (video: VideoState) => void,
+  version: VideoVersion,
+): (next: string) => Promise<SaveOutcome<string>> {
   return async (next) => {
-    const field =
-      key === "targetPublishDate"
-        ? { targetPublishDate: next }
-        : key === "youtubeUrl"
-          ? { youtubeUrl: next }
-          : key === "notes"
-            ? { notes: next }
-            : { waitingOn: next };
+    // The version this patch was computed against, so a row that something else
+    // has changed in the meantime is reported rather than overwritten. See
+    // `components/video-version.tsx`.
+    const expected = version.peek();
 
-    const result = await updateVideoFlow({ videoId, ...field });
-    if (!result.ok) return { ok: false, error: result.error };
+    const result = await updateVideo({
+      videoId,
+      ...(expected === undefined ? {} : { expectedUpdatedAt: expected }),
+      [key]: next,
+    });
+    if (!result.ok) {
+      return { ok: false, error: result.error, conflict: result.conflict };
+    }
 
     onSaved(result.video);
     return { ok: true, value: result.video[key] ?? "" };
   };
+}
+
+/**
+ * `published_at` as a date, in UTC with a fixed locale — the same formatting
+ * the server render uses, so a label recomputed after a save reads identically
+ * to one that came down with the page.
+ */
+function formatPublishedDate(value: string | null): string | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -256,12 +324,13 @@ function TargetDateField({
 }: {
   videoId: string;
   initial: string;
-  onSaved: (video: VideoFlowSnapshot) => void;
+  onSaved: (video: VideoState) => void;
 }) {
   const inputId = useId();
+  const version = useVideoVersion();
   const field = useAutosave({
     initial,
-    save: flowSaver(videoId, "targetPublishDate", onSaved),
+    save: flowSaver(videoId, "targetPublishDate", onSaved, version),
   });
 
   return (
@@ -275,7 +344,19 @@ function TargetDateField({
           type="date"
           data-testid="target-date"
           value={field.value}
-          onChange={(event) => field.setValue(event.target.value)}
+          /*
+            On change *and* on blur, which is what the two doc comments have
+            always claimed and what neither of them did. Picking a date from the
+            native overlay is the whole interaction and the control keeps focus
+            afterwards, so a blur-only save left a decision sitting unsaved on
+            screen with the status line saying nothing — and `NULL` still in the
+            column after navigating away. `commit` returns early when the value
+            already matches what has been sent, so the pair cannot double-save.
+          */
+          onChange={(event) => {
+            field.setValue(event.target.value);
+            field.commit();
+          }}
           onBlur={field.commit}
           className={INPUT_CLASS}
         />
@@ -297,7 +378,6 @@ function TargetDateField({
 
       <SaveStatus
         state={field.state}
-        pending={field.pending}
         testId="target-date-status"
         idle={
           field.value === ""
@@ -323,7 +403,7 @@ function TargetDateField({
  *
  * The age is the reason the field is worth having. "Waiting on the editor" is
  * information; "waiting on the editor for three weeks" is a decision. Rewording
- * the text does not restart that clock — see `updateVideoFlow`.
+ * the text does not restart that clock — see `updateVideo`.
  */
 function WaitingOnField({
   videoId,
@@ -334,12 +414,13 @@ function WaitingOnField({
   videoId: string;
   initial: string;
   ageLabel: string | null;
-  onSaved: (video: VideoFlowSnapshot) => void;
+  onSaved: (video: VideoState) => void;
 }) {
   const inputId = useId();
+  const version = useVideoVersion();
   const field = useAutosave({
     initial,
-    save: flowSaver(videoId, "waitingOn", onSaved),
+    save: flowSaver(videoId, "waitingOn", onSaved, version),
   });
 
   return (
@@ -355,7 +436,7 @@ function WaitingOnField({
           value={field.value}
           placeholder="the editor, a delivery, a quiet evening…"
           autoComplete="off"
-          maxLength={200}
+          maxLength={MAX_WAITING_ON_LENGTH}
           onChange={(event) => field.setValue(event.target.value)}
           onBlur={field.commit}
           onKeyDown={(event) => {
@@ -383,7 +464,6 @@ function WaitingOnField({
 
       <SaveStatus
         state={field.state}
-        pending={field.pending}
         testId="waiting-on-status"
         idle={
           field.value === ""
@@ -433,12 +513,13 @@ function YoutubeUrlField({
   initial: string;
   publishedAt: string | null;
   publishedLabel: string | null;
-  onSaved: (video: VideoFlowSnapshot) => void;
+  onSaved: (video: VideoState) => void;
 }) {
   const inputId = useId();
+  const version = useVideoVersion();
   const field = useAutosave({
     initial,
-    save: flowSaver(videoId, "youtubeUrl", onSaved),
+    save: flowSaver(videoId, "youtubeUrl", onSaved, version),
   });
 
   const published = publishedAt !== null;
@@ -458,7 +539,7 @@ function YoutubeUrlField({
         placeholder="https://www.youtube.com/watch?v=…"
         autoComplete="off"
         spellCheck={false}
-        maxLength={2000}
+        maxLength={MAX_URL_LENGTH}
         onChange={(event) => field.setValue(event.target.value)}
         onBlur={field.commit}
         onKeyDown={(event) => {
@@ -493,7 +574,6 @@ function YoutubeUrlField({
 
       <SaveStatus
         state={field.state}
-        pending={field.pending}
         testId="youtube-url-status"
         idle={hasUrl ? "" : "Filled in once the video is actually up."}
       />
@@ -526,12 +606,13 @@ function NotesField({
 }: {
   videoId: string;
   initial: string;
-  onSaved: (video: VideoFlowSnapshot) => void;
+  onSaved: (video: VideoState) => void;
 }) {
   const inputId = useId();
+  const version = useVideoVersion();
   const field = useAutosave({
     initial,
-    save: flowSaver(videoId, "notes", onSaved),
+    save: flowSaver(videoId, "notes", onSaved, version),
   });
 
   return (
@@ -545,15 +626,18 @@ function NotesField({
         data-testid="notes"
         value={field.value}
         placeholder={"B-roll list, sponsor read, gear notes.\nMarkdown is kept exactly as you type it."}
-        maxLength={20_000}
+        maxLength={MAX_NOTES_LENGTH}
         onChange={(event) => field.setValue(event.target.value)}
         onBlur={field.commit}
-        className={`${INPUT_CLASS} min-h-48 resize-y font-mono text-sm leading-relaxed`}
+        // `text-base`, not `text-sm`: iOS Safari zooms the page when a focused
+        // field is under 16px, and a sponsor read typed at 11pm on a phone is
+        // exactly what this box is for. `INPUT_CLASS` already says 16px; this
+        // used to override it back down.
+        className={`${INPUT_CLASS} min-h-48 resize-y font-mono leading-relaxed`}
       />
 
       <SaveStatus
         state={field.state}
-        pending={field.pending}
         testId="notes-status"
         idle="Plain text. Markdown is stored as written, not rendered."
       />
@@ -602,26 +686,34 @@ function ArchiveButton({
 }: {
   videoId: string;
   archivedAt: string | null;
-  onChanged: (video: VideoFlowSnapshot) => void;
+  onChanged: (video: VideoState) => void;
 }) {
   const archived = archivedAt !== null;
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
 
-  function toggle() {
-    setError(null);
-    startTransition(async () => {
-      try {
-        const result = await setVideoArchived({ videoId, archived: !archived });
-        if (result.ok) onChanged(result.video);
-        else setError(result.error);
-      } catch {
-        setError(
-          `Could not reach the server, so this video is still ${archived ? "archived" : "on the board"}. Try again.`,
-        );
+  /*
+    The same queue every other field on this page uses, with a boolean for a
+    patch. A click is the whole decision, so there is no blur to wait for and
+    `useAutosave`'s typing machinery would be in the way — but the parts that
+    matter are the ones that must not be hand-rolled a third time: the caught
+    rejection, the retry payload, and one status element with one politeness.
+  */
+  const version = useVideoVersion();
+
+  const { state, pending, send } = useSaveQueue<boolean>({
+    save: async (next) => {
+      const expected = version.peek();
+      const result = await updateVideo({
+        videoId,
+        ...(expected === undefined ? {} : { expectedUpdatedAt: expected }),
+        archived: next,
+      });
+      if (!result.ok) {
+        return { ok: false, error: result.error, conflict: result.conflict };
       }
-    });
-  }
+      onChanged(result.video);
+      return { ok: true };
+    },
+  });
 
   return (
     <div className="flex flex-col gap-1 border-t border-border pt-4">
@@ -631,7 +723,7 @@ function ArchiveButton({
           data-testid="archive-toggle"
           data-archived={archived ? "true" : "false"}
           disabled={pending}
-          onClick={toggle}
+          onClick={() => send(!archived)}
           className="rounded-md border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-40"
         >
           {pending
@@ -650,16 +742,7 @@ function ArchiveButton({
         </p>
       </div>
 
-      <p
-        role={error ? "alert" : "status"}
-        data-testid="archive-status"
-        className={[
-          "min-h-4 text-xs",
-          error ? "text-amber-700 dark:text-amber-400" : "text-muted",
-        ].join(" ")}
-      >
-        {error ?? ""}
-      </p>
+      <SaveStatus state={state} testId="archive-status" onRetry={send} />
     </div>
   );
 }

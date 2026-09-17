@@ -5,25 +5,36 @@ import { z } from "zod";
 
 import type { Database } from "@/lib/database.types";
 import {
-  HookListSchema,
+  MAX_TITLE_LENGTH,
   readHooks,
   readTitleCandidates,
-  SkipReasonSchema,
-  TitleCandidateListSchema,
   type Hook,
   type TitleCandidate,
 } from "@/lib/packaging";
+import {
+  CHANGED_ELSEWHERE,
+  NullableText,
+  VideoPatchSchema,
+  type VideoPatchInput,
+} from "@/lib/video-fields";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
- * Video server actions. M1 owns two of them: `captureVideo` and
- * `updateWorkingTitle`.
+ * Video server actions. There are two, and they are two because they do
+ * genuinely different things:
  *
- * `updateVideo` proper — the whole packaging block saved field by field — is
- * M2, and `updateWorkingTitle` is deliberately not it: it writes one column and
- * takes one column, so the M1 detail stub can autosave a title without this
- * file growing into a general "save a video" endpoint before there is a page
- * that needs one.
+ * - `captureVideo` **creates** a video, through the `capture_video` RPC —
+ *   `INSERT` on `videos` is revoked from clients, so there is no other way.
+ * - `updateVideo` **changes** one, and is the single write path behind every
+ *   field on `/videos/[id]`.
+ *
+ * Changing a *stage* is neither of them: it is `moveVideo` in
+ * `app/actions/moves.ts`, over the `move_video` RPC, because the TTH gate lives
+ * inside that function and the board's drag, the `[`/`]` keys and the detail
+ * page's stage select must not be able to disagree about it.
+ *
+ * Every rule about what a field may contain lives in `lib/video-fields.ts` and
+ * `lib/packaging.ts`. Nothing in this file hand-rolls a second copy.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -33,19 +44,16 @@ import { requireUser } from "@/lib/supabase/require-user";
 /** How many tags one capture may carry, and how long each may be. */
 const MAX_TAGS = 20;
 const MAX_TAG_LENGTH = 40;
-const MAX_TITLE_LENGTH = 300;
 
 /**
- * A single-line value from the form: trimmed, and `undefined` when it is empty.
+ * A single-line value from the capture form: trimmed, and `undefined` when it
+ * is empty, so the key is simply left out of the follow-up update.
  *
- * Capture's disclosure fields are optional, and an empty box must leave the
- * column NULL rather than writing `''` — `/now` and the idea bank both test
- * these for "is there anything here".
+ * The trim-then-empty-is-nothing rule is `NullableText` from
+ * `lib/video-fields.ts` — the same rule the detail page writes these columns
+ * with — with `null` mapped to "do not send this key at all".
  */
-const OptionalText = z
-  .string()
-  .transform((value) => value.trim())
-  .transform((value) => (value === "" ? undefined : value));
+const OptionalText = NullableText.transform((value) => value ?? undefined);
 
 /**
  * The comma-separated tag box. `"tutorial, behind the scenes,,tutorial"` →
@@ -228,461 +236,97 @@ export async function captureVideoAction(
 }
 
 /* -------------------------------------------------------------------------- */
-/* The working title                                                          */
+/* The detail page's one write path                                            */
 /* -------------------------------------------------------------------------- */
 
 /**
- * The detail stub's title field, saved on blur.
+ * `updateVideo` — everything `/videos/[id]` can change about a video.
  *
- * Deliberately narrow: one column in, one column out. `videos.title` is in the
- * client's `UPDATE` grant (unlike `stage_id` and friends), so this is a plain
- * row update and not an RPC — there is no invariant to keep. The gate reads the
- * same column at move time, which is why clearing a title here is *allowed*:
- * PLAN.md wants a cleared title to surface as "Complete packaging" on the next
- * move, not to be silently refused by a form.
- */
-const TitleInput = z.object({
-  videoId: z.uuid(),
-  title: z
-    .string()
-    .transform((value) => value.trim())
-    .pipe(
-      z
-        .string()
-        .max(
-          MAX_TITLE_LENGTH,
-          `Titles are capped at ${MAX_TITLE_LENGTH} characters.`,
-        ),
-    ),
-});
-
-export type UpdateWorkingTitleInput = z.input<typeof TitleInput>;
-
-export type UpdateWorkingTitleResult =
-  | { ok: true; title: string }
-  | { ok: false; error: string };
-
-export async function updateWorkingTitle(
-  input: UpdateWorkingTitleInput,
-): Promise<UpdateWorkingTitleResult> {
-  const parsed = TitleInput.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0].message };
-  }
-  const { videoId, title } = parsed.data;
-
-  const { supabase } = await requireUser();
-
-  // RLS is the ownership check: another user's id updates zero rows, and
-  // `select` on the way back returns nothing, which is what "no such video"
-  // looks like from here.
-  const { data, error } = await supabase
-    .from("videos")
-    .update({ title, updated_at: new Date().toISOString() })
-    .eq("id", videoId)
-    .select("id, title, channel_id")
-    .maybeSingle();
-
-  if (error) {
-    return { ok: false, error: `That did not save: ${error.message}` };
-  }
-  if (!data) {
-    return { ok: false, error: "That video does not exist any more." };
-  }
-
-  revalidatePath(`/videos/${videoId}`);
-
-  // The card on the board shows this title.
-  const { data: channel } = await supabase
-    .from("channels")
-    .select("slug")
-    .eq("id", data.channel_id)
-    .maybeSingle();
-
-  if (channel) {
-    revalidatePath(`/c/${channel.slug}/board`);
-  }
-
-  return { ok: true, title: data.title };
-}
-
-/* -------------------------------------------------------------------------- */
-/* The packaging block (M2)                                                    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * `updateVideo` — the packaging block's autosave endpoint.
+ * ## One action, not five
  *
- * One action for the whole block rather than one per field, because the block's
- * edits are not always one field: choosing a title candidate writes
- * `title_candidates` *and* `title` in the same gesture, and those two have to
- * land together or the working title and the ticked candidate disagree. Every
- * property is optional and only the ones present are written, so a blurred
- * concept box still costs exactly one column.
+ * M2's two halves arrived with three actions between them (`updateWorkingTitle`
+ * from M1's stub, a packaging patch, a flow patch) plus a fourth for archiving.
+ * They shared the ownership check, the `updated_at` stamp and both
+ * revalidations, and differed in every detail of how they reported a refusal.
+ * This is the merged one. Every field on the page is a key in one patch,
+ * validated by one schema (`lib/video-fields.ts`), and only the keys that are
+ * present are written — so a blurred notes box still costs exactly one column.
  *
- * ## Why it returns the whole packaging state
+ * Some edits are genuinely more than one column and have to land together:
+ * choosing a title candidate writes `title_candidates` *and* `title`, and a
+ * skip writes `packaging_skipped_at` *and* `packaging_skip_reason` (a CHECK
+ * pairs them). One patch is how they cannot land half-applied.
+ *
+ * ## Why it returns the whole row
  *
  * The live gate indicator has to agree with what `move_video` would decide, and
  * `move_video` reads the row — not the form. So the action reads the row back
- * after writing and hands the caller the four columns the gate looks at; the
- * indicator is then derived from what is *stored*, not from what was typed. A
- * save that partially failed, a value the database rewrote, a column changed in
- * another tab: all of them show up here rather than being believed.
+ * after writing and hands the caller what is *stored*. A save that partially
+ * failed, a value the database rewrote, a column changed in another tab: all of
+ * them show up here rather than being believed. The flow fields get the same
+ * treatment for the same reason, and `waiting_since` and `published_at` ride
+ * along because two fields render from them.
  *
- * ## What it refuses
+ * ## What it cannot do
  *
- * `title_candidates` and `hooks` are jsonb with almost no schema in the
- * database. `lib/packaging.ts` is where the real rules live — at most three
- * hooks, at most one chosen per list, no blank text, unique ids — and this
- * action is the only writer that goes through them. Nothing here hand-rolls a
- * second copy of those rules.
- *
- * `stage_id` is not in this action's vocabulary, and could not be even if it
- * were: `UPDATE (stage_id, stage_entered_at, published_at, shipped_role)` is
- * revoked from `authenticated`, and `move_video` is the only path.
+ * `stage_id` is not in its vocabulary. `UPDATE (stage_id, stage_entered_at,
+ * published_at, shipped_role)` is revoked from `authenticated`, so `move_video`
+ * — reached through `moveVideo` in `app/actions/moves.ts` — is the only path,
+ * and the TTH gate cannot be walked around from the page where the packaging
+ * fields live.
  */
-/** The written concept is a description of a picture, not a script. */
-const MAX_CONCEPT_LENGTH = 2000;
 
-const PackagingSkipInput = z.union([
-  z.object({ reason: SkipReasonSchema }),
-  z.null(),
-]);
-
-const UpdateVideoInput = z
-  .object({
-    videoId: z.uuid(),
-    /**
-     * The working title. Trimmed, and allowed to be empty: PLAN.md wants a
-     * cleared title to surface at the gate as "Complete packaging", not to be
-     * refused by a form.
-     */
-    title: z
-      .string()
-      .transform((value) => value.trim())
-      .pipe(z.string().max(MAX_TITLE_LENGTH, `Titles are capped at ${MAX_TITLE_LENGTH} characters.`))
-      .optional(),
-    /**
-     * The *written* thumbnail concept — the field the gate reads. The concept
-     * sketch is `thumbnail_concept_path` and is a different column written by a
-     * different action; the two are never conflated here.
-     *
-     * An emptied box writes NULL rather than `''`. Both read as missing at the
-     * gate (`coalesce(thumbnail_concept, '') = ''`), and one representation for
-     * "there is nothing here" is what the rest of the app already assumes.
-     */
-    thumbnailConcept: z
-      .string()
-      .transform((value) => value.trim())
-      .pipe(
-        z
-          .string()
-          .max(
-            MAX_CONCEPT_LENGTH,
-            `The thumbnail concept is capped at ${MAX_CONCEPT_LENGTH} characters — it is a description, not the script.`,
-          ),
-      )
-      .optional(),
-    titleCandidates: TitleCandidateListSchema.optional(),
-    hooks: HookListSchema.optional(),
-    /**
-     * `{ reason }` skips packaging, `null` un-skips it, absent leaves it alone.
-     * The two columns are set together because `0001_init.sql` pairs them:
-     * `(packaging_skipped_at is null) = (packaging_skip_reason is null)`.
-     */
-    packagingSkip: PackagingSkipInput.optional(),
-  })
-  .refine(
-    (input) =>
-      input.title !== undefined ||
-      input.thumbnailConcept !== undefined ||
-      input.titleCandidates !== undefined ||
-      input.hooks !== undefined ||
-      input.packagingSkip !== undefined,
-    { message: "That save had nothing in it." },
-  );
-
-export type UpdateVideoInputShape = z.input<typeof UpdateVideoInput>;
-
-/**
- * The four columns the gate reads, as the row holds them after the write.
- * The client re-derives its indicator from exactly this.
- */
-export interface PackagingState {
+/** Every column the detail page reads back, as the row holds it after a write. */
+export interface VideoState {
+  /* packaging — the four columns the gate reads, plus the skip pair */
   readonly title: string;
   readonly thumbnailConcept: string | null;
   readonly titleCandidates: TitleCandidate[];
   readonly hooks: Hook[];
   readonly packagingSkippedAt: string | null;
   readonly packagingSkipReason: string | null;
+  /* flow */
+  readonly targetPublishDate: string | null;
+  readonly youtubeUrl: string | null;
+  readonly publishedAt: string | null;
+  readonly notes: string | null;
+  readonly waitingOn: string | null;
+  /** When `waiting_on` was first set; paired with it by a CHECK. */
+  readonly waitingSince: string | null;
+  readonly archivedAt: string | null;
+  /**
+   * The row's new version stamp. The page hands it back as the precondition on
+   * its next write — see `components/video-version.tsx`.
+   */
+  readonly updatedAt: string | null;
 }
 
 export type UpdateVideoResult =
-  | { ok: true; packaging: PackagingState }
-  | { ok: false; error: string };
+  | { ok: true; video: VideoState }
+  | {
+      ok: false;
+      error: string;
+      /**
+       * The row was changed by something else between the page reading it and
+       * this write. Nothing was written, and re-sending the same patch would
+       * only overwrite the newer values — so the page offers a reload.
+       */
+      conflict?: boolean;
+    };
 
-/** The columns every packaging read and write-back selects. */
-const PACKAGING_COLUMNS =
-  "title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, channel_id";
+/** The columns every write reads back. `channel_id` is for the revalidation. */
+const VIDEO_COLUMNS =
+  "channel_id, updated_at, title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at";
 
-interface PackagingRow {
+interface VideoRow {
+  channel_id: string;
+  updated_at: string | null;
   title: string;
   thumbnail_concept: string | null;
   title_candidates: unknown;
   hooks: unknown;
   packaging_skipped_at: string | null;
   packaging_skip_reason: string | null;
-  channel_id: string;
-}
-
-/**
- * The row as the editor reads it.
- *
- * Lenient on purpose (see `lib/packaging.ts`): a row written by the seed, by a
- * future brainstorm import or by hand still has to render. What it will not do
- * is *repair* `chosen` — a row that really carries two chosen hooks reads as
- * two chosen hooks, so the indicator says what the gate will say.
- */
-// NOT exported: a `"use server"` module may only export async functions, and
-// Turbopack refuses the whole file otherwise ("Server Actions must be async
-// functions"), which takes every route down with it. Nothing outside this file
-// uses it today. If the page shell ever needs it, it belongs in
-// `lib/packaging.ts` beside `readHooks`/`readTitleCandidates`, not here.
-function packagingStateFromRow(row: PackagingRow): PackagingState {
-  return {
-    title: row.title,
-    thumbnailConcept: row.thumbnail_concept,
-    titleCandidates: readTitleCandidates(row.title_candidates),
-    hooks: readHooks(row.hooks),
-    packagingSkippedAt: row.packaging_skipped_at,
-    packagingSkipReason: row.packaging_skip_reason,
-  };
-}
-
-export async function updateVideo(
-  input: UpdateVideoInputShape,
-): Promise<UpdateVideoResult> {
-  const parsed = UpdateVideoInput.safeParse(input);
-  if (!parsed.success) {
-    // The block shows one line, so the first issue is what it shows. The zod
-    // messages are written to be that line — "Three hooks is the limit…",
-    // "Only one hook can be the chosen one…".
-    return { ok: false, error: parsed.error.issues[0].message };
-  }
-  const { videoId, title, thumbnailConcept, titleCandidates, hooks, packagingSkip } =
-    parsed.data;
-
-  // Typed against the generated `videos.Update` so a column name that does not
-  // exist is a compile error rather than a silent no-op PATCH.
-  const patch: Database["public"]["Tables"]["videos"]["Update"] = {
-    updated_at: new Date().toISOString(),
-  };
-  if (title !== undefined) patch.title = title;
-  if (thumbnailConcept !== undefined) {
-    patch.thumbnail_concept = thumbnailConcept === "" ? null : thumbnailConcept;
-  }
-  if (titleCandidates !== undefined) patch.title_candidates = titleCandidates;
-  if (hooks !== undefined) patch.hooks = hooks;
-  if (packagingSkip !== undefined) {
-    // Both columns, always together: the CHECK pairs them, and a skip whose
-    // reason failed to write would be a skip nobody can explain later.
-    patch.packaging_skipped_at =
-      packagingSkip === null ? null : new Date().toISOString();
-    patch.packaging_skip_reason = packagingSkip === null ? null : packagingSkip.reason;
-  }
-
-  const { supabase } = await requireUser();
-
-  // RLS is the ownership check: another user's id updates zero rows and the
-  // `select` on the way back returns nothing — which is what "no such video"
-  // looks like from here, and is deliberately indistinguishable from an id that
-  // was never issued.
-  const { data, error } = await supabase
-    .from("videos")
-    .update(patch)
-    .eq("id", videoId)
-    .select(PACKAGING_COLUMNS)
-    .maybeSingle<PackagingRow>();
-
-  if (error) {
-    // The database's own refusals reach the user as themselves: the hooks CHECK
-    // (a fourth hook that somehow got past zod) and the skip-reason CHECK are
-    // the two that can realistically fire, and both are worth seeing verbatim
-    // rather than as "that did not save".
-    return { ok: false, error: `That did not save: ${error.message}` };
-  }
-  if (!data) {
-    return { ok: false, error: "That video does not exist any more." };
-  }
-
-  revalidatePath(`/videos/${videoId}`);
-
-  // The card carries the title, and from M2 the skipped-packaging badge.
-  const { data: channel } = await supabase
-    .from("channels")
-    .select("slug")
-    .eq("id", data.channel_id)
-    .maybeSingle();
-  if (channel) {
-    revalidatePath(`/c/${channel.slug}/board`);
-  }
-
-  return { ok: true, packaging: packagingStateFromRow(data) };
-}
-
-/* -------------------------------------------------------------------------- */
-/* The flow fields                                                             */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The non-packaging half of the detail page: target date, final URL, notes,
- * `waiting_on`, and the archive switch.
- *
- * All five are plain columns in the client's `UPDATE` grant — none of them is
- * `stage_id` and none of them is read by the TTH gate — so this is a row update
- * and not an RPC. The stage select next to them is *not* here: it goes through
- * `moveVideo` (`app/actions/moves.ts`) and therefore through `move_video`, so
- * the board's drag, the `[`/`]` keys and the select cannot disagree about the
- * gate. There is deliberately no code path in this file that writes a stage.
- *
- * ## One patch endpoint, not five actions
- *
- * The fields autosave one at a time on blur, so every call carries exactly one
- * key in practice. They share an endpoint because they share everything else —
- * the ownership check, the `updated_at` stamp, the two revalidations — and five
- * copies of that is five places for them to drift. Each key still has its own
- * validation and its own message, which is the part that has to be per-field.
- *
- * ## Empty means NULL, everywhere
- *
- * A cleared box writes `NULL`, never `''`. `/now` and the board both test these
- * columns for "is there anything here" (`waiting_on` is a chip, the target date
- * is the primary sort key), and `''` is a value that reads as present and looks
- * absent.
- */
-
-/** How long each free-text column may be. Generous; these are guard rails. */
-const MAX_NOTES_LENGTH = 20_000;
-const MAX_WAITING_ON_LENGTH = 200;
-const MAX_URL_LENGTH = 2_000;
-
-/**
- * A real calendar date in `YYYY-MM-DD`, which is what a `date` column holds.
- *
- * `<input type="date">` cannot produce anything else, but a server action is a
- * POST endpoint like any other and `2026-02-30` would otherwise reach Postgres
- * and come back as a 400 with a wire-format complaint in it. Round-tripping
- * through `Date.UTC` is what rejects the days that do not exist.
- */
-function isCalendarDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const [year, month, day] = [
-    Number(match[1]),
-    Number(match[2]),
-    Number(match[3]),
-  ];
-  if (year < 1970 || year > 2999) return false;
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
-}
-
-/**
- * An `http`/`https` URL.
- *
- * The host is not checked against a list of YouTube domains: the public link,
- * `youtu.be`, a Studio link and a members-only link are all things a creator
- * legitimately pastes here, and a field that refuses the address the site
- * actually gave them is worse than one that stores it. What is refused is the
- * thing that is not a link at all — `javascript:`, a bare "tomorrow", a video
- * id on its own — because this string ends up in an anchor's `href`.
- */
-function isHttpUrl(value: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return false;
-  }
-  return parsed.protocol === "http:" || parsed.protocol === "https:";
-}
-
-/** `"  "` and `""` both mean NULL; anything else is trimmed and kept verbatim. */
-const NullableText = z
-  .union([z.string(), z.null()])
-  .transform((value) => (value === null ? null : value.trim()))
-  .transform((value) => (value === "" ? null : value));
-
-const TargetPublishDate = NullableText.refine(
-  (value) => value === null || isCalendarDate(value),
-  { message: "That is not a date the calendar has. Use the date picker." },
-);
-
-const YoutubeUrl = NullableText.refine(
-  (value) => value === null || value.length <= MAX_URL_LENGTH,
-  { message: `That link is longer than ${MAX_URL_LENGTH} characters.` },
-).refine((value) => value === null || isHttpUrl(value), {
-  message:
-    "That is not a link. Paste the whole address, starting with https://.",
-});
-
-const Notes = NullableText.refine(
-  (value) => value === null || value.length <= MAX_NOTES_LENGTH,
-  {
-    message: `Notes are capped at ${MAX_NOTES_LENGTH} characters — long enough for a script, not for a book.`,
-  },
-);
-
-const WaitingOn = NullableText.refine(
-  (value) => value === null || value.length <= MAX_WAITING_ON_LENGTH,
-  {
-    message: `Keep "waiting on" to ${MAX_WAITING_ON_LENGTH} characters — it is a chip on a card, not a note.`,
-  },
-);
-
-const FlowInput = z.object({
-  videoId: z.uuid(),
-  targetPublishDate: TargetPublishDate.optional(),
-  youtubeUrl: YoutubeUrl.optional(),
-  notes: Notes.optional(),
-  waitingOn: WaitingOn.optional(),
-});
-
-export type UpdateVideoFlowInput = z.input<typeof FlowInput>;
-
-/**
- * Every flow field as the database now holds it.
- *
- * The whole set comes back from every call, not just the key that was written:
- * one save is one round trip, and a field that re-renders from what the server
- * confirmed cannot drift from it. `publishedAt` rides along because the URL
- * field reads it — a link is shown differently before the video is live.
- */
-export interface VideoFlowSnapshot {
-  targetPublishDate: string | null;
-  youtubeUrl: string | null;
-  publishedAt: string | null;
-  notes: string | null;
-  waitingOn: string | null;
-  /** When `waiting_on` was first set; paired with it by a CHECK. */
-  waitingSince: string | null;
-  archivedAt: string | null;
-}
-
-export type UpdateVideoFlowResult =
-  | { ok: true; video: VideoFlowSnapshot }
-  | { ok: false; error: string };
-
-/** The columns a flow write reads back; `channel_id` is for the revalidation. */
-const FLOW_SELECT =
-  "channel_id, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at";
-
-type FlowRow = {
-  channel_id: string;
   target_publish_date: string | null;
   youtube_url: string | null;
   published_at: string | null;
@@ -690,10 +334,29 @@ type FlowRow = {
   waiting_on: string | null;
   waiting_since: string | null;
   archived_at: string | null;
-};
+}
 
-function snapshotOf(row: FlowRow): VideoFlowSnapshot {
+/**
+ * The row as the page reads it.
+ *
+ * The two jsonb columns go through the lenient readers in `lib/packaging.ts`:
+ * a row written by the seed, by a future brainstorm import or by hand still has
+ * to render. What they will not do is *repair* `chosen` — a row that really
+ * carries two chosen hooks reads as two chosen hooks, so the indicator says
+ * what the gate will say.
+ *
+ * Not exported: a `"use server"` module may only export async functions, and
+ * Turbopack refuses the whole file otherwise ("Server Actions must be async
+ * functions"), which takes every route down with it.
+ */
+function stateOf(row: VideoRow): VideoState {
   return {
+    title: row.title,
+    thumbnailConcept: row.thumbnail_concept,
+    titleCandidates: readTitleCandidates(row.title_candidates),
+    hooks: readHooks(row.hooks),
+    packagingSkippedAt: row.packaging_skipped_at,
+    packagingSkipReason: row.packaging_skip_reason,
     targetPublishDate: row.target_publish_date,
     youtubeUrl: row.youtube_url,
     publishedAt: row.published_at,
@@ -701,34 +364,61 @@ function snapshotOf(row: FlowRow): VideoFlowSnapshot {
     waitingOn: row.waiting_on,
     waitingSince: row.waiting_since,
     archivedAt: row.archived_at,
+    updatedAt: row.updated_at,
   };
 }
 
-export async function updateVideoFlow(
-  input: UpdateVideoFlowInput,
-): Promise<UpdateVideoFlowResult> {
-  const parsed = FlowInput.safeParse(input);
+export async function updateVideo(
+  input: VideoPatchInput,
+): Promise<UpdateVideoResult> {
+  const parsed = VideoPatchSchema.safeParse(input);
   if (!parsed.success) {
+    // The page shows one line, so the first issue is what it shows. The
+    // messages in `lib/video-fields.ts` and `lib/packaging.ts` are written to
+    // be that line — "Three hooks is the limit…", "That is not a link…".
     return { ok: false, error: parsed.error.issues[0].message };
   }
-  const { videoId, ...fields } = parsed.data;
-
-  const patch: Record<string, string | null> = {};
-  if ("targetPublishDate" in fields) {
-    patch.target_publish_date = fields.targetPublishDate ?? null;
-  }
-  if ("youtubeUrl" in fields) patch.youtube_url = fields.youtubeUrl ?? null;
-  if ("notes" in fields) patch.notes = fields.notes ?? null;
+  const { videoId, expectedUpdatedAt, ...fields } = parsed.data;
 
   const { supabase } = await requireUser();
 
-  if ("waitingOn" in fields) {
-    const waitingOn = fields.waitingOn ?? null;
-    patch.waiting_on = waitingOn;
+  // Typed against the generated `videos.Update`, so a column name that does not
+  // exist is a compile error rather than a silent no-op PATCH.
+  const patch: Database["public"]["Tables"]["videos"]["Update"] = {
+    updated_at: new Date().toISOString(),
+  };
 
-    if (waitingOn === null) {
-      // Cleared together, because the CHECK in 0004_waiting_since.sql says so:
-      // an unblocked video has no "since".
+  if (fields.title !== undefined) patch.title = fields.title;
+  if (fields.thumbnailConcept !== undefined) {
+    patch.thumbnail_concept = fields.thumbnailConcept;
+  }
+  if (fields.titleCandidates !== undefined) {
+    patch.title_candidates = fields.titleCandidates;
+  }
+  if (fields.hooks !== undefined) patch.hooks = fields.hooks;
+  if (fields.packagingSkip !== undefined) {
+    // Both columns, always together: the CHECK pairs them, and a skip whose
+    // reason failed to write would be a skip nobody can explain later.
+    patch.packaging_skipped_at =
+      fields.packagingSkip === null ? null : new Date().toISOString();
+    patch.packaging_skip_reason =
+      fields.packagingSkip === null ? null : fields.packagingSkip.reason;
+  }
+  if (fields.targetPublishDate !== undefined) {
+    patch.target_publish_date = fields.targetPublishDate;
+  }
+  if (fields.youtubeUrl !== undefined) patch.youtube_url = fields.youtubeUrl;
+  if (fields.notes !== undefined) patch.notes = fields.notes;
+  if (fields.archived !== undefined) {
+    patch.archived_at = fields.archived ? new Date().toISOString() : null;
+  }
+
+  if (fields.waitingOn !== undefined) {
+    patch.waiting_on = fields.waitingOn;
+
+    if (fields.waitingOn === null) {
+      // Cleared together, because the CHECK in `0004_waiting_since.sql` says
+      // so: an unblocked video has no "since".
       patch.waiting_since = null;
     } else {
       // The stamp is *when the block started*, so re-wording it does not reset
@@ -746,114 +436,82 @@ export async function updateVideoFlow(
     }
   }
 
-  if (Object.keys(patch).length === 0) {
-    return { ok: false, error: "There was nothing to save." };
+  /*
+    RLS is the ownership check: another user's id updates zero rows, and the
+    `select` on the way back returns nothing — which is what "no such video"
+    looks like from here, and is deliberately indistinguishable from an id that
+    was never issued.
+
+    `expectedUpdatedAt` is the *other* way this can match nothing, and the
+    reason it exists. Every patch this page sends carries absolute values
+    computed against the row the editor was rendered with, so an unconditional
+    write silently overwrites whatever a second tab did in between — including
+    whole jsonb arrays. Matching on the version the caller computed against
+    turns that into zero rows, which is reported rather than lost. `null` is a
+    real expectation: `capture_video` leaves `updated_at` NULL, so a never-yet-
+    written row has to be matched with `is` rather than `eq`.
+  */
+  let write = supabase.from("videos").update(patch).eq("id", videoId);
+  if (expectedUpdatedAt !== undefined) {
+    write =
+      expectedUpdatedAt === null
+        ? write.is("updated_at", null)
+        : write.eq("updated_at", expectedUpdatedAt);
   }
 
-  // RLS is the ownership check: another user's id matches no row, the update
-  // touches nothing, and the `select` comes back empty — which is exactly what
-  // an id that was never issued looks like from here.
-  const { data, error } = await supabase
-    .from("videos")
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq("id", videoId)
-    .select(FLOW_SELECT)
-    .maybeSingle();
+  const { data, error } = await write
+    .select(VIDEO_COLUMNS)
+    .maybeSingle<VideoRow>();
 
   if (error) {
+    // The database's own refusals reach the user as themselves: the hooks CHECK
+    // (a fourth hook that somehow got past zod) and the skip-reason CHECK are
+    // the two that can realistically fire, and both are worth seeing verbatim
+    // rather than as "that did not save".
     return { ok: false, error: `That did not save: ${error.message}` };
   }
   if (!data) {
+    /*
+      Two different nothings. With a precondition, "zero rows" usually means the
+      row is still there and has simply moved on — and telling someone their
+      video does not exist any more when it does, and when what they typed is
+      still on the screen in front of them, is the worst available answer. One
+      extra read says which it was.
+    */
+    if (expectedUpdatedAt !== undefined) {
+      const { data: still } = await supabase
+        .from("videos")
+        .select("id")
+        .eq("id", videoId)
+        .maybeSingle();
+
+      if (still) {
+        return { ok: false, error: CHANGED_ELSEWHERE, conflict: true };
+      }
+    }
     return { ok: false, error: "That video does not exist any more." };
   }
 
-  await revalidateVideoAndBoard(supabase, videoId, data.channel_id);
+  /*
+    The detail page and the video's board, in that order.
 
-  return { ok: true, video: snapshotOf(data) };
-}
-
-/* -------------------------------------------------------------------------- */
-/* Archive                                                                     */
-/* -------------------------------------------------------------------------- */
-
-const ArchiveInput = z.object({
-  videoId: z.uuid(),
-  archived: z.boolean(),
-});
-
-export type SetVideoArchivedInput = z.input<typeof ArchiveInput>;
-
-/**
- * Archive or restore.
- *
- * Archiving is `archived_at = now()` and nothing else. The board already reads
- * `.is("archived_at", null)` on both of its queries (the column list and the
- * cross-channel Filming count in `app/c/[slug]/board/page.tsx`), so an archived
- * video leaves the board the moment this lands and comes back the moment it is
- * restored — with its stage, its checklist, its dates and its notes untouched.
- *
- * It is not a delete and it is not a stage: there is no "Archived" column, the
- * row keeps the stage it was in, and `move_video` is still the only thing that
- * can change that. Restoring therefore needs no decision about where to put it.
- */
-export async function setVideoArchived(
-  input: SetVideoArchivedInput,
-): Promise<UpdateVideoFlowResult> {
-  const parsed = ArchiveInput.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: "That was not something the page could ask for." };
-  }
-  const { videoId, archived } = parsed.data;
-
-  const { supabase } = await requireUser();
-
-  const { data, error } = await supabase
-    .from("videos")
-    .update({
-      archived_at: archived ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", videoId)
-    .select(FLOW_SELECT)
-    .maybeSingle();
-
-  if (error) {
-    return {
-      ok: false,
-      error: `Could not ${archived ? "archive" : "restore"} that: ${error.message}`,
-    };
-  }
-  if (!data) {
-    return { ok: false, error: "That video does not exist any more." };
-  }
-
-  await revalidateVideoAndBoard(supabase, videoId, data.channel_id);
-
-  return { ok: true, video: snapshotOf(data) };
-}
-
-/**
- * The detail page and the video's board, in that order.
- *
- * Every flow field is on one of the two: the target date is the board's primary
- * sort key, `waiting_on` is a chip on the card, and archiving removes the card
- * altogether. The slug is looked up rather than passed in, so a caller cannot
- * aim a revalidation at a path it does not own.
- */
-async function revalidateVideoAndBoard(
-  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
-  videoId: string,
-  channelId: string,
-): Promise<void> {
+    Every field on the page is on one of the two: the card carries the title,
+    the target date is the board's primary sort key, `waiting_on` is a chip,
+    the skip is an amber badge, and archiving removes the card altogether. The
+    slug is looked up rather than passed in, so a caller cannot aim a
+    revalidation at a path it does not own.
+  */
   revalidatePath(`/videos/${videoId}`);
 
   const { data: channel } = await supabase
     .from("channels")
     .select("slug")
-    .eq("id", channelId)
+    .eq("id", data.channel_id)
     .maybeSingle();
 
   if (channel) {
     revalidatePath(`/c/${channel.slug}/board`);
   }
+
+  return { ok: true, video: stateOf(data) };
 }

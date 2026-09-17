@@ -41,6 +41,15 @@ export type MoveVideoResult =
       stageId: string;
       /** The fresh `stage_entered_at` stamp, so the card can show "0 days". */
       stageEnteredAt: string;
+      /**
+       * The `updated_at` this move stamped.
+       *
+       * `move_video` writes the row like anything else, so the detail page's
+       * version token has to learn about it — otherwise moving a video from the
+       * stage select would make every later packaging save on the same page
+       * look like a conflict. See `components/video-version.tsx`.
+       */
+      updatedAt: string | null;
     }
   | {
       ok: false;
@@ -154,5 +163,6 @@ export async function moveVideo(
     videoId: data.id,
     stageId: data.stage_id,
     stageEnteredAt: data.stage_entered_at,
+    updatedAt: data.updated_at,
   };
 }

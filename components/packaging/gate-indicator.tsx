@@ -45,28 +45,40 @@ export function GateIndicator({
       : "border-emerald-600/60 bg-emerald-600/10 text-emerald-800 dark:text-emerald-300"
     : "border-border bg-surface text-foreground";
 
+  /*
+    The live region is the *decision*, and only the decision.
+
+    The whole box used to be `role="status"`, caveat included — and the caveat
+    flips on the first keystroke of every edit, so resuming typing re-announced
+    the entire gate sentence whether or not the gate had changed its mind. The
+    sentence is still announced when it changes, which is the point of a live
+    indicator; the "not saved yet" fragment is a sibling of the live region
+    rather than its content, so it is read in document order and not spoken on
+    a keypress.
+  */
   return (
     <div
-      role="status"
       data-testid="gate-indicator"
       data-gate={status.ready ? (status.skipped ? "skipped" : "ready") : status.missing}
       className={["rounded-md border px-3 py-2 text-sm", tone].join(" ")}
     >
-      <span className="font-medium">{describeGate(status)}</span>
+      <span role="status">
+        <span className="font-medium">{describeGate(status)}</span>
 
-      {status.skipped && skipReason ? (
-        <span data-testid="gate-skip-reason"> — {skipReason}</span>
-      ) : null}
+        {status.skipped && skipReason ? (
+          <span data-testid="gate-skip-reason"> — {skipReason}</span>
+        ) : null}
 
-      {status.ready && !status.skipped ? (
-        <span className="text-muted"> — this video can move past Packaging.</span>
-      ) : null}
+        {status.ready && !status.skipped ? (
+          <span className="text-muted"> — this video can move past Packaging.</span>
+        ) : null}
 
-      {status.skipped ? (
-        <span className="text-muted">
-          . The gate is bypassed for this video and the skip stays visible as a badge.
-        </span>
-      ) : null}
+        {status.skipped ? (
+          <span className="text-muted">
+            . The gate is bypassed for this video and the skip stays visible as a badge.
+          </span>
+        ) : null}
+      </span>
 
       {unsaved ? (
         <span data-testid="gate-unsaved" className="text-muted">

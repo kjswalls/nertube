@@ -3,6 +3,7 @@
 import { useId, useState, useTransition } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
+import { useVideoVersion } from "@/components/video-version";
 
 /** One option: an enabled stage of this video's channel. */
 export interface FlowStage {
@@ -74,6 +75,7 @@ export function StageSelect({
     { kind: "idle" } | { kind: "moved"; name: string } | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [pending, startTransition] = useTransition();
+  const version = useVideoVersion();
 
   /**
    * A video can sit in a stage that has since been disabled — settings refuses
@@ -96,6 +98,11 @@ export function StageSelect({
         const result = await moveVideo({ videoId, stageId, slug: channelSlug });
 
         if (result.ok) {
+          // `move_video` stamps `updated_at` like any other write, so the
+          // page's shared version token has to hear about it — otherwise the
+          // next packaging save on this page would report a conflict with a
+          // move the user made themselves.
+          version.adopt(result.updatedAt);
           setCurrent({ id: result.stageId, name: target.name });
           setStatus({ kind: "moved", name: target.name });
           onMoved(result.stageId);
@@ -142,8 +149,12 @@ export function StageSelect({
         ))}
       </select>
 
+      {/*
+        The live region carries what the move did, and the standing hint sits
+        beside it rather than inside it — a permanent sentence in a live region
+        is a sentence that gets announced again every time the region settles.
+      */}
       <p
-        role={status.kind === "error" ? "alert" : "status"}
         data-testid="stage-select-status"
         data-state={pending ? "moving" : status.kind}
         className={[
@@ -153,13 +164,18 @@ export function StageSelect({
             : "text-muted",
         ].join(" ")}
       >
-        {pending
-          ? "Moving…"
-          : status.kind === "moved"
-            ? `Moved to ${status.name}.`
-            : status.kind === "error"
-              ? status.message
-              : "Moving from here runs the same packaging gate as the board."}
+        <span role={status.kind === "error" ? "alert" : "status"}>
+          {pending
+            ? "Moving…"
+            : status.kind === "moved"
+              ? `Moved to ${status.name}.`
+              : status.kind === "error"
+                ? status.message
+                : ""}
+        </span>
+        {!pending && status.kind === "idle" ? (
+          <span>Moving from here runs the same packaging gate as the board.</span>
+        ) : null}
       </p>
     </div>
   );

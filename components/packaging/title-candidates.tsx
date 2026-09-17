@@ -1,8 +1,12 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { MAX_CANDIDATES, MAX_CANDIDATE_NOTE_LENGTH, MAX_TITLE_LENGTH, type TitleCandidate } from "@/lib/packaging";
+
+import { focusAnchor } from "./hash-focus";
+
+import type { RowIssue } from "./row-issue";
 
 /**
  * The title candidate list.
@@ -30,6 +34,7 @@ import { MAX_CANDIDATES, MAX_CANDIDATE_NOTE_LENGTH, MAX_TITLE_LENGTH, type Title
  */
 export function TitleCandidates({
   candidates,
+  issue,
   onAdd,
   onEditText,
   onEditNote,
@@ -38,6 +43,15 @@ export function TitleCandidates({
   onRemove,
 }: {
   candidates: readonly TitleCandidate[];
+  /**
+   * The element the last save could not write, and why.
+   *
+   * The list shares one patch and one status line with the working title, the
+   * concept and the hooks, so a message about a candidate shown *there* reads
+   * as a refusal of whatever the person was actually typing — and does not say
+   * which row is at fault. It belongs on the row.
+   */
+  issue: RowIssue | null;
   onAdd: (text: string) => void;
   onEditText: (id: string, text: string) => void;
   onEditNote: (id: string, note: string) => void;
@@ -51,6 +65,29 @@ export function TitleCandidates({
   const addRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+
+  /*
+    Where the caret goes after a row is removed.
+
+    Removing a candidate unmounts the button that was just pressed, and focus
+    went to `<body>` — no row, no list, nowhere. It goes to the next row's text
+    field instead (or the previous one, or the add box when the list empties),
+    which is where somebody tidying a list wants to be anyway. Recorded on the
+    click and applied after the re-render, because the element to focus does not
+    exist yet at click time.
+  */
+  const focusAfterRemove = useRef<string | null>(null);
+  useEffect(() => {
+    const wanted = focusAfterRemove.current;
+    if (wanted === null) return;
+    focusAfterRemove.current = null;
+    if (document.activeElement !== null && document.activeElement !== document.body) {
+      return;
+    }
+    focusAnchor(
+      wanted === "" ? addRef.current : document.getElementById(wanted),
+    );
+  });
 
   const count = candidates.length;
   const atLimit = count >= MAX_CANDIDATES;
@@ -134,6 +171,16 @@ export function TitleCandidates({
         {notice ?? ""}
       </p>
 
+      {issue && issue.id === null ? (
+        <p
+          role="alert"
+          data-testid="candidate-issue"
+          className="text-xs text-amber-700 dark:text-amber-400"
+        >
+          {issue.message}
+        </p>
+      ) : null}
+
       {count === 0 ? (
         <p className="text-xs text-muted">
           Nothing yet. Write the bad ones too — the tenth is usually the one.
@@ -174,6 +221,17 @@ export function TitleCandidates({
                 <button
                   type="button"
                   aria-pressed={candidate.chosen}
+                  /*
+                    Fifteen buttons all called "Choose" is what a screen reader's
+                    button list showed before this: nothing tied any of them to
+                    its candidate. The Remove buttons in the same row already got
+                    this right.
+                  */
+                  aria-label={
+                    candidate.chosen
+                      ? `Un-choose candidate ${index + 1}`
+                      : `Choose candidate ${index + 1}`
+                  }
                   data-testid="candidate-choose"
                   title={
                     candidate.chosen
@@ -195,7 +253,14 @@ export function TitleCandidates({
                   type="button"
                   data-testid="candidate-remove"
                   aria-label={`Remove candidate ${index + 1}`}
-                  onClick={() => onRemove(candidate.id)}
+                  onClick={() => {
+                    const neighbour =
+                      candidates[index + 1] ?? candidates[index - 1] ?? null;
+                    focusAfterRemove.current = neighbour
+                      ? `${addId}-text-${neighbour.id}`
+                      : "";
+                    onRemove(candidate.id);
+                  }}
                   className="shrink-0 rounded border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
                 >
                   Remove
@@ -220,8 +285,22 @@ export function TitleCandidates({
                     event.currentTarget.blur();
                   }
                 }}
-                className="w-full rounded border border-transparent bg-transparent px-1 py-1 text-xs text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-foreground/40"
+                // 16px, like every other field on the page: iOS Safari zooms
+                // the whole page when a field under 16px takes focus, and this
+                // is the one you reach for on a phone to say why this title.
+                className="w-full rounded border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-foreground/40"
               />
+
+              {issue && issue.id === candidate.id ? (
+                <p
+                  role="alert"
+                  data-testid="candidate-issue"
+                  className="text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {issue.message} Nothing else on this block is held up by it —
+                  fix this row or remove it and it saves.
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>

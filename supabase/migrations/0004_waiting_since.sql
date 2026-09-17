@@ -28,7 +28,7 @@ alter table public.videos
 -- 0001_init.sql replaced the table-level UPDATE grant on videos with an
 -- explicit column list, so a new column starts with no client UPDATE privilege
 -- at all and has to be named here. It is an ordinary user-owned field —
--- `updateVideoFlow` writes it alongside `waiting_on` in one statement, which is
+-- `updateVideo` writes it alongside `waiting_on` in one statement, which is
 -- what the CHECK above requires — so it joins the granted list rather than the
 -- revoked one.
 grant update (waiting_since) on public.videos to authenticated;

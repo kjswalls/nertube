@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
-import { moveVideo } from "@/app/actions/moves";
-import { useToast } from "@/components/toast";
+import { moveVideo, type GateField } from "@/app/actions/moves";
+import { useToast, type ToastLink } from "@/components/toast";
 import { compareKinds, isWipKind } from "@/lib/defaults";
+import { GATE_ANCHOR, SKIP_ANCHOR } from "@/lib/packaging";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { BoardColumn } from "./board-column";
@@ -243,29 +244,53 @@ export function Board({
    * Refusals go through the application's one toast mechanism
    * (`components/toast.tsx`), mounted by the root layout.
    *
-   * PLAN.md wants two links out of a gate refusal — "Fix packaging"
-   * (the detail page scrolled to that field) and "Skip gate…" — and a refusal
-   * with nowhere to go is just a complaint. But in M1 there is nowhere to go
-   * *yet*: the packaging editor, the gate indicator and the skip flow are all
-   * M2, so both links pointed at fragments (`#packaging`, `#packaging-skip`)
-   * that exist on no page in the application and both dropped the user at the
-   * top of a stub with neither field on it. A named missing field plus a link
-   * that lands where it says it lands is honest; two links to nothing is not.
-   * The pair comes back with the packaging block in M2.
+   * PLAN.md: *a refused drop snaps back with a toast naming the missing field,
+   * a "Fix packaging" link (detail scrolled to that field) and a "Skip gate…"
+   * link*. M1 shipped neither — the packaging editor, the gate indicator and
+   * the skip flow were all M2, so both fragments pointed at nothing and both
+   * dropped the user at the top of a stub with neither field on it, which is
+   * worse than no link at all. M2 builds the fields, so the pair is back.
+   *
+   * The two links go to *different* places and that is the point of having
+   * two. "Fix packaging" carries the anchor of the field the database actually
+   * stopped on (`GATE_ANCHOR`), so the caret lands in the box that is empty —
+   * the concept when it is the concept, the hook list when it is the hook.
+   * "Skip gate…" goes to the reason box with the disclosure already open. One
+   * is the work; the other is the deliberate decision not to do it, and the
+   * refusal is exactly the moment somebody is choosing between them.
+   *
+   * A refusal that is *not* the gate (a disabled stage, a cross-channel drop)
+   * gets neither: there is no field to fix and nothing to skip.
    */
   const showToast = useCallback(
-    (message: string, videoId: string | null, title?: string) => {
+    (
+      message: string,
+      videoId: string | null,
+      missing: GateField | null,
+      title?: string,
+    ) => {
+      const links: ToastLink[] = [];
+
+      if (videoId && missing) {
+        links.push({
+          label: "Fix packaging",
+          href: `/videos/${videoId}#${GATE_ANCHOR[missing]}`,
+        });
+        links.push({
+          label: "Skip gate…",
+          href: `/videos/${videoId}#${SKIP_ANCHOR}`,
+        });
+      } else if (videoId) {
+        links.push({
+          label: title ? `Open “${title}”` : "Open the video",
+          href: `/videos/${videoId}`,
+        });
+      }
+
       toast.push({
         tone: "error",
         message,
-        links: videoId
-          ? [
-              {
-                label: title ? `Open “${title}”` : "Open the video",
-                href: `/videos/${videoId}`,
-              },
-            ]
-          : undefined,
+        links: links.length > 0 ? links : undefined,
       });
     },
     [toast],
@@ -356,7 +381,8 @@ export function Board({
           setOverrides((current) => ({ ...current, [card.id]: before }));
           showToast(
             `Could not move “${title}” to ${target.name}. ${result.message}${where}`,
-            result.missing ? card.id : null,
+            card.id,
+            result.missing,
             title,
           );
           setAnnouncement(`“${title}” was not moved. ${result.message}`);
@@ -371,6 +397,7 @@ export function Board({
         setOverrides((current) => ({ ...current, [card.id]: before }));
         showToast(
           `Could not move “${title}” to ${target.name}: the server could not be reached.${where}`,
+          null,
           null,
         );
         setAnnouncement(
@@ -426,10 +453,12 @@ export function Board({
           showToast(
             `“${title}” is in ${stage.name}, a stage with no place in the core order, so the arrows and the bracket keys have nowhere to send it. Drag it to a column instead.`,
             null,
+            null,
           );
         } else {
           showToast(
             `“${title}” is already in the ${direction === -1 ? "first" : "last"} stage.`,
+            null,
             null,
           );
         }

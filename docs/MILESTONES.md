@@ -719,3 +719,469 @@ and image-type checks are in the browser and are courtesy, not security. A
 determined caller can put a large non-image at their own `concept.png`. Closing
 it is a migration (or the bucket settings in the dashboard) and belongs to M7 or
 a follow-up; it is not something M1 built and hid.
+
+---
+
+## M2 — Detail page: packaging, the gate, and the flow fields
+
+### What M2 delivers
+
+- **`/videos/[id]`, composed.** One page, in the order BRIEF.md principle 1
+  argues for: the **packaging block first**, reading as the gate it is, then the
+  flow fields. M1's `TitleField` stub is gone (`app/videos/[id]/title-field.tsx`
+  deleted) — it bound a second input to `videos.title` on the same page as the
+  block's working title, and two inputs over one column is a race.
+- **The packaging block** (`components/packaging/`): the working title with a
+  live character count and a >55 warning that never blocks; the candidate editor
+  (add, note, choose — choosing copies the text into `videos.title`, because the
+  gate reads the column and not the list); the **written** thumbnail concept; the
+  hook list capped at three with one chosen; the live gate indicator; and the
+  skip disclosure with its required typed reason.
+- **The concept sketch, moved inside it.** M1's uploader is no longer a section
+  of its own. It is rendered as a `sketch` slot beside the written concept, in
+  one bordered group, `Thumbnail concept (written)` on the left and
+  `Concept sketch (reference)` on the right. Apart, they read as two fields
+  either of which might satisfy the gate — which is precisely the misreading M1's
+  review caught. Together, the description is plainly the field and the picture is
+  plainly the reference, and both help lines say which is which.
+- **The flow fields** (`components/video-detail/`): stage select (through
+  `moveVideo` → `move_video`, so the gate cannot be walked around from the page
+  the packaging fields live on), target publish date with an explicit Clear,
+  `waiting_on` with its age, the final YouTube URL (a link only once
+  `published_at` is set), notes, and archive/restore.
+- **`waiting_since`** (`supabase/migrations/0004_waiting_since.sql`): requirement
+  4 asks how long a block has been in place, and M0 stored only the text.
+  Paired with `waiting_on` by a CHECK, stamped `coalesce(existing, now())` so
+  re-wording "the editor" to "the editor's second pass" keeps the original
+  clock. Covered by `supabase/tests/65_waiting_since.test.sql`.
+- **The two gate-refusal links, restored.** See below.
+- **`updated_at` as a precondition** (`components/video-version.tsx`, added by
+  the adversarial review): every write from this page says which version of the
+  row it was computed against, so a second tab cannot silently overwrite a jsonb
+  column it never saw.
+
+### The reconciliation: two agents, one page
+
+The packaging half and the flow half were built concurrently and landed with
+four genuine collisions. All four are resolved by deletion, not by adapters.
+
+**1. Two autosave mechanisms → one.** The flow half had a per-field blur-saver
+factored out of M1's title field; the packaging half had a block-level queue
+that serialised whole-patch writes. Different state shapes, different status
+elements, different answers to "what happens when two saves overlap", for two
+halves of the same page. `components/autosave.tsx` is the merged one, and it is
+two layers because the page has two shapes of edit:
+
+- `useSaveQueue` — **one save on the wire at a time.** Every patch this app
+  sends carries *absolute* values (the whole title, the whole hook list), so two
+  in flight is not a merge problem but an ordering one: if `[c1]` and `[c1, c2]`
+  are both sent and the slower one is the first, the row ends up holding `[c1]`
+  and the second candidate is gone from the database while still on screen. A
+  save that arrives while one is in flight is queued, merged over anything
+  already queued, and sent when the wire is free. It also answers
+  `peekPending()` — the patch on the wire merged with anything queued — because
+  an editor has to diff itself against what it has **sent**, not against what
+  the server last confirmed; the review log below is mostly about what happened
+  when it did not.
+- `useAutosave` — one text field, saved on blur, built on a queue of its own.
+  The flow fields therefore gained the serialisation they did not have.
+- `SaveStatus` — one status line, `role="status"` normally and `role="alert"`
+  on a failure, with an optional Retry that re-sends exactly the payload that
+  failed. `components/packaging/save-status.tsx` and
+  `components/video-detail/autosave.tsx` are both deleted.
+
+The archive button uses the queue directly, with a boolean for a patch: a click
+is the whole decision, so there is no blur to wait for, but the caught
+rejection, the retry payload and the one status element are not hand-rolled a
+third time. **The stage select is deliberately not on it** — a move is not a
+save. It goes through `move_video`, it can be refused by the gate, and it says
+"Moving…" / "Moved to Scripting." / the refusal. Folding it in would mean
+teaching the save status a second vocabulary, which is how one pattern becomes
+two again.
+
+The four properties M1 established are kept verbatim: nothing is sent when
+nothing changed; a failure never reverts what is on screen; a rejected promise
+is caught (uncaught, it replaces the whole route with an error screen, taking
+the text being edited with it); and success re-reads the value from the server's
+answer *unless something has been typed since*, in which case what is on screen
+is newer and wins. The review added a fifth and sharpened the fourth: "nothing
+changed" is measured against what has been sent rather than what has been
+confirmed, and a success re-reads **only the columns that patch carried**, so an
+answer about one column can never rewrite another.
+
+**2. Competing zod schemas → one.** Three schemas described one row: M1's title
+field, the packaging patch, the flow patch. `lib/video-fields.ts` is now the one
+schema for everything `/videos/[id]` can write — every key optional, only the
+present ones written — and it *composes* the packaging element rules
+(`TitleCandidateListSchema`, `HookListSchema`, `SkipReasonSchema`) from
+`lib/packaging.ts` rather than restating them. The rules those files carry are
+the ones no CHECK can express: at most one `chosen` per list, unique ids, no
+blank text, and the "empty means NULL, never `''`" convention that `/now`, the
+board and the idea bank all depend on. `captureVideo`'s `OptionalText` is now
+derived from the same `NullableText`, so trimming is defined once.
+
+**3. Duplicated server actions → one.** `updateWorkingTitle` (M1),
+`updateVideo` (packaging), `updateVideoFlow` (flow) and `setVideoArchived`
+shared the ownership check, the `updated_at` stamp and both revalidations, and
+differed in every detail of how they reported a refusal. They are now one
+`updateVideo`, returning the whole `VideoState` read back from the row — so the
+gate indicator is derived from what is *stored*, which is what `move_video`
+reads, rather than from what was typed.
+
+**4. A type error across the boundary.** The flow agent had to strip `export`
+from `packagingStateFromRow` because a `"use server"` module may only export
+async functions and Turbopack takes every route down otherwise. That function is
+now `stateOf`, private, in the merged action; nothing needs to export it.
+
+### The gate refusal links M1 deferred, and what "focus" means here
+
+PLAN.md: *a refused drop snaps back with a toast naming the missing field, a
+"Fix packaging" link (detail scrolled to that field) and a "Skip gate…" link*.
+M1 shipped one link to the detail page and said why: both fragments pointed at a
+page that had no packaging fields on it, and a link to nothing is worse than no
+link. M2 built the fields, so the pair is back:
+
+- `lib/packaging.ts` now carries `GATE_ANCHOR` (`title` → `packaging-title`,
+  `thumbnail_concept` → `packaging-concept`, `hook` → `packaging-hook`) and
+  `SKIP_ANCHOR`. They live beside the predicate so the board can build an href
+  without importing a client component, and so a renamed field cannot leave a
+  link pointing at nothing.
+- Each anchor is on a **focusable control**, never on the section around it,
+  and `components/packaging/hash-focus.ts` puts the caret in it on mount and on
+  every `hashchange`. A browser's own fragment handling scrolls and stops, which
+  for a text field means arriving looking at the box and still having to click
+  it — a second gesture, and on a phone a lost keyboard.
+- The hook anchor moves with the situation: the first hook's **Choose** button
+  when there are hooks to pick between, the add box when the list is empty. The
+  gate's hook refusal means "none is chosen" far more often than "none is
+  written".
+- `#packaging-skip` **opens the disclosure** and focuses the reason box. The
+  disclosure's `open` is derived rather than stored, so the form is in the
+  document before the focus effect runs; an effect that opened it first would
+  need a second pass, and `setState` inside an effect to trigger that pass is
+  exactly the cascading render the React lint rule refuses. Skipping is still
+  three deliberate acts — the link only ever comes from a refusal, the reason is
+  still typed, and a blank one is still refused out loud.
+
+This was verified by clicking, not by reading the markup:
+`e2e/m2-acceptance.spec.ts` follows both links from a real refusal toast and
+asserts on `document.activeElement.id`, then types without clicking anything
+first and checks the text landed in the field the gate named. A separate manual
+browser pass with screenshots confirmed the same thing visually, including the
+focus ring and the scroll position.
+
+### The M2 acceptance, actually walked
+
+PLAN.md's M2 line: *fill the three fields, move to Scripting; skip with a
+reason, see the badge; clear the title afterwards and see "Complete packaging"*.
+`e2e/m2-acceptance.spec.ts`, four specs, against the real app, the real
+PostgREST and real RLS — every browser claim that changes a row paired with a
+read of that row:
+
+1. **The gate opens.** Capture, drag to Packaging, write the concept (the
+   indicator moves from `thumbnail_concept` to `hook`), write three hooks (still
+   `hook` — "none is chosen yet"), choose one (`ready`), then move to Scripting
+   from the stage select and read `stage_kind = 'scripting'` out of Postgres.
+   Then **clear the title**: the indicator goes back to `title` and says "needs a
+   working title", and the next move is refused by `move_video` for that same
+   field — the later-cleared-field case PLAN.md's review log calls out, proved
+   rather than assumed.
+2. **The skip.** The empty reason is refused out loud and writes nothing; the
+   typed one lands in both paired columns; the amber **TTH skipped** badge is on
+   the card on the board; and the video then moves to Scripting with all three
+   fields still empty.
+3. **The two links**, as above.
+4. **The composed page**: the packaging block's bounding box is above the flow
+   fields', there is exactly one input labelled "Working title", and a packaging
+   save and a flow save in sequence both land (including `waiting_since`).
+
+### The adversarial review, and what it changed
+
+Twenty-two findings came back against this milestone. Each was reproduced here
+before anything was written, and the wording below says what was done rather
+than what was suggested. Four blockers, five majors and thirteen minors; three
+are recorded rather than built, and one turned out to be two views of a fix
+already being made.
+
+**The one bug under four of the findings**
+
+Findings 1, 9 and (from the other end) 5 are the same hole: the editor diffed
+itself against *what the server last confirmed* rather than against *what had
+already been sent*. Type a title, blur, change your mind while the save is still
+on the wire, type the old one back, blur — and the diff comes out empty. Nothing
+is queued, the abandoned value lands, and the status line says "Saved" over a
+row, a board card and a screen that now hold three different strings, for ever.
+
+`useSaveQueue` now exposes `peekPending()`: the patch on the wire, merged with
+anything queued behind it, and `null` the moment the wire settles — including
+after a failure, so the row never takes credit for a write it refused.
+`PackagingBlock.commit` and `useAutosave.commit` both diff against that, falling
+back to the confirmed values when nothing is outstanding. The "nothing changed,
+send nothing" shortcut is kept, because tabbing through untouched fields must
+still be silent; it is just no longer asked the wrong question.
+
+**Fixed — blockers**
+
+- **An edit undone while its save was in flight was never sent** (findings 1 and
+  9). Above. Proved in `e2e/m2-review.spec.ts` with the server action's POST
+  held open for two seconds by `page.route` — latency, not a stub: the same
+  action, the same PostgREST, the same RLS, just later. Two cases: the working
+  title typed and taken back, and a candidate added and then removed. Both end
+  with the row, the field and the board card agreeing.
+- **A skip threw away unsaved packaging edits and then reported "Saved"**
+  (finding 5). `skip` and `unskip` called `send({ packagingSkip })` on their own
+  instead of folding the outstanding diff in, and the answer — a row that knows
+  nothing about the concept typed thirty seconds earlier while the wifi was down
+  — was then adopted wholesale into the editor. Two fixes, because there were
+  two mistakes: the skip goes through the same diff as every other edit, and the
+  answer to any save now overwrites **only the draft keys that patch carried**,
+  so a write about `packaging_skipped_at` can never rewrite the title, the
+  concept, the candidates or the hooks. The e2e case drops the connection, types
+  a concept into the failure, restores it, skips, and reads the concept back out
+  of Postgres.
+- **One invalid element wedged every other packaging save** (finding 6, and
+  finding 8 from the data end). Every packaging field shares one patch, and
+  `TitleCandidateListSchema` rejects the whole list if any element is bad — so
+  one blank candidate text (select-all, delete, Tab) made the title, the concept
+  and the hooks permanently unsavable, with the shared line telling someone
+  typing a title that "a title candidate needs some text" and no indication
+  which row was meant. `withoutInvalidLists` now takes the failing list *out of
+  the patch*, sends the rest, and reports the failure **on the offending row**
+  (`data-testid="candidate-issue"` / `"hook-issue"`, `role="alert"`), using the
+  element id zod's `path: [index, …]` points at. Nothing invalid is written —
+  the rule has not been relaxed — and because the dropped key never enters
+  `saved` or the pending baseline, the list saves itself the moment the row is
+  repaired, with no other gesture. That is also finding 8's answer: a row this
+  app did not write no longer locks its list, it marks it.
+
+**Fixed — majors**
+
+- **Two tabs silently clobbered the jsonb columns** (finding 7). Every patch
+  carries absolute values computed against the row the editor was rendered with,
+  and the write was unconditional, so a second tab PATCHed its whole `hooks`
+  array over the first tab's and neither side could tell. `updated_at` is now
+  the precondition: `updateVideo` takes `expectedUpdatedAt` and matches on it
+  (`.is("updated_at", null)` for a row `capture_video` has never written), a
+  zero-row answer is distinguished from a deleted video by one extra read, and
+  the page says *"This video changed somewhere else…"* with a **Reload** button
+  instead of a Retry that could only overwrite the newer values.
+  `components/video-version.tsx` holds one token for the whole page, seeded from
+  the server render and advanced only by this page's own writes — all five of
+  them, which is why `moveVideo` and `recordConceptSketch` now return the
+  `updated_at` they stamped. A token that missed either would turn every save
+  after a move or an upload into a conflict that never happened; there is an
+  e2e case for exactly that, alongside the two-tab one.
+- **The target date's "saved on change" was documented twice and implemented
+  nowhere** (finding 16). The native `<input type="date">` keeps focus after the
+  overlay closes, so a picked date sat unsaved with the status line saying
+  nothing and `NULL` still in the column after navigating away. `onChange` now
+  calls `commit` as well as `setValue`; `commit` returns early when the value
+  already matches what has been sent, so the pair cannot double-save.
+- **`FlowFields` never re-synced, so publishing from the page's own stage select
+  left the URL block saying the video was not live** (finding 17). The shared
+  slice was seeded into `useState` from props and updated only from `updateVideo`
+  answers — and `published_at` is written exclusively by `move_video`, so that
+  copy could never catch up at all. The props are authoritative again: what is
+  kept is the *delta* a save produced, tagged with the props it was computed
+  over, so a `router.refresh()` wins the moment it arrives. `publishedLabel` is
+  recomputed alongside the value it labels, which the old `absorb` did not do.
+- **Un-skipping re-opened the skip form pre-filled with the reason just
+  withdrawn** (finding 10), which made re-skipping one click and no typing —
+  the cheapest control on the screen, immediately after someone chose to do the
+  work properly. Crossing `skippedAt` in either direction now closes the
+  disclosure, empties the box and puts focus on the control that replaced the
+  one that vanished.
+- **Every structural change dropped focus onto `<body>`, and the skip
+  disclosure was not a disclosure** (finding 11). The skip button stays mounted
+  and carries `aria-expanded` and `aria-controls`; opening it moves the caret
+  into the reason box; Cancel returns it to the button; a successful skip lands
+  on Un-skip and an un-skip lands back on the link. Removing a candidate or a
+  hook focuses the next row's text field, or the add box when the list empties.
+  All of it guarded on focus actually having been dropped, so nothing is taken
+  off a user who moved on while the save was in flight.
+
+**Fixed — minors**
+
+- **A candidate kept its green "Chosen" badge after the working title was
+  changed** (finding 2). Choosing copies the text into `videos.title` because
+  the gate reads the column; nothing un-chose when the column then changed.
+  `unchooseStaleCandidates` runs on every commit, so an edit to the title *or*
+  to the candidate's own text closes the gap, and the tick and the gate cannot
+  disagree in either direction.
+- **The hook counter read as a cap rather than a target** (finding 3). It now
+  says "— the brief asks for three, then pick the strongest" while fewer than
+  three are written, the same shape the candidate counter already had. The gate
+  itself is unchanged: PLAN.md says exactly one chosen, and it still says that.
+- **A one-character skip reason was accepted** (finding 4), so bypassing the
+  gate was cheaper than writing the concept — the asymmetry BRIEF.md principle 1
+  asks for, running backwards. `MIN_SKIP_REASON_LENGTH` is 12, refused in
+  `SkipReasonSchema` and again inline in the disclosure so the answer comes back
+  without a round trip. The two mistakes have two messages: nothing typed, and
+  something typed that is not a reason.
+- **"Skip packaging" was silently disabled while an unrelated save was in
+  flight** (finding 12) — a disabled button with no explanation, which the
+  file's own doc comment rejects. It is enabled; the queue serialises the skip
+  behind whatever is on the wire, which is what it is for.
+- **Every "Choose" button had the same accessible name** (finding 13). They are
+  `Choose candidate 3` / `Un-choose hook 1` now, the way the Remove buttons
+  already were, with the visible text unchanged.
+- **Static help text lived inside `role="status"` live regions** (finding 14),
+  so resuming typing announced the help paragraph. `SaveStatus` keeps the live
+  region for the save state alone and renders the hint as a sibling; the gate
+  indicator's live region is the gate sentence, with the "(not saved yet…)"
+  caveat outside it, so the first keystroke of an edit no longer re-reads the
+  whole thing. The stage select got the same treatment.
+- **Phone-width targets and font sizes** (finding 15): the skip link has
+  vertical padding and clears 24×24, and the candidate note input and the notes
+  textarea are 16px so iOS does not zoom the page on focus — which
+  `working-title.tsx` already had a comment about. The 26px choose/remove
+  buttons clear WCAG 2.5.8 and were left alone.
+- **Three exported length limits were duplicated as magic numbers** (finding
+  18). `MAX_WAITING_ON_LENGTH`, `MAX_URL_LENGTH` and `MAX_NOTES_LENGTH` are
+  imported into `flow-fields.tsx`, which is what the packaging half already did.
+- **Dead knobs and dead types** (finding 19): `useAutosave`'s never-passed
+  `trim` option is gone (and with it a comment that was false), `useSaveQueue`
+  answers `SaveResult` — `{ ok: true } | { ok: false; error; conflict? }` — with
+  the value-carrying `SaveOutcome` left to `useAutosave`, which is the only
+  thing that reads it, and the unused `VideoPatch` export is deleted.
+- **Stale references** (finding 20): the three `updateVideoFlow` mentions name
+  `updateVideo`, `age.ts` no longer claims an archive line that does not exist,
+  and the orphan section banner in `app/actions/videos.ts` is gone.
+- **`readHooks` claimed to accept exactly what `move_video` accepts** (finding
+  22) and did not: Postgres' boolean input also takes `y`, `ye`, `n`, `tr`,
+  `fals` and the rest of the prefixes, so `{"chosen":"y"}` read as not-chosen in
+  the indicator while the gate counted it and let the video straight through.
+  `asChosen` now carries both lists in full, they are exported as
+  `PG_BOOLEAN_STRINGS`, and `lib/packaging.test.ts` pins them against the output
+  of `select ('y')::boolean, ('tr')::boolean, …` on PostgreSQL 16. The comment
+  also says what happens to a value Postgres *cannot* cast: `move_video` raises,
+  which is a refusal someone sees, and the reader calls it not-chosen because a
+  renderer cannot raise.
+
+**Rejected**
+
+- None outright. Finding 8 ("the readers accept shapes the writers refuse") is
+  finding 6 seen from the data end rather than a separate defect, so it has no
+  separate fix: `asChosen` closes the `chosen` half and the per-row reporting
+  closes the "no way to repair it except deleting it" half. Two halves of two
+  other findings were not done as suggested and the reasons are above: finding
+  6's alternative of *treating a blanked candidate as a removal* was not taken
+  (select-all-delete-Tab while thinking is not a request to delete the row), and
+  finding 15's `min-h-11` on the choose and remove buttons was not taken (26px
+  already clears WCAG 2.5.8, and 44px rows would crowd a fifteen-candidate list
+  on the screen that exists to encourage fifteen candidates).
+
+**Recorded rather than built**
+
+- **`waiting_since` is an M3 feature with an M0-schema change, shipped in M2**
+  (finding 21). Correct, and the reviewer's own advice was not to rip it out.
+  Stated plainly here, since the "Deliberately not built" note below says `/now`
+  is M3 while the column only `/now` needs is already in the schema: PLAN.md's
+  `videos` flow columns are `waiting_on`, `filming_day_id`,
+  `target_publish_date`, `archived_at` — there is **no `waiting_since`** — and
+  M0 was the milestone that was supposed to deliver the whole schema. M2 added
+  it anyway (`supabase/migrations/0004_waiting_since.sql`, its paired CHECK, its
+  column grant, `supabase/tests/65_waiting_since.test.sql`,
+  `components/video-detail/age.ts`, and the `coalesce(existing, now())` branch
+  in `updateVideo` with the extra read it costs) because requirement 4 asks how
+  long a block has been in place and the text alone cannot answer. It is a
+  deviation from PLAN.md's fixed column list and a milestone early. Nothing is
+  broken by it; the next reviewer should not have to rediscover that the schema
+  and the plan disagree here.
+
+**Deferred, to a named milestone**
+
+- Nothing from this review was deferred: no finding asked for an M3+ feature.
+  What the review *touched* that belongs later is unchanged — the brainstorm
+  panel that will sit on this block is still M8, and the checklist ratio and
+  `/now` are still M3.
+
+**How each was checked.** Everything above was reproduced and re-probed against
+the local dev stack — the real app, the real PostgREST, real RLS — in Chromium.
+`e2e/m2-review.spec.ts` is thirteen new specs that exist only because of this
+review, and it is deliberately the file that edits with a **busy** wire: the
+rest of the suite waits for "Saved" after every gesture, which is exactly why
+none of it could see findings 1, 5, 9 or 12. `lib/packaging.test.ts` gained the
+skip-reason floor and the Postgres boolean set. The two-tab finding is covered
+by a second page in the same browser context, and by the companion spec that
+proves a move and an upload on the *same* page do not produce a false conflict.
+
+### Gates, as of this commit
+
+Run in this order, as the last thing done to this milestone:
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both `tsconfig.json` and `tsconfig.harness.json`) |
+| `npm run lint` | clean |
+| `npm run build` | succeeds; seven routes, `/videos/[id]` dynamic |
+| `./scripts/verify-db.sh m2_final` | OK — four migrations applied, 13 test files passed |
+| `npm run test` | 80 passed (4 files) |
+| `npm run e2e` | 67 passed, 1 skipped of 68, 4.4m |
+
+The skipped spec is `session-refresh`, which skips itself unless the stack was
+started with a short token TTL — it has its own command, `npm run e2e:refresh`.
+
+The e2e figure is from **two consecutive runs against the same, unreset stack**
+(4.4m then 4.5m, both 67/1), preceded by a cold run on a freshly reset database
+(also 67/1, 4.5m). Thirteen of the sixty-eight are `e2e/m2-review.spec.ts` and
+exist only because of the adversarial review.
+
+**One repeatability defect the review's own new spec exposed**, fixed here
+rather than worked around: `e2e/m1-acceptance.spec.ts` retargets a capture with
+`Alt`+the digit its second channel is drawn with, and the header only binds
+`1`..`9`. Every spec file in `e2e/` owns a channel and recreates it rather than
+dropping it, so the steady state was already nine channels — exactly the last
+digit that exists. Adding one more file took it to ten and the walk failed with
+`Unknown key: "Digit10"` on the *second* consecutive run. `cleanUp()` in that
+file now clears every non-seed channel before it starts, so the acceptance walk
+begins from the state PLAN.md describes — *log in, create two channels* —
+regardless of what ran before it. This is the same class of finding as M1's
+number 16, and it was reachable only by running the suite twice.
+
+### Honest limits
+
+- Everything was verified against the local dev stack
+  (`scripts/dev-stack/`), never a hosted Supabase project — this container's
+  egress blocks `*.supabase.co`. `scripts/dev-stack/README.md` lists what that
+  harness does not reproduce. The M1 deploy gap is still open and still the one
+  part of this repository that cannot be signed off from here.
+- `StageSelect` initialises its current stage from props once and does not
+  re-sync — the same deliberate limitation as the board's override map. It is
+  no longer *dangerous*, because a write from a stale editor is refused by the
+  `updated_at` precondition rather than allowed to overwrite, but a second tab
+  still shows a stage the video may have left.
+- The title character-count warning uses raw `value.length`, not the trimmed
+  length, so trailing spaces count toward 55. That is the number YouTube
+  truncates on, and it keeps the live count and the warning from disagreeing.
+- Archiving does not clear `waiting_on` and does not touch the stage, so
+  restoring needs no decision about where the card goes.
+- The gate indicator's "not saved yet" caveat is derived by diffing the editor
+  against the last confirmed row, so it is honest about a save in flight, a
+  failed one, and a list element that could not be written. It still cannot
+  *know* about an edit made in another tab until something is saved — what it
+  can no longer do is let that edit be overwritten in silence: the next save
+  from this tab is refused with "this video changed somewhere else" and a
+  Reload.
+- The `updated_at` precondition is optimistic locking, not merging. Two people
+  editing one video still means one of them reloads and retypes; what is gone
+  is the version where neither of them is told. It also means an **out-of-band**
+  write — a `move_video` run over SQL, the board open in another tab — makes the
+  open editor refuse until it is reloaded. That is deliberate, and
+  `e2e/packaging.spec.ts` now reloads after the SQL moves it makes for exactly
+  that reason.
+- A list element that fails its own schema is dropped from the patch and marked
+  on its row; the rest of the block keeps saving. While it is unsaved the gate
+  indicator says "not saved yet" but the shared save line can read "Saved" — it
+  is reporting the wire, which really is idle, and the alert on the row is the
+  thing that says what is outstanding.
+
+### Deliberately not built
+
+The brainstorm panel belongs on this block and is M8 — the block leaves room for
+it and does not stub it. Checklists, the ratio on the card and `/now` are M3
+(the page says so at the bottom rather than pretending they are coming
+invisibly); thumbnail roles and the swap log are M4; the idea bank and the
+matrix M5; the calendar M6; settings M7. The Filming badge PLAN.md lists under
+M2 shipped with the board in M1 and is still text-only until M6 gives it a
+filming day to create.

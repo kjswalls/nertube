@@ -513,18 +513,22 @@ test('a gated drag is refused, the card snaps back, and the toast names the miss
   await expect(toast).toBeVisible();
   await expect(toast).toContainText(/thumbnail concept/i);
   await expect(toast).toContainText('Gate blocked');
-  // PLAN.md wants "Fix packaging" and "Skip gate…" out of a refusal. Both are
-  // M2 — there is no packaging editor and no skip flow to link to — so M1
-  // offers the one link that lands where it says it does, and neither dead
-  // fragment is rendered.
-  await expect(
-    toast.getByRole('link', { name: 'Open “Gate blocked”' }),
-  ).toBeVisible();
-  await expect(toast.getByRole('link', { name: /Fix packaging/ })).toHaveCount(0);
-  await expect(toast.getByRole('link', { name: /Skip gate/ })).toHaveCount(0);
-  const href = await toast.getByRole('link').first().getAttribute('href');
-  expect(href, 'the refusal must not link to a fragment nothing renders').not.toMatch(
-    /#/,
+  // PLAN.md wants "Fix packaging" and "Skip gate…" out of a refusal. M1 shipped
+  // neither, on purpose: both fragments pointed at a page that had no packaging
+  // fields on it. M2 builds the block, so the pair is restored — and "Fix
+  // packaging" carries the anchor of the field the database actually stopped
+  // on, which here is the written concept.
+  const fixLink = toast.getByRole('link', { name: 'Fix packaging' });
+  const skipLink = toast.getByRole('link', { name: /Skip gate/ });
+  await expect(fixLink).toBeVisible();
+  await expect(skipLink).toBeVisible();
+  await expect(fixLink).toHaveAttribute(
+    'href',
+    /^\/videos\/[0-9a-f-]+#packaging-concept$/,
+  );
+  await expect(skipLink).toHaveAttribute(
+    'href',
+    /^\/videos\/[0-9a-f-]+#packaging-skip$/,
   );
 
   // Snapped back: it is in Packaging, it is not in Scripting, and Scripting is

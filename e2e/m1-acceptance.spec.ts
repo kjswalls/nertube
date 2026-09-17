@@ -8,6 +8,7 @@ import {
   API_KEY_IAT,
   GATEWAY_URL,
   PG,
+  SEED_CHANNELS,
   SEED_EMAIL,
   SEED_PASSWORD,
 } from '../scripts/dev-stack/shared';
@@ -96,16 +97,33 @@ test.afterAll(async () => {
 });
 
 /**
- * Remove anything this file created. Videos first: `videos -> stages` is
- * `on delete no action`, so clearing the rows before the channel cascade keeps
- * the delete order out of the picture.
+ * Put the account back to "the two channels the stack seeds", which is what
+ * PLAN.md's M1 acceptance starts from: *log in, create two channels*.
+ *
+ * It removes **every** channel this suite has left behind, not only this file's
+ * two, and that is the point. The header binds `1`..`9` to the first nine
+ * channels in `created_at` order, and the walk below retargets a capture with
+ * `Alt`+the digit its second channel is drawn with. Every spec file in `e2e/`
+ * owns a channel and recreates it rather than dropping it, so on a *second*
+ * consecutive run against an unreset stack this file's two land tenth and
+ * eleventh, there is no digit for them, and the walk fails with
+ * `Unknown key: "Digit10"` — a failure about leftovers, in the one spec whose
+ * job is to prove the product works. Every other file rebuilds its own channel
+ * in `beforeEach`, so there is nothing here for them to lose.
+ *
+ * Videos first: `videos -> stages` is `on delete no action`, so clearing the
+ * rows before the channel cascade keeps the delete order out of the picture.
  */
 async function cleanUp(): Promise<void> {
+  const seeded = [...SEED_CHANNELS];
   await db.query(
     `delete from public.videos
-      where channel_id in (select id from public.channels where slug like 'm1-acceptance-%')`,
+      where channel_id in (select id from public.channels where name <> all($1::text[]))`,
+    [seeded],
   );
-  await db.query("delete from public.channels where slug like 'm1-acceptance-%'");
+  await db.query('delete from public.channels where name <> all($1::text[])', [
+    seeded,
+  ]);
 }
 
 interface VideoRow {
@@ -391,12 +409,16 @@ test('dragging an idea past Packaging is refused, and nothing moves', async ({
   const toast = toastSaying(page, /thumbnail concept/i);
   await expect(toast).toBeVisible();
   await expect(toast).toHaveAttribute('data-tone', 'error');
-  // One link, and it lands on a page that exists. "Fix packaging" and
-  // "Skip gate…" come back in M2 with the packaging block and the skip flow.
-  await expect(toast.getByRole('link')).toHaveCount(1);
-  await expect(toast.getByRole('link')).toHaveAttribute(
+  // Two links, and both land on something that exists: M2 restored the pair
+  // PLAN.md asks for once there were fields to point at.
+  await expect(toast.getByRole('link')).toHaveCount(2);
+  await expect(toast.getByRole('link', { name: 'Fix packaging' })).toHaveAttribute(
     'href',
-    /^\/videos\/[0-9a-f-]+$/,
+    /^\/videos\/[0-9a-f-]+#packaging-concept$/,
+  );
+  await expect(toast.getByRole('link', { name: /Skip gate/ })).toHaveAttribute(
+    'href',
+    /^\/videos\/[0-9a-f-]+#packaging-skip$/,
   );
 
   // Snapped back: not left sitting in the column the database refused.

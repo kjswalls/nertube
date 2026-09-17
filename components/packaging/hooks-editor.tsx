@@ -1,8 +1,12 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { MAX_HOOK_LENGTH, MAX_HOOKS, type Hook } from "@/lib/packaging";
+
+import { focusAnchor } from "./hash-focus";
+
+import type { RowIssue } from "./row-issue";
 
 /**
  * The hook list: three variants, one chosen.
@@ -29,14 +33,27 @@ import { MAX_HOOK_LENGTH, MAX_HOOKS, type Hook } from "@/lib/packaging";
  * The indicator says so while they are there.
  */
 export function HooksEditor({
+  anchorId,
   hooks,
+  issue,
   onAdd,
   onEditText,
   onCommit,
   onToggleChosen,
   onRemove,
 }: {
+  /**
+   * `GATE_ANCHOR.hook`, put on whichever control a person sent here would
+   * actually use: the "Choose" button of the first hook when there are hooks to
+   * pick between, and the add box when the list is still empty. The gate's hook
+   * refusal means "none is chosen" far more often than "none is written", and a
+   * link that lands in the wrong one of those two is a link that has to be
+   * followed by hunting.
+   */
+  anchorId: string;
   hooks: readonly Hook[];
+  /** The element the last save could not write, and why. Shown on its own row. */
+  issue: RowIssue | null;
   onAdd: (text: string) => void;
   onEditText: (id: string, text: string) => void;
   onCommit: () => void;
@@ -49,8 +66,21 @@ export function HooksEditor({
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
+  /** Where the caret goes after a row is removed — see `title-candidates.tsx`. */
+  const focusAfterRemove = useRef<string | null>(null);
+  useEffect(() => {
+    const wanted = focusAfterRemove.current;
+    if (wanted === null) return;
+    focusAfterRemove.current = null;
+    if (document.activeElement !== null && document.activeElement !== document.body) {
+      return;
+    }
+    focusAnchor(wanted === "" ? addRef.current : document.getElementById(wanted));
+  });
+
   const atLimit = hooks.length >= MAX_HOOKS;
   const chosen = hooks.filter((hook) => hook.chosen).length;
+  const short = hooks.length < MAX_HOOKS;
 
   function add() {
     const text = draft.trim();
@@ -79,9 +109,17 @@ export function HooksEditor({
         <h3 id={`${addId}-heading`} className="text-xs font-medium text-muted">
           Hooks
         </h3>
+        {/*
+          Phrased against the target, exactly like the candidate counter next
+          door. "1/3 written" reads as a cap you are comfortably under; the
+          brief asks for three versions and the strongest picked, and the gate
+          turns green on one hook, so nothing on the screen used to notice that
+          only one variant existed.
+        */}
         <p data-testid="hook-count" className="text-xs text-muted">
           <span data-testid="hook-count-number">{hooks.length}</span>/{MAX_HOOKS} written
           {chosen === 1 ? " · one chosen" : chosen === 0 ? " · none chosen" : ` · ${chosen} chosen`}
+          {short ? " — the brief asks for three, then pick the strongest" : ""}
         </p>
       </div>
 
@@ -98,11 +136,14 @@ export function HooksEditor({
         }}
         className="flex gap-2"
       >
-        <label htmlFor={addId} className="sr-only">
+        <label
+          htmlFor={hooks.length === 0 ? anchorId : addId}
+          className="sr-only"
+        >
           Add a hook
         </label>
         <textarea
-          id={addId}
+          id={hooks.length === 0 ? anchorId : addId}
           ref={addRef}
           value={draft}
           rows={2}
@@ -151,7 +192,7 @@ export function HooksEditor({
               data-testid="hook-row"
               data-chosen={hook.chosen ? "true" : "false"}
               className={[
-                "flex items-start gap-2 rounded-md border px-2 py-2",
+                "flex flex-wrap items-start gap-2 rounded-md border px-2 py-2",
                 hook.chosen ? "border-emerald-600/60 bg-emerald-600/5" : "border-border",
               ].join(" ")}
             >
@@ -171,7 +212,13 @@ export function HooksEditor({
 
               <button
                 type="button"
+                id={index === 0 ? anchorId : undefined}
                 aria-pressed={hook.chosen}
+                // One accessible name per hook, not three buttons called
+                // "Choose" — the same fix the Remove buttons already had.
+                aria-label={
+                  hook.chosen ? `Un-choose hook ${index + 1}` : `Choose hook ${index + 1}`
+                }
                 data-testid="hook-choose"
                 title={
                   hook.chosen
@@ -193,15 +240,42 @@ export function HooksEditor({
                 type="button"
                 data-testid="hook-remove"
                 aria-label={`Remove hook ${index + 1}`}
-                onClick={() => onRemove(hook.id)}
+                onClick={() => {
+                  const neighbour = hooks[index + 1] ?? hooks[index - 1] ?? null;
+                  focusAfterRemove.current = neighbour
+                    ? `${addId}-text-${neighbour.id}`
+                    : "";
+                  onRemove(hook.id);
+                }}
                 className="shrink-0 rounded border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
               >
                 Remove
               </button>
+
+              {issue && issue.id === hook.id ? (
+                <p
+                  role="alert"
+                  data-testid="hook-issue"
+                  className="w-full text-xs text-amber-700 dark:text-amber-400"
+                >
+                  {issue.message} Nothing else on this block is held up by it —
+                  fix this row or remove it and it saves.
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
       )}
+
+      {issue && issue.id === null ? (
+        <p
+          role="alert"
+          data-testid="hook-issue"
+          className="text-xs text-amber-700 dark:text-amber-400"
+        >
+          {issue.message}
+        </p>
+      ) : null}
     </section>
   );
 }

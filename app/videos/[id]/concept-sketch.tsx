@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type ChangeEvent } from "react";
 
 import { recordConceptSketch } from "@/app/actions/uploads";
+import { useVideoVersion } from "@/components/video-version";
 import {
   CONCEPT_SKETCH_ACCEPT,
   conceptSketchPath,
@@ -66,6 +67,7 @@ export function ConceptSketch({
 }) {
   const inputId = useId();
   const router = useRouter();
+  const version = useVideoVersion();
   const [busy, setBusy] = useState<null | "uploading" | "saving">(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -132,6 +134,10 @@ export function ConceptSketch({
     }
 
     setSaved(true);
+    // Recording a sketch writes the row, so it stamps `updated_at` — and the
+    // page's shared version token has to hear about it, or the next packaging
+    // save would look like somebody else's write. See `video-version.tsx`.
+    version.adopt(result.updatedAt);
     // The action revalidated this route; this is what re-reads it, so the
     // <img> below comes back with a freshly signed URL for the new object.
     router.refresh();
@@ -139,9 +145,9 @@ export function ConceptSketch({
 
   return (
     <section aria-labelledby={`${inputId}-heading`} className="flex flex-col gap-3">
-      <h2 id={`${inputId}-heading`} className="text-sm font-semibold">
+      <h3 id={`${inputId}-heading`} className="text-xs font-medium text-muted">
         Concept sketch (reference)
-      </h2>
+      </h3>
 
       {/*
         The name matters. BRIEF.md principle 2 separates the thumbnail
@@ -150,12 +156,14 @@ export function ConceptSketch({
         both were called "thumbnail concept", a card with a sketch on it was
         refused a move for "a thumbnail concept", which is a refusal nobody can
         act on. This is the reference image; the written concept is the field
-        the gate wants, and its editor arrives with the packaging block in M2.
+        the gate wants, and it is the box immediately beside this one.
       */}
       <p className="text-xs text-muted">
-        A reference image for the concept — a sketch, a frame, a photo. The
-        written thumbnail concept is a separate field, and it is the one the
-        packaging gate reads; its editor is M2.
+        A reference image for the concept — a sketch, a frame, a photo. It is
+        here to look at while writing the concept next to it. It is{" "}
+        <strong className="font-medium">not</strong> the field the gate reads:
+        that is the written concept, and a video with a sketch and no written
+        concept is still refused at Packaging.
       </p>
 
       {/*

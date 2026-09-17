@@ -25,22 +25,27 @@ import { useId } from "react";
  * sideways discourages writing the second half of it.
  */
 export function ThumbnailConcept({
+  anchorId,
   value,
   onChange,
   onCommit,
   maxLength,
 }: {
+  /**
+   * The textarea's `id` — `GATE_ANCHOR.thumbnail_concept`. A refusal that says
+   * the concept is missing links straight into this box.
+   */
+  anchorId: string;
   value: string;
   onChange: (next: string) => void;
   onCommit: () => void;
   maxLength: number;
 }) {
-  const fieldId = useId();
   const helpId = useId();
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={fieldId} className="text-xs font-medium text-muted">
+      <label htmlFor={anchorId} className="text-xs font-medium text-muted">
         Thumbnail concept (written)
       </label>
 
@@ -52,7 +57,7 @@ export function ThumbnailConcept({
       </p>
 
       <textarea
-        id={fieldId}
+        id={anchorId}
         name="thumbnailConcept"
         value={value}
         rows={3}

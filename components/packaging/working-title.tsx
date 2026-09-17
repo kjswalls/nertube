@@ -28,16 +28,21 @@ import { MAX_TITLE_LENGTH, TITLE_WARN_LENGTH } from "@/lib/packaging";
  * keyboard path and the mouse path both end in exactly one save.
  */
 export function WorkingTitle({
+  anchorId,
   value,
   onChange,
   onCommit,
 }: {
+  /**
+   * The input's `id` — `GATE_ANCHOR.title`, so the board's "Fix packaging"
+   * link can land the caret here rather than merely scrolling past it.
+   */
+  anchorId: string;
   value: string;
   onChange: (next: string) => void;
   /** Blur or Enter: the block decides whether anything actually changed. */
   onCommit: () => void;
 }) {
-  const inputId = useId();
   const countId = useId();
 
   const length = value.length;
@@ -45,12 +50,12 @@ export function WorkingTitle({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor={inputId} className="text-xs font-medium text-muted">
+      <label htmlFor={anchorId} className="text-xs font-medium text-muted">
         Working title
       </label>
 
       <input
-        id={inputId}
+        id={anchorId}
         name="title"
         type="text"
         value={value}
