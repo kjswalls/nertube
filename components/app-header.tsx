@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { signOut } from "@/app/actions/auth";
+import { CaptureHost } from "@/components/capture/capture-host";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
@@ -61,6 +62,12 @@ export async function AppHeader({ currentSlug }: { currentSlug?: string }) {
             + New channel
           </Link>
         </nav>
+
+        {/* `c` anywhere opens the capture modal, so the binding is mounted by
+            the one component every signed-in page renders. It also already
+            knows the channel list and the route's channel, which is exactly
+            what capture needs to pick its target. */}
+        <CaptureHost channels={channels ?? []} currentSlug={currentSlug} />
 
         <form action={signOut} className="ml-auto">
           <button

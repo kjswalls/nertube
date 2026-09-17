@@ -1,0 +1,393 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import {
+  useActionState,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+
+import { captureVideoAction, type CaptureState } from "@/app/actions/videos";
+
+import { readLastChannel, writeLastChannel } from "./last-channel";
+
+/** The channels a capture may be aimed at, in the header's order. */
+export interface CaptureChannel {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/**
+ * The capture form: one input, Enter, done.
+ *
+ * The same component is the body of the `c` modal and the whole of `/capture`,
+ * because PLAN.md says they are the same form and because two copies would
+ * drift. `variant` changes what happens *after* a save — the modal closes, the
+ * page clears itself and waits for the next idea — and nothing else.
+ *
+ * The fast path is one field. Hook, notes and tags live behind a disclosure
+ * that is closed until asked for, so nothing between `c` and Enter can be
+ * mistaken for something that wants filling in.
+ */
+export function CaptureForm({
+  channels,
+  initialChannelId,
+  preferLastUsed,
+  variant,
+  onSaved,
+  autoFocus = true,
+}: {
+  channels: readonly CaptureChannel[];
+  /** The route's channel, or the first one. Always a real id. */
+  initialChannelId: string;
+  /**
+   * True when the route does not name a channel, so the last-used one wins.
+   * Read from localStorage after mount — the server cannot know it, and
+   * rendering it on the server would be a hydration mismatch.
+   */
+  preferLastUsed: boolean;
+  variant: "modal" | "page";
+  /** Modal variant: called once a capture has been written. */
+  onSaved?: (saved: { id: string; title: string; channelName: string }) => void;
+  autoFocus?: boolean;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<CaptureState, FormData>(
+    captureVideoAction,
+    null,
+  );
+
+  const [channelId, setChannelId] = useState(initialChannelId);
+  const [title, setTitle] = useState("");
+  const [more, setMore] = useState(false);
+  /**
+   * The empty-title refusal, decided here: it must never cost a round trip,
+   * and `required` alone cannot see that "   " is empty.
+   */
+  const [clientError, setClientError] = useState<string | null>(null);
+  /** The page variant's "it saved" line; the modal hands this to its host. */
+  const [saved, setSaved] = useState<{ title: string; channelName: string } | null>(
+    null,
+  );
+
+  const titleRef = useRef<HTMLInputElement>(null);
+  const hookRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const ids = useId();
+  const titleId = `${ids}-title`;
+  const hookId = `${ids}-hook`;
+  const notesId = `${ids}-notes`;
+  const tagsId = `${ids}-tags`;
+  const moreId = `${ids}-more`;
+  const hintId = `${ids}-hint`;
+
+  /**
+   * Put the cursor in the title field.
+   *
+   * The `autoFocus` attribute alone is not enough inside the modal: React
+   * restores the focus that was there *before* a commit as part of that commit,
+   * so opening the dialog from a focused control (the header's Capture button,
+   * say) ends with focus back on that control and the dialog's first tab stop
+   * picking it up. An effect runs after that restoration, so this wins. The
+   * attribute stays for the server-rendered `/capture`, where the browser
+   * focuses the field before any JavaScript has run at all.
+   */
+  useEffect(() => {
+    if (autoFocus) titleRef.current?.focus();
+  }, [autoFocus]);
+
+  // The last-used channel, once there is a browser to ask. Only when the route
+  // did not already name one: an explicit channel always beats a remembered one.
+  useEffect(() => {
+    if (!preferLastUsed) return;
+    const remembered = readLastChannel();
+    if (remembered && channels.some((channel) => channel.id === remembered)) {
+      // Reading localStorage is the one thing that cannot happen during render:
+      // the server does not have it, so rendering from it is a hydration
+      // mismatch. An effect is the supported place, and this one runs once.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+      setChannelId(remembered);
+    }
+    // Once, on mount: re-running this would fight a `1..9` retarget.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A capture landed. Clear the form either way; who gets told depends on the
+  // variant.
+  useEffect(() => {
+    if (!state || !state.ok) return;
+
+    writeLastChannel(state.channelId);
+    // `useActionState` hands the result back as state rather than to a
+    // callback, so clearing the form for the next idea is necessarily a
+    // response to that state arriving. Keeping the action attached to the
+    // <form> is what makes /capture work with no JavaScript at all, which is
+    // worth one effect.
+    /* eslint-disable react-hooks/set-state-in-effect -- see above */
+    setTitle("");
+    setMore(false);
+    setClientError(null);
+    formRef.current?.reset();
+    // `reset()` also resets the radios to their *rendered* `defaultChecked`,
+    // and the channel is React state, so put it back.
+    setChannelId(state.channelId);
+
+    // The action revalidated the board; this is what re-renders it in place, so
+    // the new card shows up without anyone reaching for the reload button.
+    router.refresh();
+
+    if (variant === "modal") {
+      onSaved?.({ id: state.id, title: state.title, channelName: state.channelName });
+    } else {
+      setSaved({ title: state.title, channelName: state.channelName });
+      titleRef.current?.focus();
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // `state` is a fresh object per submission, which is what makes this fire
+    // once per capture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  /** Aim the capture at the nth channel (1-based), if there is one. */
+  function retarget(position: number): boolean {
+    const channel = channels[position - 1];
+    if (!channel) return false;
+    setChannelId(channel.id);
+    return true;
+  }
+
+  /**
+   * Keys the title input handles itself.
+   *
+   * **Shift+Enter opens the disclosure.** A single-line input submits its form
+   * on Enter *whether or not* Shift is held, so this has to run first.
+   *
+   * **A bare `1`..`9` retargets the channel while the title is still empty.**
+   * PLAN.md asks for "`1..9` retargets the channel before Enter", and the
+   * literal reading — a digit is always a channel — makes "10 things I got
+   * wrong" untypeable. "While the title is empty" is what "before" can mean
+   * without breaking the field: the digits are live at exactly the moment the
+   * modal opens, and become text the instant there is any. Alt+digit (read off
+   * `event.code`, because Alt+1 is `¡` on a Mac keyboard) works whenever.
+   */
+  function onTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter" && event.shiftKey) {
+      event.preventDefault();
+      setMore(true);
+      // The disclosure renders in the same commit; focus it after that.
+      requestAnimationFrame(() => hookRef.current?.focus());
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey) return;
+
+    if (event.altKey) {
+      const fromCode = /^Digit([1-9])$/.exec(event.code);
+      if (fromCode && retarget(Number(fromCode[1]))) event.preventDefault();
+      return;
+    }
+
+    if (title === "" && /^[1-9]$/.test(event.key)) {
+      if (retarget(Number(event.key))) event.preventDefault();
+    }
+  }
+
+  // The client-side refusal wins while it stands: it is the newer answer.
+  const error = clientError ?? (state && !state.ok ? state.error : null);
+  const current = channels.find((channel) => channel.id === channelId);
+
+  const field =
+    "w-full rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40";
+
+  return (
+    <form
+      ref={formRef}
+      action={formAction}
+      onSubmit={(event) => {
+        // Refused here, before the action is ever called: an empty or
+        // whitespace-only title is not a network problem. (The server action
+        // validates the same rule with zod — this form is not the only caller,
+        // and a client check is a convenience, never a guarantee.)
+        if (title.trim() === "") {
+          event.preventDefault();
+          setClientError(
+            "Give the idea a title — anything you will recognise later.",
+          );
+          titleRef.current?.focus();
+          return;
+        }
+        setClientError(null);
+      }}
+      /* `required` still tells assistive technology the field is required;
+         `noValidate` keeps the browser's own bubble out of the way, because it
+         fires before this handler and cannot see the whitespace case. */
+      noValidate
+      className="flex flex-col gap-3"
+      // A capture is never a browser-autofilled form.
+      autoComplete="off"
+    >
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={titleId} className="text-sm font-medium">
+          Idea
+        </label>
+        <input
+          ref={titleRef}
+          id={titleId}
+          name="title"
+          type="text"
+          required
+          maxLength={300}
+          /* The modal exists to put the cursor here, and /capture is a
+             capture-only route: both are the documented exception to "never
+             move focus for the user". */
+          autoFocus={autoFocus}
+          value={title}
+          onChange={(event) => {
+            setTitle(event.target.value);
+            if (clientError) setClientError(null);
+            if (saved) setSaved(null);
+          }}
+          onKeyDown={onTitleKeyDown}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={hintId}
+          placeholder="What is the video?"
+          className={field}
+        />
+        <p id={hintId} className="text-xs text-muted">
+          Enter saves it as an idea
+          {current ? ` in ${current.name}` : ""}. Shift+Enter adds a hook, notes
+          and tags.
+          {channels.length > 1 ? " 1–9 picks the channel while this is empty." : ""}
+        </p>
+      </div>
+
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="text-sm font-medium">Channel</legend>
+        <div className="flex flex-wrap gap-2">
+          {channels.map((channel, index) => {
+            const checked = channel.id === channelId;
+            return (
+              <label
+                key={channel.id}
+                className={[
+                  "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-sm",
+                  "focus-within:ring-2 focus-within:ring-foreground/40",
+                  checked
+                    ? "border-foreground bg-foreground font-medium text-background"
+                    : "border-border text-muted hover:text-foreground",
+                ].join(" ")}
+              >
+                <input
+                  type="radio"
+                  name="channelId"
+                  value={channel.id}
+                  checked={checked}
+                  onChange={() => setChannelId(channel.id)}
+                  className="sr-only"
+                />
+                {index < 9 ? (
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "rounded px-1 text-xs tabular-nums",
+                      checked ? "bg-background/20" : "bg-surface",
+                    ].join(" ")}
+                  >
+                    {index + 1}
+                  </span>
+                ) : null}
+                {channel.name}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !more;
+            setMore(next);
+            if (next) requestAnimationFrame(() => hookRef.current?.focus());
+          }}
+          aria-expanded={more}
+          aria-controls={moreId}
+          className="self-start rounded-md px-1 py-1 text-sm text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-foreground/40"
+        >
+          {more ? "Less" : "More"}
+        </button>
+
+        {/* Unmounted, not hidden: an empty <textarea> that is merely invisible
+            still posts, and still collects a tab stop. */}
+        {more ? (
+          <div id={moreId} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={hookId} className="text-sm font-medium">
+                One-line hook
+              </label>
+              <input
+                ref={hookRef}
+                id={hookId}
+                name="oneLineHook"
+                type="text"
+                className={field}
+                placeholder="The promise in one line"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={notesId} className="text-sm font-medium">
+                Notes
+              </label>
+              <textarea id={notesId} name="notes" rows={3} className={field} />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={tagsId} className="text-sm font-medium">
+                Tags
+              </label>
+              <input
+                id={tagsId}
+                name="tags"
+                type="text"
+                className={field}
+                placeholder="comma, separated"
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Always rendered so a screen reader announces the message in place. */}
+      <p
+        role="alert"
+        aria-live="assertive"
+        className="min-h-5 text-sm text-red-600 dark:text-red-400"
+      >
+        {error}
+      </p>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="min-h-11 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Capture"}
+        </button>
+
+        {variant === "page" ? (
+          <p role="status" aria-live="polite" className="text-sm text-muted">
+            {saved ? `Captured “${saved.title}” in ${saved.channelName}.` : ""}
+          </p>
+        ) : null}
+      </div>
+    </form>
+  );
+}
