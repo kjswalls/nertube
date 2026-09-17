@@ -77,6 +77,15 @@ available, `supabase db reset` is the authority.
 `lib/database.types.ts` is hand-written for the same reason: `supabase gen types
 --db-url` still shells out to Docker.
 
+**Since M0 closed**, `scripts/dev-stack/` puts the missing layers back: it runs
+the real PostgREST binary in front of a database built by `verify-db.sh`, and
+re-implements enough of GoTrue and Storage to serve one Supabase-shaped origin,
+so the real app can be signed into and driven in a real browser (`npm run
+dev:stack`, `npm run e2e`). It does not change the caveat above — it is still a
+test harness, `scripts/seed-demo.ts` still needs `auth.admin.*` and still cannot
+run, and `scripts/dev-stack/README.md` lists in full which Supabase behaviours
+it does not reproduce.
+
 ### Deliberately not built yet
 
 Everything M1 and later in `docs/PLAN.md`. Concretely, and to save anyone
@@ -217,3 +226,59 @@ expired session: the matcher excluded `/login`, the page calls `getUser()`, and
 server-component cookie write raises, so there was nowhere for rotated cookies to
 go. The reviewer's own trace with a stubbed Supabase shows the rotation
 happening and no `set-cookie` coming back.
+
+---
+
+## Local test stack
+
+### What it is
+
+`scripts/dev-stack/` and the Playwright suite in `e2e/`. `npm run dev:stack`
+serves one Supabase-shaped origin on `http://127.0.0.1:54321` carrying
+`/rest/v1`, `/auth/v1` and `/storage/v1`, in front of a real PostgreSQL database
+built from `supabase/tests/shim.sql` and the migrations, with the real
+**PostgREST** binary answering every table read, every write and every `rpc()`
+as `anon` or `authenticated` with RLS on. GoTrue and the Storage API are
+re-implemented — about 1,200 lines — to the shape `@supabase/supabase-js`
+parses. `npm run e2e` then drives the real application in a real browser against
+it: sign in, land on a board, read the seeded columns, get bounced when signed
+out. `scripts/dev-stack/README.md` is the reference.
+
+### Why it exists
+
+This repository is developed in an environment with **no Docker daemon**, so
+`supabase start` cannot run and `supabase db reset` cannot run. Without the
+stack, nothing above the SQL layer could be executed at all: no page that needs
+data could be opened, the login form could never be submitted, and `proxy.ts`'s
+session refresh could only be reasoned about. It exists to make M1's cards,
+drag-and-drop and capture modal reviewable as *running software* rather than as
+a diff. It is never deployed, never imported by the application, and where
+Docker is available `supabase start` remains the authority.
+
+### What it cannot prove
+
+A green local run is not a green hosted run, and the difference is written down
+in full under
+[“What this harness does not reproduce”](../scripts/dev-stack/README.md#what-this-harness-does-not-reproduce)
+— thirty-odd numbered items, kept current on purpose, because an undocumented
+divergence is worse than a missing feature. The short version:
+
+- **Auth is a subset.** Password and refresh-token grants only; no email, OTP,
+  OAuth, SSO, MFA or `auth.admin.*`; no rate limiting; a shared HS256 secret
+  instead of JWKS; a simplified refresh-token reuse interval and no reuse
+  *detection*. `scripts/seed-demo.ts` still cannot run here.
+- **Storage is a subset.** No transforms, resumable uploads, `move`/`copy`,
+  public buckets, CDN or Range requests, and `list()` is one level with simple
+  sorting and a bounded scan. The *ownership* rule is not faked: it is
+  `0001_init.sql`'s policy refusing in Postgres.
+- **The gateway is not Kong.** It requires an api key, and that is all: no
+  consumers, no ACLs, no rate limits, no HTTPS.
+- **The database is the shim's.** Plain PostgreSQL 16 with the `auth` and
+  `storage` pieces recreated by hand; no Realtime, Edge Functions, Supavisor,
+  `pg_cron`/`pg_net`/`pg_graphql`, Studio or platform limits. The SQL suite runs
+  against a throwaway `nertube_test`, and the database that is served is built
+  from the migrations alone so it carries no test fixtures.
+- **It proves nothing about deployment.** No HTTPS, no real domain, no Vercel,
+  no hosted project — and there is no hosted project for this app to check
+  against. Anything on the list above has to be verified on real Supabase before
+  it can be believed.

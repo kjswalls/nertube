@@ -45,3 +45,13 @@ next-env.d.ts
 # supabase CLI local state
 /supabase/.temp
 /supabase/.branches
+
+# local dev stack (scripts/dev-stack): throwaway database bytes, PostgREST
+# config and uploaded objects. Never committed.
+/.dev-stack/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e/screenshots/

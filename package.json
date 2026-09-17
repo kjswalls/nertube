@@ -7,11 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.harness.json",
     "test": "vitest run",
     "db:verify": "./scripts/verify-db.sh",
     "db:types": "mkdir -p lib && supabase gen types typescript --db-url \"${NERTUBE_DB_URL:-postgresql://postgres@127.0.0.1:5432/nertube_dev}\" > lib/database.types.ts.tmp && mv lib/database.types.ts.tmp lib/database.types.ts || (rm -f lib/database.types.ts.tmp; exit 1)",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "dev:stack": "node --import tsx scripts/dev-stack/start.mts",
+    "dev:stack:smoke": "tsx scripts/dev-stack/smoke.mts",
+    "dev:stack:stop": "node --import tsx scripts/dev-stack/stop.mts",
+    "e2e": "playwright test",
+    "e2e:refresh": "DEV_STACK_ACCESS_TOKEN_TTL=5 DEV_STACK_REQUIRE_SHORT_TTL=1 E2E_REUSE=0 DEV_STACK_PORT=54331 DEV_STACK_POSTGREST_PORT=54332 NERTUBE_DEV_DB=nertube_e2e_refresh E2E_PORT=3112 playwright test session-refresh"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -22,12 +27,15 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22.20.3",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "pg": "^8.23.0",
     "supabase": "^2.117.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",

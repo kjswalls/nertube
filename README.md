@@ -38,11 +38,77 @@ Other scripts:
 | `npm run build` | Production build |
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
-| `npm run typecheck` | `tsc --noEmit` |
+| `npm run typecheck` | `tsc --noEmit` over both programs: the app, and `tsconfig.harness.json` (the dev stack, the Playwright specs, the unit tests) |
 | `npm test` | `vitest run` |
 | `npm run db:verify` | Rebuild a local database and run the SQL tests |
 | `npm run db:types` | Regenerate `lib/database.types.ts` from the local database (needs Docker) |
 | `npm run seed:demo` | Dev-only: create the user, two seeded channels and the 8-video week fixture |
+| `npm run dev:stack` | Dev-only TEST harness: local Supabase stand-in (see below) |
+| `npm run dev:stack:smoke` | Drive a running dev stack with supabase-js and report what works |
+| `npm run dev:stack:stop` | Stop a dev stack that was killed without being able to clean up |
+| `npm run e2e` | Playwright end-to-end against the real app and the dev stack |
+| `npm run e2e:refresh` | The session-refresh spec on its own stack, ports and database, with a 5-second access token, to exercise `proxy.ts`'s session refresh |
+
+## The local dev stack (a TEST harness)
+
+`npm run dev:stack` starts a local, Docker-free stand-in for Supabase so the
+real app can be driven in a real browser against real Postgres with real
+row-level security. It lives in `scripts/dev-stack/` and has its own
+[README](scripts/dev-stack/README.md).
+
+```bash
+npm run dev:stack   # resets nertube_dev, seeds it, serves http://127.0.0.1:54321
+npm run dev         # the app, pointed at that origin
+npm run e2e         # Playwright end-to-end; starts both of the above itself
+```
+
+It runs the SQL test suite against a throwaway `nertube_test` (so the tests have
+to pass before it will serve anything), builds the database it actually serves
+from the shim and the migrations alone, seeds one user and two channels through
+the real `create_channel` / `capture_video` functions as the `authenticated`
+role, runs the real **PostgREST** binary in front of the database (as
+`authenticator`, not as a superuser), and serves one origin carrying
+`/rest/v1`, `/auth/v1` and `/storage/v1` behind a Kong-style api-key check. It
+prints the URL and the anon key to paste into `.env.local`, and takes PostgREST
+down with it on Ctrl-C — or on a plain `kill`, which npm does not forward and
+which the stack therefore watches for itself. `npm run dev:stack:stop` clears up
+after a `kill -9`, the one case nothing can catch.
+
+**It is a test harness that approximates Supabase. It is never used in
+production, it is never deployed, and the application does not import a line of
+it. It exists only because Docker is unavailable in this environment**, so
+`supabase start` cannot run and no page that needs data could otherwise be
+opened at all. Where Docker is available, `supabase start` is the authority.
+
+The database and PostgREST in it are real; GoTrue and Storage are
+re-implemented to the shape `@supabase/supabase-js` parses. What that costs is
+listed in full under
+["What this harness does not reproduce"](scripts/dev-stack/README.md#what-this-harness-does-not-reproduce)
+— roughly: no email, magic links, OTP, OAuth, SSO, MFA or `auth.admin.*`; no
+rate limiting or lockout; no JWKS or asymmetric signing keys; no refresh-token
+reuse detection; none of Kong beyond the api-key check; only the `public` schema
+over REST; no Realtime, Edge Functions, Supavisor, `pg_cron`/`pg_net`/
+`pg_graphql` or Studio; and in Storage no image transforms, resumable uploads,
+`move`/`copy`, public buckets, CDN or Range requests, with a simplified `list()`.
+**A passing local run is not a passing hosted run.** If a behaviour on that list
+matters, check it against a real project.
+
+`npm run e2e` is the acceptance test for all of the above: it signs in through
+the real login form with the seeded credentials, lands on a board, asserts the
+nine seeded stage columns, asserts a wrong password shows an error without
+signing in, and asserts a signed-out browser is bounced from the board to
+`/login`. It writes a screenshot into the gitignored `e2e/screenshots/`.
+It also asserts the browser's session cookie names this origin, so the suite
+cannot silently be driving an app pointed somewhere else; Playwright starts the
+application server itself for the same reason. `npm run e2e:refresh` drives the
+session-refresh path by starting its own stack — own ports, own database — with
+a five-second access token, the only way to watch `proxy.ts` rotate a token, and
+the check that found the harness's one real fidelity bug (rotating refresh
+tokens with no reuse interval, which signed the user out mid-render). It fails
+rather than skips if it ever finds itself talking to a stack that mints
+hour-long tokens.
+Playwright uses the Chromium already installed at `/opt/pw-browsers` via
+`executablePath`; `playwright install` must never run here.
 
 ## Database
 
@@ -67,7 +133,11 @@ npm run db:verify -- mydbname  # or name your own
 ```
 
 It reads `PGHOST`, `PGPORT` and `PGUSER` (defaults `127.0.0.1`, `5432`,
-`postgres`).
+`postgres`), and refuses to run at all unless `PGHOST` is loopback — its first
+statement is `drop database ... with (force)`, and `PGHOST`/`PGPASSWORD` are
+exactly what you would export to reach a hosted database.
+`scripts/verify-db.sh --no-tests` stops after the migrations; that is how
+`npm run dev:stack` builds a serving database without the test fixtures.
 
 `npm run db:types` regenerates `lib/database.types.ts` with the Supabase CLI.
 The CLI is an npm dev dependency used for that one job. Note that
