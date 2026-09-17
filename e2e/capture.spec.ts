@@ -255,6 +255,15 @@ test('an empty or whitespace-only title is refused, and writes nothing', async (
   page,
 }) => {
   const before = await videoCount();
+
+  // "Before the round trip" is a claim about the network, so watch it: a server
+  // action is a POST to the current URL, and a refused capture must not make
+  // one.
+  const posts: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST') posts.push(request.url());
+  });
+
   const dialog = await openModal(page);
 
   await page.keyboard.press('Enter');
@@ -267,7 +276,8 @@ test('an empty or whitespace-only title is refused, and writes nothing', async (
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('alert')).toHaveText(/give the idea a title/i);
 
-  // The refusal is client-side, so nothing was written and nothing tried to be.
+  // The refusal is client-side, so nothing was written and nothing was sent.
+  expect(posts, 'a refused capture should never reach the server').toEqual([]);
   expect(await videoCount()).toBe(before);
 
   // The field still works: typing a title clears the error and saves.

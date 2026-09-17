@@ -8,6 +8,7 @@ import {
   type BoardStage,
 } from "@/components/board/types";
 import { isStageKind, type StageKind } from "@/lib/defaults";
+import { signedUrlsFor } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
 
 export async function generateMetadata({
@@ -112,6 +113,18 @@ export default async function BoardPage({
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
 
+  // Concept sketches live in a private bucket, so the card needs a signed URL
+  // per path. Signed in ONE request for the whole board (PLAN.md: *server
+  // components batch `createSignedUrls(paths, 3600)`*) — a board can hold a
+  // hundred cards, and a hundred `createSignedUrl` calls would be a hundred
+  // round trips on the page this product is used from most. A path the batch
+  // could not sign simply gets no URL, and the card falls back to its empty
+  // frame.
+  const sketchUrls = await signedUrlsFor(
+    supabase,
+    videoRows.map((video) => video.thumbnail_concept_path),
+  );
+
   const cards: BoardCard[] = [];
   for (const video of videoRows) {
     // A video in a disabled stage has no column to sit in. It is not lost —
@@ -142,6 +155,9 @@ export default async function BoardPage({
       targetPublishDate: video.target_publish_date,
       targetPublishLabel: formatTargetDate(video.target_publish_date),
       thumbnailConceptPath: video.thumbnail_concept_path,
+      thumbnailConceptUrl: video.thumbnail_concept_path
+        ? (sketchUrls.get(video.thumbnail_concept_path) ?? null)
+        : null,
       packagingSkipped: video.packaging_skipped_at !== null,
       waitingOn: video.waiting_on,
       recencyMs: Date.parse(video.updated_at ?? video.created_at),

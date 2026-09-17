@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { DragEvent } from "react";
+import { useState, type DragEvent } from "react";
 
 import type { BoardCard } from "./types";
 
@@ -63,6 +63,16 @@ export function VideoCard({
   const title = card.title.trim() === "" ? "Untitled" : card.title;
   const stale = card.daysInStage > staleDays;
 
+  /*
+    Which signed URL failed to load, if any. Compared against the current one
+    rather than held as a boolean, so a re-upload (a new URL) clears the failure
+    by itself and a card that once failed is not stuck empty forever.
+  */
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const showSketch =
+    card.thumbnailConceptUrl !== null &&
+    card.thumbnailConceptUrl !== brokenUrl;
+
   const daysLabel =
     card.daysInStage === 0
       ? "today"
@@ -97,18 +107,24 @@ export function VideoCard({
     >
       <div className="flex items-start gap-2">
         {/*
-          SLOT — concept sketch thumb.
+          The concept sketch thumb.
 
-          `videos.thumbnail_concept_path` is a private Storage path; the board
-          page would batch `createSignedUrls(paths, 3600)` and pass the URL in.
-          That upload path and the signed URL are another agent's M1 work, so
-          this stays an empty, labelled frame: the box is here, at the size and
-          aspect ratio the image will take, and nothing pretends there is a
-          picture. Replace the contents with an <img>; keep the wrapper.
+          The wrapper is always the same 56x32 box, whether it holds a picture,
+          nothing, or a picture that would not load — so a board of a hundred
+          cards has one layout no matter how many sketches exist or how many
+          signed URLs have expired. `showSketch` is false in all three failing
+          cases and the box quietly stays dashed and empty; there is no broken
+          image icon and no alt text shouting about a missing file, because a
+          missing sketch is not an error on a kanban board.
+
+          Sized in the markup as well as in CSS (`width`/`height` attributes) so
+          the browser reserves the box before the bytes arrive, and `lazy` so a
+          long column does not fetch a hundred images to show ten.
         */}
         <div
           data-slot="thumbnail-concept"
           data-has-concept-sketch={card.thumbnailConceptPath ? "true" : "false"}
+          data-showing-sketch={showSketch ? "true" : "false"}
           aria-hidden="true"
           title={
             card.thumbnailConceptPath
@@ -116,12 +132,38 @@ export function VideoCard({
               : "No concept sketch"
           }
           className={[
-            "mt-0.5 h-8 w-14 shrink-0 rounded border border-dashed",
-            card.thumbnailConceptPath
-              ? "border-foreground/40 bg-surface"
-              : "border-border bg-surface/50",
+            "mt-0.5 h-8 w-14 shrink-0 overflow-hidden rounded border",
+            showSketch
+              ? "border-border"
+              : card.thumbnailConceptPath
+                ? "border-dashed border-foreground/40 bg-surface"
+                : "border-dashed border-border bg-surface/50",
           ].join(" ")}
-        />
+        >
+          {showSketch ? (
+            /*
+              A plain <img>: the src is a signed URL on a host that comes from
+              an environment variable and carries a token that expires within
+              the hour, so next/image's `remotePatterns` cannot describe it and
+              its optimiser would cache private bytes past the signature.
+              `aria-hidden` on the wrapper is why the alt is empty — the card's
+              own label already names the video.
+            */
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={card.thumbnailConceptUrl ?? undefined}
+              alt=""
+              width={56}
+              height={32}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              data-testid="card-sketch"
+              onError={() => setBrokenUrl(card.thumbnailConceptUrl)}
+              className="h-full w-full object-cover"
+            />
+          ) : null}
+        </div>
 
         <h3 className="min-w-0 flex-1 text-sm leading-snug font-medium">
           <Link

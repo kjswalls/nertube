@@ -40,10 +40,20 @@ export interface BoardCard {
   /** The raw `YYYY-MM-DD`, which is what the sort compares. */
   readonly targetPublishDate: string | null;
   /**
-   * Storage path of the concept sketch, or null. The card renders a marked
-   * empty slot for it — the signed-URL `<img>` is another agent's M1 work.
+   * Storage path of the concept sketch, or null. Not rendered directly — it is
+   * a private object name — but it is what the board page signs, and what the
+   * card's slot reads to tell "no sketch" from "a sketch whose URL failed".
    */
   readonly thumbnailConceptPath: string | null;
+  /**
+   * A signed URL for that path, valid for an hour, or null.
+   *
+   * Null for two different reasons that the card treats the same way: there is
+   * no sketch, or the batch signing skipped this path (the object is gone, the
+   * storage API answered an error). Neither is worth an error state on a
+   * kanban card — see `VideoCard`.
+   */
+  readonly thumbnailConceptUrl: string | null;
   /** `packaging_skipped_at is not null` — the permanent amber badge. */
   readonly packagingSkipped: boolean;
   /** `videos.waiting_on`, shown as a chip. */

@@ -6,11 +6,14 @@ import { z } from "zod";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
- * Video server actions. M1 owns exactly one of them: `captureVideo`.
+ * Video server actions. M1 owns two of them: `captureVideo` and
+ * `updateWorkingTitle`.
  *
- * `updateVideo`, `moveVideo` and the rest of PLAN.md's list land with the
- * milestones that need them; nothing here should grow into a general "save a
- * video" endpoint.
+ * `updateVideo` proper — the whole packaging block saved field by field — is
+ * M2, and `updateWorkingTitle` is deliberately not it: it writes one column and
+ * takes one column, so the M1 detail stub can autosave a title without this
+ * file growing into a general "save a video" endpoint before there is a page
+ * that needs one.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -212,4 +215,83 @@ export async function captureVideoAction(
     notes: field("notes"),
     tags: field("tags"),
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* The working title                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The detail stub's title field, saved on blur.
+ *
+ * Deliberately narrow: one column in, one column out. `videos.title` is in the
+ * client's `UPDATE` grant (unlike `stage_id` and friends), so this is a plain
+ * row update and not an RPC — there is no invariant to keep. The gate reads the
+ * same column at move time, which is why clearing a title here is *allowed*:
+ * PLAN.md wants a cleared title to surface as "Complete packaging" on the next
+ * move, not to be silently refused by a form.
+ */
+const TitleInput = z.object({
+  videoId: z.uuid(),
+  title: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(
+      z
+        .string()
+        .max(
+          MAX_TITLE_LENGTH,
+          `Titles are capped at ${MAX_TITLE_LENGTH} characters.`,
+        ),
+    ),
+});
+
+export type UpdateWorkingTitleInput = z.input<typeof TitleInput>;
+
+export type UpdateWorkingTitleResult =
+  | { ok: true; title: string }
+  | { ok: false; error: string };
+
+export async function updateWorkingTitle(
+  input: UpdateWorkingTitleInput,
+): Promise<UpdateWorkingTitleResult> {
+  const parsed = TitleInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0].message };
+  }
+  const { videoId, title } = parsed.data;
+
+  const { supabase } = await requireUser();
+
+  // RLS is the ownership check: another user's id updates zero rows, and
+  // `select` on the way back returns nothing, which is what "no such video"
+  // looks like from here.
+  const { data, error } = await supabase
+    .from("videos")
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq("id", videoId)
+    .select("id, title, channel_id")
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, error: `That did not save: ${error.message}` };
+  }
+  if (!data) {
+    return { ok: false, error: "That video does not exist any more." };
+  }
+
+  revalidatePath(`/videos/${videoId}`);
+
+  // The card on the board shows this title.
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("slug")
+    .eq("id", data.channel_id)
+    .maybeSingle();
+
+  if (channel) {
+    revalidatePath(`/c/${channel.slug}/board`);
+  }
+
+  return { ok: true, title: data.title };
 }
