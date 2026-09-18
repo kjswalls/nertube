@@ -33,11 +33,21 @@ import type {
 export function EventChip({
   event,
   channel,
+  showTag,
   month,
 }: {
   event: CalendarEvent;
   /** The channel a publish event belongs to; ignored for a filming day. */
   channel?: CalendarChannel;
+  /**
+   * Draw the channel tag at all.
+   *
+   * False on a one-channel account, where every chip would carry the same two
+   * letters expanding to the only channel there is — a label that distinguishes
+   * nothing, on the narrowest element in the product. The stripe stays (it
+   * costs no width) and the channel is still in the accessible name.
+   */
+  showTag: boolean;
   /** Which month the chip is drawn in, so a link back keeps the view. */
   month: string;
 }) {
@@ -98,7 +108,7 @@ export function EventChip({
         channel ? stripeClass(channel.stripe) : "border-l-2 border-l-border",
       ].join(" ")}
     >
-      {channel ? (
+      {channel && showTag ? (
         <span
           aria-hidden="true"
           data-testid="calendar-chip-tag"

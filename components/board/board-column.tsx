@@ -18,8 +18,11 @@ import type { DragEvent, ReactNode } from "react";
  *   would teach its one user to ignore the colour everywhere else. The caller
  *   decides; this component only renders what it is told.
  * - **Filming batch badge.** Counted across *all* channels, because there is
- *   one creator and one camera. Text only in M1; M6 makes it create the
- *   filming day.
+ *   one creator and one camera. Text only from M1 to M5; M6 hands it in as a
+ *   control (`components/calendar/filming/schedule-day-button.tsx`) that opens
+ *   the schedule flow with those videos pre-selected. This component still only
+ *   renders what it is told — it has never known what the badge *means*, and
+ *   making it know now would put the "three in Filming" rule in two places.
  *
  * The column is also the drop target — the whole `<section>`, not just the
  * scrolling list inside it. The header is 38px of a 737px column and the user
@@ -48,8 +51,15 @@ export function BoardColumn({
   /** Render the over-WIP treatment. The caller has already applied `WIP_KINDS`. */
   wipWarning: boolean;
   wipThreshold: number;
-  /** "N in Filming — schedule batch day?", or null. */
-  filmingBadge: string | null;
+  /**
+   * The Filming column's batch-day signal, or null.
+   *
+   * A node rather than a string since M6: it arrives as the button that opens
+   * the schedule dialog, carrying its own `data-testid="filming-badge"` and the
+   * same sentence it has always read. The column gives it the slot it has
+   * always had, under the count.
+   */
+  filmingBadge: ReactNode;
   /** A card is being dragged over this column. */
   isDropTarget: boolean;
   onDragOver: (event: DragEvent<HTMLElement>) => void;
@@ -117,14 +127,7 @@ export function BoardColumn({
           </p>
         ) : null}
 
-        {filmingBadge ? (
-          <p
-            data-testid="filming-badge"
-            className="rounded-button bg-attention/15 px-1.5 py-0.5 text-[11px] leading-4 font-medium text-attention"
-          >
-            {filmingBadge}
-          </p>
-        ) : null}
+        {filmingBadge}
       </header>
 
       {/* The scrolling list. The drop handlers live on the <section> above,

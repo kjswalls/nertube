@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   addDays,
@@ -336,5 +336,183 @@ describe("formatting", () => {
     expect(relativeDayLabel("2026-02-24", today)).toBe("7 days ago");
     // Across the month end, where a naive subtraction of day numbers breaks.
     expect(relativeDayLabel("2026-03-01", "2026-02-28")).toBe("Tomorrow");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The sweep                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The same claims again, but exhaustively rather than on the dates a person
+ * thought to type, and under seven zones rather than one.
+ *
+ * The cases above are the interesting days: this block is the argument that
+ * there are no *other* interesting days. Written while building
+ * `app/calendar/**`, which depends on every one of these holding on days nobody
+ * will look at until the month they happen.
+ */
+
+const ORIGINAL_TZ = process.env.TZ;
+
+afterEach(() => {
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = ORIGINAL_TZ;
+});
+
+/**
+ * Runs `body` with the process in each of seven zones: behind UTC, far behind,
+ * on it, ahead by a three-quarter hour, ahead with southern-hemisphere DST, and
+ * the one with a 12:45 offset.
+ *
+ * Node applies `process.env.TZ` to `Date` from the next call onwards. If a
+ * runtime ever ignored it these assertions would simply be proving less, never
+ * failing falsely.
+ */
+function inEveryZone(body: () => void): void {
+  for (const zone of [
+    "UTC",
+    "America/Los_Angeles",
+    "Pacific/Honolulu",
+    "Europe/London",
+    "Asia/Kathmandu",
+    "Australia/Sydney",
+    "Pacific/Chatham",
+  ]) {
+    process.env.TZ = zone;
+    body();
+  }
+}
+
+/** Every invariant a month grid has, on whatever month is handed in. */
+function assertWellFormed(key: string): void {
+  const month = parseMonthKey(key);
+  if (month === null) throw new Error(`${key} is not a month`);
+
+  const weeks = monthGrid(month);
+  const first = firstOfMonth(month);
+  const last = lastOfMonth(month);
+
+  expect(weeks.length).toBeGreaterThanOrEqual(4);
+  expect(weeks.length).toBeLessThanOrEqual(6);
+  for (const week of weeks) {
+    expect(week).toHaveLength(7);
+    expect(weekdayIndex(week[0].date)).toBe(0); // Monday
+    expect(weekdayIndex(week[6].date)).toBe(6); // Sunday
+  }
+
+  const cells = weeks.flat();
+
+  // Consecutive, with nothing repeated and nothing skipped. This is the
+  // assertion a grid built by adding 86_400_000 milliseconds fails on, in the
+  // zone and the week where the clocks change.
+  for (let index = 1; index < cells.length; index += 1) {
+    expect(daysBetween(cells[index - 1].date, cells[index].date)).toBe(1);
+  }
+  expect(new Set(cells.map((cell) => cell.date)).size).toBe(cells.length);
+
+  const inside = cells.filter((cell) => cell.inMonth);
+  expect(inside[0].date).toBe(first);
+  expect(inside[inside.length - 1].date).toBe(last);
+  expect(inside).toHaveLength((daysBetween(first, last) ?? -1) + 1);
+
+  // The borrowed days really do belong to the neighbours, and there are never
+  // seven of them — a whole borrowed week would mean an off-by-one in the lead.
+  const before = cells.filter((cell) => cell.date < first);
+  const after = cells.filter((cell) => cell.date > last);
+  expect(before.length).toBeLessThan(7);
+  expect(after.length).toBeLessThan(7);
+  for (const cell of before) {
+    expect(monthKey(monthOf(cell.date)!)).toBe(monthKey(shiftMonth(month, -1)));
+  }
+  for (const cell of after) {
+    expect(monthKey(monthOf(cell.date)!)).toBe(monthKey(shiftMonth(month, 1)));
+  }
+}
+
+describe("the sweep", () => {
+  it("round-trips every day of a decade through parse and format", () => {
+    let date = "2020-01-01";
+    let count = 0;
+    while (date <= "2030-12-31") {
+      const day = parseDateColumn(date);
+      expect(day, date).not.toBeNull();
+      expect(toDateColumn(day!)).toBe(date);
+      expect(isDateColumn(date)).toBe(true);
+      const next = addDays(date, 1)!;
+      expect(compareDateColumns(date, next)).toBe(-1);
+      expect(daysBetween(date, next)).toBe(1);
+      date = next;
+      count += 1;
+    }
+    // Eleven years, three of them leap (2020, 2024, 2028).
+    expect(count).toBe(4018);
+  });
+
+  it("knows the century leap rules", () => {
+    expect(isDateColumn("2024-02-29")).toBe(true);
+    expect(isDateColumn("2023-02-29")).toBe(false);
+    expect(isDateColumn("2000-02-29")).toBe(true); // divisible by 400
+    expect(isDateColumn("1900-02-29")).toBe(false); // divisible by 100, not 400
+    expect(isDateColumn("2100-02-29")).toBe(false);
+    expect(lastOfMonth({ year: 2100, month: 2 })).toBe("2100-02-28");
+    expect(lastOfMonth({ year: 2000, month: 2 })).toBe("2000-02-29");
+  });
+
+  it("holds every grid invariant for every month of six years", () => {
+    for (let year = 2023; year <= 2028; year += 1) {
+      for (let index = 1; index <= 12; index += 1) {
+        assertWellFormed(`${year}-${String(index).padStart(2, "0")}`);
+      }
+    }
+  });
+
+  it("draws the same grid in every zone, cell for cell", () => {
+    const shapes: string[] = [];
+    inEveryZone(() => {
+      // March and October 2026 contain the US, UK and Australian clock changes;
+      // February 2024 is a leap month; November 2026 starts on a Sunday, which
+      // is the six-row case.
+      for (const key of ["2026-03", "2026-10", "2024-02", "2026-11"]) {
+        assertWellFormed(key);
+      }
+      shapes.push(
+        JSON.stringify(
+          ["2026-03", "2026-10", "2024-02", "2026-11"].map((key) =>
+            monthGrid(parseMonthKey(key)!).flat(),
+          ),
+        ),
+      );
+    });
+    expect(new Set(shapes).size).toBe(1);
+  });
+
+  it("answers the same day, month and words in every zone", () => {
+    // 23:30 UTC on the 30th is already the 1st in Sydney and still the 30th in
+    // Los Angeles. A calendar day is neither of those local opinions.
+    const late = Date.UTC(2026, 8, 30, 23, 30);
+    const early = Date.UTC(2026, 8, 1, 0, 30);
+    inEveryZone(() => {
+      expect(todayColumn(late)).toBe("2026-09-30");
+      expect(todayColumn(early)).toBe("2026-09-01");
+      expect(monthKey(monthOf(todayColumn(late))!)).toBe("2026-09");
+      expect(formatMonth({ year: 2026, month: 9 })).toBe("September 2026");
+      // en-GB abbreviates September to "Sept", not "Sep" — the point of the
+      // assertion is that the *day* does not shift, and the word is the
+      // formatter's business.
+      expect(formatDateColumn("2026-09-01", "medium")).toBe("1 Sept 2026");
+      expect(relativeDayLabel("2026-10-01", "2026-09-30")).toBe("Tomorrow");
+    });
+  });
+
+  it("steps months in both directions without drifting", () => {
+    let month = { year: 2024, month: 1 };
+    for (let index = 0; index < 36; index += 1) month = shiftMonth(month, 1);
+    expect(monthKey(month)).toBe("2027-01");
+    for (let index = 0; index < 36; index += 1) month = shiftMonth(month, -1);
+    expect(monthKey(month)).toBe("2024-01");
+
+    expect(monthKey(shiftMonth({ year: 2026, month: 9 }, 100))).toBe("2035-01");
+    expect(monthKey(shiftMonth({ year: 2026, month: 9 }, -100))).toBe("2018-05");
   });
 });

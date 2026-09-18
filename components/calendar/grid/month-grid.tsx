@@ -119,7 +119,6 @@ export function MonthGrid({
                   <div className="flex h-full flex-col gap-1">
                     <DayNumber
                       cell={cell}
-                      month={month}
                       isToday={isToday}
                       count={packed.all.length}
                     />
@@ -134,6 +133,7 @@ export function MonthGrid({
                               ? channelById.get(event.channelId)
                               : undefined
                           }
+                          showTag={channels.length > 1}
                           month={month}
                         />
                       ))}
@@ -176,12 +176,10 @@ export function MonthGrid({
  */
 function DayNumber({
   cell,
-  month,
   isToday,
   count,
 }: {
   cell: { date: DateColumn; inMonth: boolean };
-  month: string;
   isToday: boolean;
   count: number;
 }) {

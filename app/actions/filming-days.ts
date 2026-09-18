@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import {
+  MAX_FILMING_NOTES_LENGTH,
+  type FilmingDay,
+} from "@/components/calendar/filming/types";
 import { isDateColumn } from "@/lib/calendar-dates";
+import { readFilmingDay } from "@/lib/filming-data";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
@@ -65,9 +70,6 @@ import { requireUser } from "@/lib/supabase/require-user";
 const DateColumnSchema = z
   .string()
   .refine(isDateColumn, "Pick a date for the shoot — a real one, day by day.");
-
-/** Room for a call sheet, not for a script. */
-export const MAX_FILMING_NOTES_LENGTH = 2_000;
 
 /**
  * The notes box. Trimmed, and empty means NULL — the same rule every other
@@ -135,15 +137,17 @@ const DeleteInput = z.object({
 /* Output                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/** A filming day as every caller here reads it back. */
-export interface FilmingDayState {
-  readonly id: string;
-  /** `YYYY-MM-DD`. A calendar day, never an instant. */
-  readonly onDate: string;
-  readonly notes: string | null;
-  /** The videos currently pointing at it, in no particular order. */
-  readonly videoIds: readonly string[];
-}
+/**
+ * A filming day as every caller here reads it back — the same `FilmingDay` the
+ * calendar renders, videos and all.
+ *
+ * Deliberately not a thinner "just the ids" shape. Every caller of these
+ * actions is about to draw the day it just changed (the dialog shows what the
+ * existing day already covers; the day panel redraws its own list after an
+ * unlink), and handing back ids would make each of them do a second read with
+ * its own idea of what a video on a day looks like.
+ */
+export type FilmingDayState = FilmingDay;
 
 export type FilmingDayResult =
   | { ok: true; day: FilmingDayState; linked: number; warning?: string }
@@ -190,41 +194,14 @@ interface DayRow {
   notes: string | null;
 }
 
-/**
- * Every write in this file ends here: the row as it now is, with the videos
- * that now point at it.
- *
- * Read back rather than assumed, for the reason `updateVideo` reads its row
- * back — the caller is about to render this, and what is stored is the only
- * version of it that is still true in another tab. Two reads, because
- * `videos.filming_day_id` has a composite foreign key and a PostgREST embed
- * over it would have to name a constraint; two plain selects say the same thing
- * and cannot be ambiguous.
- */
-async function readDay(
-  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
-  dayId: string,
-): Promise<FilmingDayState | null> {
-  const { data: day } = await supabase
-    .from("filming_days")
-    .select(DAY_COLUMNS)
-    .eq("id", dayId)
-    .maybeSingle<DayRow>();
-
-  if (!day) return null;
-
-  const { data: videos } = await supabase
-    .from("videos")
-    .select("id")
-    .eq("filming_day_id", dayId);
-
-  return {
-    id: day.id,
-    onDate: day.on_date,
-    notes: day.notes,
-    videoIds: (videos ?? []).map((video) => video.id),
-  };
-}
+/*
+  Every write in this file ends with `readFilmingDay` — read back rather than
+  assumed, for the reason `updateVideo` reads its row back: the caller is about
+  to render this, and what is stored is the only version of it that is still
+  true in another tab. It is `lib/filming-data.ts`'s reader, the same one the
+  calendar page uses, so an action's answer and a page render cannot disagree
+  about what a day covers.
+*/
 
 /**
  * Revalidate everything a link change is visible on: the calendar, each
@@ -276,6 +253,16 @@ async function link(
 ): Promise<{ linked: string[]; error: string | null }> {
   if (videoIds.length === 0) return { linked: [], error: null };
 
+  /*
+    One column, and deliberately not `updated_at` with it.
+
+    Every other write to `videos` in this app stamps `updated_at`, because that
+    column is the detail page's optimistic-concurrency token and the board's
+    recency key. Attaching a video to a filming day is neither of those things:
+    bumping it would invalidate a half-typed packaging edit in another tab over
+    a change that does not touch a single field of it, and would reshuffle the
+    Idea column's "ten most recently updated" for a decision about a Saturday.
+  */
   const { data, error } = await supabase
     .from("videos")
     .update({ filming_day_id: dayId })
@@ -343,7 +330,7 @@ export async function createFilmingDay(
         .eq("on_date", onDate)
         .maybeSingle();
 
-      const day = existing ? await readDay(supabase, existing.id) : null;
+      const day = existing ? await readFilmingDay(existing.id) : null;
       if (day) {
         return {
           ok: false,
@@ -372,11 +359,17 @@ export async function createFilmingDay(
 
   await revalidateFor(supabase, videoIds);
 
-  const day = (await readDay(supabase, created.id)) ?? {
+  /*
+    The day as it now is. The fallback is for the read failing, not for the
+    day being absent — it was created one statement ago — and it says exactly
+    what is known rather than claiming an empty shoot: the videos the link
+    reported, with nothing dressed on them that was not read.
+  */
+  const day = (await readFilmingDay(created.id)) ?? {
     id: created.id,
     onDate: created.on_date,
     notes: created.notes,
-    videoIds: linked,
+    videos: [],
   };
 
   return {
@@ -412,7 +405,7 @@ export async function linkVideosToFilmingDay(
 
   // Checked before the write so a missing day is a sentence rather than a
   // foreign-key violation, and so the read-back below has something to read.
-  const before = await readDay(supabase, dayId);
+  const before = await readFilmingDay(dayId);
   if (!before) {
     return {
       ok: false,
@@ -426,7 +419,7 @@ export async function linkVideosToFilmingDay(
 
   await revalidateFor(supabase, videoIds);
 
-  const day = (await readDay(supabase, dayId)) ?? before;
+  const day = (await readFilmingDay(dayId)) ?? before;
   return {
     ok: true,
     day,
@@ -487,7 +480,7 @@ export async function unlinkVideoFromFilmingDay(
   // Only the caller that named a day gets one back: without a `dayId` there is
   // nothing to re-read, because the link that was just removed is the only
   // thing that knew which day it had been.
-  const day = dayId === undefined ? null : await readDay(supabase, dayId);
+  const day = dayId === undefined ? null : await readFilmingDay(dayId);
 
   return { ok: true, day };
 }
@@ -554,14 +547,17 @@ export async function updateFilmingDay(
     };
   }
 
-  const day = (await readDay(supabase, dayId)) ?? {
+  const day = (await readFilmingDay(dayId)) ?? {
     id: data.id,
     onDate: data.on_date,
     notes: data.notes,
-    videoIds: [],
+    videos: [],
   };
 
-  await revalidateFor(supabase, day.videoIds);
+  await revalidateFor(
+    supabase,
+    day.videos.map((video) => video.id),
+  );
 
   return { ok: true, day, linked: 0 };
 }
@@ -596,7 +592,7 @@ export async function deleteFilmingDay(
 
   const { supabase } = await requireUser();
 
-  const before = await readDay(supabase, dayId);
+  const before = await readFilmingDay(dayId);
   if (!before) {
     return { ok: false, error: "That filming day does not exist any more." };
   }
@@ -615,7 +611,10 @@ export async function deleteFilmingDay(
     return { ok: false, error: "That filming day does not exist any more." };
   }
 
-  await revalidateFor(supabase, before.videoIds);
+  await revalidateFor(
+    supabase,
+    before.videos.map((video) => video.id),
+  );
 
-  return { ok: true, unlinked: before.videoIds.length, onDate: before.onDate };
+  return { ok: true, unlinked: before.videos.length, onDate: before.onDate };
 }

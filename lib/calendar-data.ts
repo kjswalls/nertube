@@ -128,7 +128,7 @@ export async function readCalendarMonth(
       kind: "publish",
       date,
       videoId: video.id,
-      title: video.title === "" ? "Untitled" : video.title,
+      title: video.title.trim() === "" ? "Untitled" : video.title,
       channelId: video.channel_id,
       stageName: stage?.name ?? null,
       state: publishStateOf({
@@ -190,7 +190,7 @@ export async function readCalendarMonth(
           .filter((video) => video.filming_day_id === day.id)
           .map((video) => ({
             id: video.id,
-            title: video.title === "" ? "Untitled" : video.title,
+            title: video.title.trim() === "" ? "Untitled" : video.title,
             channelId: video.channel_id,
             stageName: video.stage_id
               ? (stages.get(video.stage_id)?.name ?? null)

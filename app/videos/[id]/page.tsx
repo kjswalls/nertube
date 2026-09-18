@@ -45,6 +45,8 @@ import {
 import { VideoSections } from "@/components/video-sections/video-sections";
 import { FilingBlock } from "@/components/ideas/assign/filing-block";
 import { FlowFields, type FlowStage } from "@/components/video-detail/flow-fields";
+import { formatDateColumn, todayColumn } from "@/lib/calendar-dates";
+import { readLinkableFilmingDays } from "@/lib/filming-data";
 import { formatAge } from "@/components/video-detail/age";
 import { PackagingBlock } from "@/components/packaging/packaging-block";
 import { VideoVersionProvider } from "@/components/video-version";
@@ -119,7 +121,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, filming_day_id, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -441,6 +443,34 @@ export default async function VideoDetailPage({
   }));
 
   /*
+    The filming days this video could be put on (M6).
+
+    From today onwards, plus the one it is already on when that is in the past —
+    a video linked to last Saturday's shoot has to be able to name the day it is
+    on. `todayColumn(now)` turns this page's single clock read into a calendar
+    day through the one helper that is allowed to (`lib/calendar-dates.ts`), so
+    the list and the board's badge cannot land on opposite sides of midnight.
+  */
+  const today = todayColumn(now);
+  /*
+    Formatted here, on the server, and passed down as strings.
+
+    `VideoFilmingDay` is a client component, so this route renders it twice —
+    once in Node and once in the browser during hydration — and
+    `Intl.DateTimeFormat` does not give those two the same answer: Node 22 and
+    Chromium 141 disagree about the comma in "Wed, 30 Sept". Formatting in the
+    component made React throw the subtree away on every load. This is the same
+    rule the board applies to `targetPublishLabel` and the flow fields to
+    `publishedLabel`.
+  */
+  const filmingDays = (
+    await readLinkableFilmingDays(today, video.filming_day_id)
+  ).map((day) => ({
+    ...day,
+    label: formatDateColumn(day.onDate, "weekday") ?? day.onDate,
+  }));
+
+  /*
     Is the target date here yet?
 
     The same arithmetic `lib/next-action.ts` rule 5 makes, against the same
@@ -671,6 +701,7 @@ export default async function VideoDetailPage({
               schedule: (
                 <FlowFields
                   videoId={video.id}
+                  videoTitle={video.title}
                   channelSlug={channel?.slug ?? ""}
                   stages={flowStages}
                   currentStageId={video.stage_id}
@@ -679,6 +710,9 @@ export default async function VideoDetailPage({
                   youtubeUrl={video.youtube_url ?? ""}
                   notes={video.notes ?? ""}
                   waitingOn={video.waiting_on ?? ""}
+                  today={today}
+                  filmingDayId={video.filming_day_id}
+                  filmingDays={filmingDays}
                   waitingSince={video.waiting_since}
                   waitingAgeLabel={formatAge(video.waiting_since, now)}
                   archivedAt={video.archived_at}

@@ -1,0 +1,409 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useId, useState, useTransition } from "react";
+
+import {
+  deleteFilmingDay,
+  unlinkVideoFromFilmingDay,
+  updateFilmingDay,
+} from "@/app/actions/filming-days";
+import { SaveStatus, useAutosave } from "@/components/autosave";
+import { useToast } from "@/components/toast";
+import {
+  formatDateColumn,
+  relativeDayLabel,
+} from "@/lib/calendar-dates";
+
+import { STATUS_LABEL, statusOf, summarise } from "./summary";
+import { MAX_FILMING_NOTES_LENGTH, type FilmingDay } from "./types";
+
+/**
+ * What a filming day *contains*, drawn once and used from both places a day is
+ * looked at: expanded from its event on the calendar, and inside the schedule
+ * dialog the board's badge opens.
+ *
+ * One component for both, because they are the same object and the second copy
+ * is where "the calendar says three videos and the dialog says two" comes from.
+ *
+ * ## What it shows, and why that is the honest version
+ *
+ * Every video the day covers, **with the stage it is in now**. A video filmed
+ * on Saturday is in Editing by Sunday — the normal case, not an error — and a
+ * day that hid it would be claiming an empty shoot. `summary.ts` turns the
+ * stages into the one-line headline above the list; this file only draws it.
+ *
+ * ## The two destructive things, and how they differ
+ *
+ * - **Detach** takes one video off the day. Nothing else about the video
+ *   changes, and a video without a day is the normal state of most of the
+ *   board, so it happens on one click with a toast that says what happened.
+ * - **Cancel this day** deletes the day itself. It asks first — and what it
+ *   says while asking is the part that matters: the videos are *unlinked, not
+ *   deleted*, which is the foreign key's `on delete set null` doing it rather
+ *   than anything in this file. The count in the confirmation is read from the
+ *   day, so it is the real number.
+ */
+export function FilmingDayPanel({
+  day: dayProp,
+  today,
+  onChanged,
+  testId = "filming-day-panel",
+}: {
+  day: FilmingDay;
+  /** `YYYY-MM-DD`, from the server's one clock read. */
+  today: string;
+  /** The day after a change, or `null` when it has just been deleted. */
+  onChanged?: (day: FilmingDay | null) => void;
+  testId?: string;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [busy, startBusy] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [moving, setMoving] = useState<string | null>(null);
+
+  /*
+    The props are authoritative; what is kept here is only the delta a write on
+    this panel produced, tagged with the props it was computed over. The moment
+    a fresh server render arrives the tag stops matching and the new props win.
+    This is the pattern `components/video-detail/flow-fields.tsx` arrived at
+    after a `useState` initialiser left a client copy behind a `router.refresh`.
+  */
+  const propsVersion = `${dayProp.id}|${dayProp.onDate}|${dayProp.notes ?? ""}|${dayProp.videos
+    .map((video) => video.id)
+    .join(",")}`;
+  const [applied, setApplied] = useState<{ over: string; day: FilmingDay } | null>(
+    null,
+  );
+  const day = applied && applied.over === propsVersion ? applied.day : dayProp;
+
+  function absorb(next: FilmingDay): void {
+    setApplied({ over: propsVersion, day: next });
+  }
+
+  const summary = summarise(day.videos, { onDate: day.onDate, today });
+  const dateLabel = formatDateColumn(day.onDate, "full") ?? day.onDate;
+  const relative = relativeDayLabel(day.onDate, today);
+
+  function detach(videoId: string, title: string): void {
+    setError(null);
+    startBusy(async () => {
+      const result = await unlinkVideoFromFilmingDay({ videoId, dayId: day.id });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.day) absorb(result.day);
+      onChanged?.(result.day);
+      toast.push({ message: `Took “${title}” off ${dateLabel}.` });
+      router.refresh();
+    });
+  }
+
+  /**
+   * The shoot moved to the Sunday.
+   *
+   * One column on one row, and the links come with it — which is the whole
+   * reason this exists rather than "cancel and book again": cancelling unlinks
+   * every video by design, and re-attaching four of them by hand to fix a typo
+   * is exactly the friction BRIEF.md principle 6 is about.
+   *
+   * A date that is already booked is refused rather than merged, and the
+   * refusal says what to do instead. That is `updateFilmingDay`'s answer, not a
+   * second opinion formed here.
+   */
+  function moveDay(): void {
+    if (moving === null) return;
+    setError(null);
+    const onDate = moving;
+    startBusy(async () => {
+      const result = await updateFilmingDay({ dayId: day.id, onDate });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      absorb(result.day);
+      onChanged?.(result.day);
+      setMoving(null);
+      toast.push({
+        message: `Moved the filming day to ${
+          formatDateColumn(result.day.onDate, "full") ?? result.day.onDate
+        }.`,
+      });
+      router.refresh();
+    });
+  }
+
+  function cancelDay(): void {
+    setError(null);
+    startBusy(async () => {
+      const result = await deleteFilmingDay({ dayId: day.id });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setConfirming(false);
+      onChanged?.(null);
+      toast.push({
+        message:
+          result.unlinked === 0
+            ? `Cancelled the filming day on ${dateLabel}.`
+            : `Cancelled ${dateLabel}. ${
+                result.unlinked === 1 ? "1 video is" : `${result.unlinked} videos are`
+              } no longer attached to a day — nothing was deleted.`,
+      });
+      router.refresh();
+    });
+  }
+
+  return (
+    <section
+      data-testid={testId}
+      data-day-id={day.id}
+      data-on-date={day.onDate}
+      data-tone={summary.tone}
+      data-video-count={summary.total}
+      className="flex flex-col gap-4"
+    >
+      <header className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <h3 className="font-display text-[17px] leading-tight font-semibold tracking-tight">
+            {dateLabel}
+          </h3>
+          {relative ? (
+            <span className="font-mono text-[11px] text-muted">{relative}</span>
+          ) : null}
+        </div>
+
+        {/*
+          The one line that says what this day is now. It carries colour only in
+          the single case that is asking for a decision — a day that has passed
+          with videos still in Filming. Everything else is furniture.
+        */}
+        <p
+          data-testid="filming-day-headline"
+          className={[
+            "text-[12px] leading-5",
+            summary.tone === "attention"
+              ? "font-medium text-attention"
+              : "text-muted",
+          ].join(" ")}
+        >
+          {summary.headline}
+        </p>
+      </header>
+
+      {day.videos.length > 0 ? (
+        <ul data-testid="filming-day-videos" className="flex flex-col gap-1.5">
+          {day.videos.map((video) => {
+            const status = statusOf(video);
+            return (
+              <li
+                key={video.id}
+                data-testid="filming-day-video"
+                data-video-id={video.id}
+                data-status={status}
+                className="flex items-start justify-between gap-3 rounded-input border border-border bg-background px-2.5 py-2"
+              >
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <Link
+                    href={`/videos/${video.id}`}
+                    className="truncate font-display text-[14px] leading-snug outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {video.title}
+                  </Link>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted">
+                    <span>{video.channelName}</span>
+                    <span aria-hidden="true">·</span>
+                    {/*
+                      The stage the video is in now, and what that means for
+                      this day. The stage's own name, because a channel may have
+                      renamed it; the status word beside it, because "Editing"
+                      alone does not say whether the shoot happened.
+                    */}
+                    <span>
+                      {video.stageName}
+                      <span className="text-muted/80"> — {STATUS_LABEL[status]}</span>
+                    </span>
+                    {video.targetPublishDate ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono">
+                          publishes {formatDateColumn(video.targetPublishDate, "short")}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  data-testid="filming-day-detach"
+                  disabled={busy}
+                  onClick={() => detach(video.id, video.title)}
+                  title={`Take “${video.title}” off this filming day. The video itself is untouched.`}
+                  className="shrink-0 rounded-button px-2 py-1 text-[11px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                >
+                  Detach
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-[12px] text-muted">
+          Nothing is attached to this day. Videos can be added from the board’s
+          Filming column or from a video’s own page.
+        </p>
+      )}
+
+      <DayNotes day={day} onSaved={absorb} />
+
+      {error ? (
+        <p
+          role="alert"
+          data-testid="filming-day-error"
+          className="text-[12px] text-over-limit"
+        >
+          {error}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        {moving === null ? (
+          <button
+            type="button"
+            data-testid="move-day"
+            disabled={busy || confirming}
+            onClick={() => setMoving(day.onDate)}
+            className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          >
+            Move this day…
+          </button>
+        ) : (
+          <>
+            <label htmlFor={`${day.id}-move`} className="sr-only">
+              Move this filming day to
+            </label>
+            <input
+              id={`${day.id}-move`}
+              data-testid="move-day-date"
+              type="date"
+              value={moving}
+              disabled={busy}
+              onChange={(event) => setMoving(event.target.value)}
+              className="rounded-input border border-border bg-background px-2.5 py-1 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            />
+            <button
+              type="button"
+              data-testid="move-day-save"
+              disabled={busy || moving === day.onDate}
+              onClick={moveDay}
+              className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] font-medium outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            >
+              Move it
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setMoving(null)}
+              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Keep the date
+            </button>
+          </>
+        )}
+
+        {confirming ? (
+          <>
+            <p
+              data-testid="cancel-day-confirm"
+              className="text-[12px] text-muted"
+            >
+              {summary.total === 0
+                ? "Cancel this day?"
+                : `Cancel this day? ${
+                    summary.total === 1 ? "1 video" : `${summary.total} videos`
+                  } will be unlinked — none of them is deleted.`}
+            </p>
+            <button
+              type="button"
+              data-testid="cancel-day-yes"
+              disabled={busy}
+              onClick={cancelDay}
+              className="rounded-button border border-over-limit/50 px-2.5 py-1 text-[12px] font-medium text-over-limit outline-none transition-colors hover:bg-over-limit/10 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            >
+              Yes, cancel it
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirming(false)}
+              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Keep it
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            data-testid="cancel-day"
+            disabled={busy || moving !== null}
+            onClick={() => setConfirming(true)}
+            className="rounded-button border border-border px-2.5 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          >
+            Cancel this day…
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The call sheet: what to remember on the day. Saved on blur through the
+ * application's one autosave hook, exactly like every text field on
+ * `/videos/[id]` — there is no second save mechanism here.
+ */
+function DayNotes({
+  day,
+  onSaved,
+}: {
+  day: FilmingDay;
+  onSaved: (day: FilmingDay) => void;
+}) {
+  const fieldId = useId();
+
+  const autosave = useAutosave({
+    initial: day.notes ?? "",
+    save: async (next) => {
+      const result = await updateFilmingDay({ dayId: day.id, notes: next });
+      if (!result.ok) return { ok: false, error: result.error };
+      onSaved(result.day);
+      return { ok: true, value: result.day.notes ?? "" };
+    },
+  });
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={fieldId} className="text-xs font-medium text-muted">
+        Shoot notes
+      </label>
+      <textarea
+        id={fieldId}
+        data-testid="filming-day-notes"
+        rows={2}
+        maxLength={MAX_FILMING_NOTES_LENGTH}
+        value={autosave.value}
+        onChange={(event) => autosave.setValue(event.target.value)}
+        onBlur={autosave.commit}
+        placeholder="Shirt changes, lighting, which set."
+        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      />
+      <SaveStatus state={autosave.state} testId="filming-day-notes-status" />
+    </div>
+  );
+}

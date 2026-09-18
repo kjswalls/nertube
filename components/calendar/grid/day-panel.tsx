@@ -61,6 +61,8 @@ export function DayPanel({
 }) {
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const relative = relativeDayLabel(date, today);
+  // Same rule as the grid: one channel needs no abbreviation of itself.
+  const showTag = channels.length > 1;
 
   return (
     <section
@@ -128,6 +130,7 @@ export function DayPanel({
                             href={`/videos/${video.id}`}
                             title={video.title}
                             channel={channelById.get(video.channelId)}
+                            showTag={showTag}
                             trailing={video.stageName}
                           />
                         </li>
@@ -148,6 +151,7 @@ export function DayPanel({
                   href={`/videos/${event.videoId}`}
                   title={event.title}
                   channel={channelById.get(event.channelId)}
+                  showTag={showTag}
                   trailing={event.stageName}
                   late={event.state === "late"}
                   state={event.state}
@@ -165,6 +169,7 @@ function VideoLine({
   href,
   title,
   channel,
+  showTag,
   trailing,
   late = false,
   state,
@@ -172,6 +177,7 @@ function VideoLine({
   href: string;
   title: string;
   channel?: CalendarChannel;
+  showTag: boolean;
   trailing: string | null;
   late?: boolean;
   state?: string;
@@ -186,7 +192,7 @@ function VideoLine({
         channel ? stripeClass(channel.stripe) : "",
       ].join(" ")}
     >
-      {channel ? (
+      {channel && showTag ? (
         <span className="shrink-0 font-mono text-[10px] tracking-wide text-muted">
           {channel.tag}
         </span>

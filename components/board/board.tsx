@@ -13,6 +13,9 @@ import { stageStats } from "@/lib/stage-stats";
 import { GATE_ANCHOR, SKIP_ANCHOR } from "@/lib/packaging";
 import { useShortcuts } from "@/lib/shortcuts";
 
+import { ScheduleFilmingDayButton } from "@/components/calendar/filming/schedule-day-button";
+import type { FilmingCandidate } from "@/components/calendar/filming/types";
+
 import { BoardColumn } from "./board-column";
 import {
   compareCards,
@@ -68,7 +71,8 @@ export function Board({
   cards,
   wipThreshold,
   staleDays,
-  filmingInOtherChannels,
+  filmingElsewhere,
+  today,
   now,
 }: {
   channelName: string;
@@ -89,11 +93,17 @@ export function Board({
    */
   now: number;
   /**
-   * Filming-stage cards in this user's *other* channels. Added to this
-   * channel's live Filming count so the batch-day badge stays correct while
-   * cards are dragged in and out, without a refetch.
+   * The videos sitting in Filming in this user's *other* channels.
+   *
+   * A list rather than a count since M6, because the badge is now a button and
+   * the dialog it opens has to pre-select exactly the videos the badge is
+   * counting — one creator, one camera, one Saturday. Its length is still what
+   * is added to this channel's live Filming count, so the badge stays correct
+   * while cards are dragged in and out without a refetch.
    */
-  filmingInOtherChannels: number;
+  filmingElsewhere: readonly FilmingCandidate[];
+  /** Today as a calendar day (`YYYY-MM-DD`), from the same server clock. */
+  today: string;
 }) {
   const router = useRouter();
 
@@ -271,8 +281,35 @@ export function Board({
 
   const filmingTotal = useMemo(() => {
     const filming = columns.find((column) => column.stage.kind === "filming");
-    return filmingInOtherChannels + (filming?.total ?? 0);
-  }, [columns, filmingInOtherChannels]);
+    return filmingElsewhere.length + (filming?.total ?? 0);
+  }, [columns, filmingElsewhere]);
+
+  /**
+   * What the schedule dialog pre-selects: every video in Filming, in every
+   * channel — this channel's from the cards on screen (so a card dragged in a
+   * second ago is included without a refetch), the rest from the server read.
+   *
+   * The two halves cannot double-count: `filmingElsewhere` is read with
+   * `channel_id <> this one`, and a card cannot be in two channels.
+   */
+  const filmingCandidates = useMemo<FilmingCandidate[]>(() => {
+    const filming = columns.find((column) => column.stage.kind === "filming");
+    // `all`, not `visible`: the two are the same for this column — only the
+    // Idea column caps what it draws — and "every video in Filming" is the
+    // question, not "every card on screen".
+    const here = (filming?.all ?? []).map((card) => ({
+      id: card.id,
+      title: card.title,
+      channelId: "",
+      channelName,
+      channelSlug,
+      stageKind: "filming" as const,
+      stageName: filming?.stage.name ?? "Filming",
+      archived: false,
+      targetPublishDate: card.targetPublishDate,
+    }));
+    return [...here, ...filmingElsewhere];
+  }, [columns, channelName, channelSlug, filmingElsewhere]);
 
   /* --------------------------------------------------------------- moves -- */
 
@@ -731,12 +768,30 @@ export function Board({
             has to say why, or it reads as the board miscounting rather than as
             the signal BRIEF.md principle 4 asks for.
           */
-          const filmingBadge =
+          const badgeText =
             stage.kind === "filming" && filmingTotal >= FILMING_BATCH_THRESHOLD
               ? filmingTotal > total
                 ? `${filmingTotal} in Filming across all channels — schedule batch day?`
                 : `${filmingTotal} in Filming — schedule batch day?`
               : null;
+
+          /*
+            M1 to M5 this was a sentence. It is the same sentence, and now it
+            is the button that answers it: the schedule dialog opens with every
+            video the badge is counting already ticked, so noticing and booking
+            the Saturday are one click apart (BRIEF.md principle 4).
+          */
+          const filmingBadge =
+            badgeText === null ? null : (
+              <ScheduleFilmingDayButton
+                candidates={filmingCandidates}
+                today={today}
+                label={badgeText}
+                tone="badge"
+                testId="filming-badge"
+                title="Schedule a batch filming day with these videos on it."
+              />
+            );
 
           return (
             <BoardColumn

@@ -5,6 +5,8 @@ import {
   boardChannelOf,
   type SidebarSection,
 } from "@/components/app-sidebar";
+import { countTargetsIn } from "@/lib/calendar-data";
+import { monthKey, monthOf, todayColumn } from "@/lib/calendar-dates";
 import { countIdeas } from "@/lib/ideas-data";
 import { countNowRows, readNowInputs } from "@/lib/now-data";
 import { requireUser } from "@/lib/supabase/require-user";
@@ -68,6 +70,15 @@ import { requireUser } from "@/lib/supabase/require-user";
  * definition of "an idea" it counts by, and returns `null` rather than throwing
  * or guessing zero when it cannot read.
  *
+ * ## The Calendar count
+ *
+ * Cross-channel, because the calendar is: one number for the month `/calendar`
+ * opens on, over every channel's videos. It is derived from the same clock this
+ * component already reads and turned into a calendar day by the same helper the
+ * page uses (`lib/calendar-dates.ts`), so the badge and the month it opens
+ * cannot land on opposite sides of midnight. `lib/calendar-data.ts` owns the
+ * definition it counts by and returns `null` rather than guessing zero.
+ *
  * ## The badge is allowed to fail; the page is not
  *
  * `readNowInputs` throws when any of its reads errors, and every signed-in route
@@ -128,6 +139,12 @@ export async function AppShell({
   const ideasCount =
     ideasChannel === undefined ? null : await countIdeas(ideasChannel.id);
 
+  // The month `/calendar` opens on, from this request's one clock read. Its
+  // reader swallows its own failures, like the bank's.
+  const thisMonth = monthOf(todayColumn(clock));
+  const calendarCount =
+    thisMonth === null ? null : await countTargetsIn(monthKey(thisMonth));
+
   return (
     /*
       `overflow-x: clip` and not `hidden`: `hidden` on one axis forces the other
@@ -173,6 +190,7 @@ export async function AppShell({
         section={section}
         nowCount={nowCount}
         ideasCount={ideasCount}
+        calendarCount={calendarCount}
         userEmail={user.email ?? null}
       />
 

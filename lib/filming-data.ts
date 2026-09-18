@@ -331,29 +331,3 @@ export async function readLinkableFilmingDays(
 
   return days;
 }
-
-/**
- * How many filming days are scheduled from `today` onwards — the number the
- * sidebar's Calendar row draws.
- *
- * `null`, never a throw and never a zero, for the reason `lib/ideas-data.ts`
- * gives at length: the shell renders on every signed-in route, and a transient
- * failure here must not take the board down with it. Zero is a claim; `null` is
- * the absence of one.
- */
-export const countUpcomingFilmingDays = cache(
-  async (today: string): Promise<number | null> => {
-    try {
-      const { supabase } = await requireUser();
-      const { count, error } = await supabase
-        .from("filming_days")
-        .select("id", { count: "exact", head: true })
-        .gte("on_date", today);
-
-      if (error) return null;
-      return count ?? null;
-    } catch {
-      return null;
-    }
-  },
-);

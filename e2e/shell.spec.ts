@@ -213,26 +213,37 @@ test('the sidebar is a real nav, 224px wide, and says where you are without colo
   const other = sidebar.getByRole('link', { name: 'Sunday Softworks', exact: true });
   await expect(other).not.toHaveAttribute('aria-current', /.*/);
 
-  // Board is the section you are in; the two that do not exist yet are real
-  // disabled controls naming the milestone, not links to a 404.
+  // Board is the section you are in.
   await expect(sidebar.getByRole('link', { name: 'Board' })).toHaveAttribute(
     'aria-current',
     'page',
   );
-  for (const [name, milestone] of [['Calendar', 'M6']] as const) {
-    const item = sidebar.getByRole('button', { name: `${name} ${milestone}`, exact: true });
-    // `aria-disabled`, not `disabled`: it says "unavailable" *and* stays in the
-    // tab order, so the explanation is reachable without a mouse.
-    await expect(item).toHaveAttribute('aria-disabled', 'true');
-    await expect(item).not.toHaveAttribute('disabled', /.*/);
-    await expect(item).toBeDisabled();
-    await expect(item).toHaveAttribute('title', /arrives in M\d/);
-    // The milestone is on screen, not only in the tooltip.
-    await expect(item).toContainText(milestone);
-    // And it can be focused, which a `disabled` button cannot.
-    await item.focus();
-    await expect(item).toBeFocused();
-  }
+
+  /*
+    There are no placeholders left.
+
+    Calendar was the last one — a disabled control reading "Calendar M6" — and
+    M6 built the page, so on an account that has channels every row in the
+    sections list is a link. `SidebarDisabled` still exists for the two rows
+    that can genuinely have nowhere to go (Board and Ideas before a channel is
+    created), and `e2e/capture.spec.ts` covers that account; here there must be
+    none of it.
+
+    The rule this replaces is the same one it was enforcing: no dead links in
+    the sidebar. It is now checked from the other side — every section row goes
+    somewhere, and the hrefs are asserted below.
+  */
+  await expect(sidebar.getByTestId('sidebar-unbuilt')).toHaveCount(0);
+  const calendarLink = sidebar.getByRole('link', {
+    name: 'Calendar',
+    exact: true,
+  });
+  await expect(calendarLink).toHaveAttribute('href', '/calendar');
+  await expect(calendarLink).not.toHaveAttribute('aria-current', /.*/);
+  // Still keyboard-reachable, which was the whole point of the disabled
+  // control it replaces.
+  await calendarLink.focus();
+  await expect(calendarLink).toBeFocused();
 
   // `/now` was one of those three until M3 built it, and Ideas was one until M5
   // did. Both are links now, and they have to be working ones — the rule the
@@ -248,12 +259,13 @@ test('the sidebar is a real nav, 224px wide, and says where you are without colo
   await expect(nowLink).not.toHaveAttribute('aria-current', /.*/);
 
   // Nothing in the sidebar points at a route that does not exist. `/calendar`
-  // is M6 and is still a disabled control, not a link; the idea bank lives
-  // under its channel (`/c/[slug]/ideas`), never at a bare `/ideas`.
+  // is one since M6 and is expected exactly once; the idea bank lives under its
+  // channel (`/c/[slug]/ideas`), never at a bare `/ideas`.
   const hrefs = await sidebar.getByRole('link').evaluateAll((links) =>
     links.map((link) => (link as HTMLAnchorElement).getAttribute('href') ?? ''),
   );
-  expect(hrefs.some((href) => /^\/(calendar|ideas)/.test(href))).toBe(false);
+  expect(hrefs.filter((href) => href === '/calendar')).toHaveLength(1);
+  expect(hrefs.some((href) => /^\/ideas/.test(href))).toBe(false);
 
   // And it really opens, with the sidebar marking it as the page you are on.
   await nowLink.click();

@@ -616,6 +616,16 @@ export async function updateVideo(
   */
   revalidatePath(`/videos/${videoId}`);
 
+  /*
+    And the calendar, which is cross-channel and therefore needs no slug.
+
+    `target_publish_date` is one of the fields this action writes, and it is the
+    whole of what `/calendar` draws — archiving takes a video off the grid too.
+    Without this the Router Cache can hand back a month rendered before the date
+    was changed.
+  */
+  revalidatePath("/calendar");
+
   const { data: channel } = await supabase
     .from("channels")
     .select("slug")

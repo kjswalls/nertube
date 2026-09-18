@@ -17,6 +17,17 @@ import type { StageKind } from "@/lib/defaults";
  * `lib/calendar-dates.ts`.
  */
 
+/**
+ * Room for a call sheet, not for a script.
+ *
+ * It lives here rather than beside the zod schema that enforces it because
+ * `app/actions/filming-days.ts` is a `"use server"` module, and such a module
+ * may only export async functions — a `export const` in it is a build error,
+ * not a style choice. Both ends need the number: the schema refuses more than
+ * this, and the textarea stops at it.
+ */
+export const MAX_FILMING_NOTES_LENGTH = 2_000;
+
 /** A video as a filming day renders it. */
 export interface FilmingVideo {
   readonly id: string;

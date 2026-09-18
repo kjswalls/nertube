@@ -7,7 +7,7 @@ import { ShortcutHints } from "@/components/shortcut-hints";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /** Which entry in the sidebar the route being rendered corresponds to. */
-export type SidebarSection = "board" | "now" | "ideas";
+export type SidebarSection = "board" | "now" | "ideas" | "calendar";
 
 export interface SidebarChannel {
   readonly id: string;
@@ -55,20 +55,19 @@ export function boardChannelOf(
  * am I on" then a stale column and a blocked video are competing with the
  * furniture.
  *
- * ## Why the unbuilt sections are disabled buttons and not links
+ * ## Every section here is now a page
  *
- * `/calendar` does not exist yet. `/now` (M3) and `/c/[slug]/ideas` (M5) do,
- * and are links like any other — M3's reviewers filed the Ideas row as
- * unreachable by keyboard and explained only by a tooltip, and the fix was
- * never a better tooltip: it was building the page it pointed at. M1's review
- * caught this exact mistake on the
- * gate-refusal toast — a link to a fragment on a page that had no such field —
- * and the answer was the same then: an affordance that says what it will do and
- * refuses to pretend it does it yet. Each one names the milestone it arrives
- * in, on the row and not only in a tooltip, so the shape of the product is
- * visible without a single dead link in it — and it is `aria-disabled` rather
- * than `disabled`, so a keyboard user can actually reach the thing that says
- * so. See `SidebarDisabled`.
+ * Calendar was the last placeholder, and M6 removed it: all four rows are
+ * links, reachable by keyboard like any other link, and none of them announces
+ * a milestone any more. The rule that produced them is worth keeping even
+ * though the rows are gone — M3's reviewers filed the Ideas row as unreachable
+ * by keyboard and explained only by a tooltip, and the fix was never a better
+ * tooltip, it was building the page it pointed at.
+ *
+ * `SidebarDisabled` stays, because two rows can still genuinely have nowhere
+ * to go: Board and Ideas on an account with no channel yet. It is
+ * `aria-disabled` rather than `disabled` so a keyboard user can reach the thing
+ * that says why.
  *
  * ## What it still does that the header did
  *
@@ -86,6 +85,7 @@ export function AppSidebar({
   section,
   nowCount,
   ideasCount,
+  calendarCount,
   userEmail,
 }: {
   channels: readonly SidebarChannel[];
@@ -108,6 +108,14 @@ export function AppSidebar({
    * read failed and `undefined` when nobody asked. See `lib/ideas-data.ts`.
    */
   ideasCount?: number | null;
+  /**
+   * How many videos are going out in the month `/calendar` opens on, across
+   * every channel, or `null` when it could not be read.
+   *
+   * Cross-channel on purpose, like the page: the calendar is the one view that
+   * does not belong to a channel, so its badge does not either.
+   */
+  calendarCount?: number | null;
   userEmail: string | null;
 }) {
   const boardChannel = boardChannelOf(channels, currentSlug);
@@ -253,7 +261,50 @@ export function AppSidebar({
                 </SidebarDisabled>
               )}
             </li>
-            <SectionItem label="Calendar" milestone="M6" />
+            <li>
+              {/*
+                M6 built it, so it is a link — and it is the last of the four
+                sections to stop being a placeholder. It needs no channel: the
+                calendar is every channel at once, which is the whole reason it
+                exists.
+              */}
+              <SidebarLink
+                href="/calendar"
+                current={section === "calendar" ? "page" : false}
+                /*
+                  The count, drawn exactly as the Now and Ideas counts are:
+                  `aria-hidden` on the chip so the link's accessible name stays
+                  "Calendar", the number repeated in `title` so a screen reader
+                  gets it as the link's description, and nothing at all when it
+                  is zero or unknown. It counts what the page counts first —
+                  videos with a target date in this month — and deliberately
+                  does not fold filming days into the same number.
+                */
+                title={
+                  calendarCount === undefined ||
+                  calendarCount === null ||
+                  calendarCount === 0
+                    ? undefined
+                    : `${calendarCount} ${calendarCount === 1 ? "video" : "videos"} going out this month`
+                }
+                trailing={
+                  calendarCount === undefined ||
+                  calendarCount === null ||
+                  calendarCount === 0 ? null : (
+                    <span
+                      aria-hidden="true"
+                      data-testid="sidebar-calendar-count"
+                      data-count={calendarCount}
+                      className="font-mono text-[10px] text-muted"
+                    >
+                      {calendarCount}
+                    </span>
+                  )
+                }
+              >
+                Calendar
+              </SidebarLink>
+            </li>
           </ul>
         </div>
 
@@ -363,43 +414,6 @@ export function AppSidebar({
         </div>
       </nav>
     </div>
-  );
-}
-
-/**
- * A section that is drawn but not built. See the file comment.
- *
- * The milestone is drawn on the row, in small mono, exactly the way
- * `components/preview/assist-pill.tsx` draws M8 on the inert assist buttons. It
- * used to live only in `title`, which is a tooltip: a keyboard user never
- * hovers and a touch user cannot, so the one sentence explaining why the row
- * does nothing was reachable by mouse alone. On screen it is reachable by
- * everybody, and it joins the control's accessible name — "Calendar M6" — which
- * is the sentence in miniature.
- */
-function SectionItem({
-  label,
-  milestone,
-  note,
-}: {
-  label: string;
-  milestone: string;
-  /** Anything more than the milestone number, for the tooltip only. */
-  note?: string;
-}) {
-  return (
-    <li>
-      <SidebarDisabled
-        title={`${label} arrives in ${milestone}${note ? `, ${note}` : ""}.`}
-        trailing={
-          <span className="font-mono text-[10px] tracking-wide uppercase">
-            {milestone}
-          </span>
-        }
-      >
-        {label}
-      </SidebarDisabled>
-    </li>
   );
 }
 

@@ -17,6 +17,11 @@ import {
   MAX_WAITING_ON_LENGTH,
 } from "@/lib/video-fields";
 
+import {
+  VideoFilmingDay,
+  type LinkableDay,
+} from "@/components/calendar/filming/video-filming-day";
+
 import { formatAge } from "./age";
 import { StageSelect, type FlowStage } from "./stage-select";
 
@@ -54,6 +59,8 @@ export type { FlowStage };
 
 export interface FlowFieldsProps {
   videoId: string;
+  /** The working title, for the messages a filming-day change announces. */
+  videoTitle: string;
   /** The channel's slug, for the board revalidation a move triggers. */
   channelSlug: string;
   /** Enabled stages, in `position` order — the board's column order. */
@@ -62,6 +69,12 @@ export interface FlowFieldsProps {
   currentStageName: string;
   /** `YYYY-MM-DD`, or "" for none — what a `<input type="date">` speaks. */
   targetPublishDate: string;
+  /** Today as a calendar day, from the page's one clock read (M6). */
+  today: string;
+  /** The filming day this video is on, or null. */
+  filmingDayId: string | null;
+  /** The days it could be put on: upcoming, plus the one it is on. */
+  filmingDays: readonly LinkableDay[];
   youtubeUrl: string;
   notes: string;
   waitingOn: string;
@@ -177,6 +190,25 @@ export function FlowFields(props: FlowFieldsProps) {
         videoId={props.videoId}
         initial={props.targetPublishDate}
         onSaved={absorb}
+      />
+
+      {/*
+        Which day this one is being filmed on (M6).
+
+        It sits directly under the target date because the two are the video's
+        two dates and a creator reads them together — *when is it shot* and
+        *when does it go out*. It is the only control in this block that does
+        not go through `updateVideo`: attaching a video is the filming day's
+        business, and `components/calendar/filming/video-filming-day.tsx`
+        explains why giving `filming_day_id` a second write path here would be
+        a mistake.
+      */}
+      <VideoFilmingDay
+        videoId={props.videoId}
+        videoTitle={props.videoTitle}
+        today={props.today}
+        currentDayId={props.filmingDayId}
+        days={props.filmingDays}
       />
 
       <WaitingOnField

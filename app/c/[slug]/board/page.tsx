@@ -8,7 +8,9 @@ import {
   type BoardCard,
   type BoardStage,
 } from "@/components/board/types";
+import { todayColumn } from "@/lib/calendar-dates";
 import { isStageKind, type StageKind } from "@/lib/defaults";
+import { readFilmingVideos } from "@/lib/filming-data";
 import { cacheBusted, signedUrlsFor } from "@/lib/storage";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
@@ -198,28 +200,23 @@ export default async function BoardPage({
     cards[index] = { ...card, checklist: ratios.get(card.id) ?? null };
   }
 
-  // The Filming batch badge counts across ALL channels: one creator, one
-  // camera, one Saturday. Two selects rather than an embed, because `videos`
-  // has two FKs to `stages` and PostgREST cannot guess which one is meant.
-  const { data: filmingStages } = await supabase
-    .from("stages")
-    .select("id, channel_id")
-    .eq("kind", "filming")
-    .eq("is_enabled", true);
+  /*
+    The Filming batch badge counts across ALL channels: one creator, one
+    camera, one Saturday.
 
-  const otherChannelFilmingStageIds = (filmingStages ?? [])
-    .filter((stage) => stage.channel_id !== channel.id)
-    .map((stage) => stage.id);
-
-  let filmingInOtherChannels = 0;
-  if (otherChannelFilmingStageIds.length > 0) {
-    const { count } = await supabase
-      .from("videos")
-      .select("id", { count: "exact", head: true })
-      .in("stage_id", otherChannelFilmingStageIds)
-      .is("archived_at", null);
-    filmingInOtherChannels = count ?? 0;
-  }
+    Since M6 it is a *list* and not a count, because the badge is now the button
+    that opens the schedule dialog and that dialog pre-selects exactly the
+    videos the badge counted. `readFilmingVideos()` (`lib/filming-data.ts`) is
+    the one definition of "in Filming" — an enabled stage of kind `filming`, not
+    archived, any channel — so the number on the badge and the videos the dialog
+    pre-selects cannot drift apart. This channel's own cards are
+    added on the client from what is on screen, so a card dragged in a moment
+    ago is included without a refetch; this list is deliberately the *other*
+    channels only, and the two cannot overlap.
+  */
+  const filmingElsewhere = (await readFilmingVideos()).filter(
+    (video) => video.channelId !== channel.id,
+  );
 
   return (
     <AppShell currentSlug={slug} section="board">
@@ -249,7 +246,8 @@ export default async function BoardPage({
             cards={cards}
             wipThreshold={channel.wip_threshold}
             staleDays={channel.stale_days}
-            filmingInOtherChannels={filmingInOtherChannels}
+            filmingElsewhere={filmingElsewhere}
+            today={todayColumn(now)}
             now={now}
           />
         )}

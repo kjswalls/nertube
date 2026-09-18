@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { calendarHref } from "@/components/calendar/grid/url";
-import { formatMonth, monthKey, parseMonthKey } from "@/lib/calendar-dates";
+import { formatMonth, parseMonthKey } from "@/lib/calendar-dates";
 
 /** The nearest month either side that actually has something in it. */
 export interface NearestMonth {
@@ -40,9 +40,11 @@ export function EmptyMonth({
   /** Where target dates get set from. Null when there is no channel yet. */
   boardHref: string | null;
 }) {
-  const parsed = parseMonthKey(month);
-  const label = parsed === null ? month : formatMonth(parsed);
-  const nothingAnywhere = previous === null && next === null;
+  const label = labelOf(month);
+  const nearest = [previous, next].filter(
+    (entry): entry is NearestMonth => entry !== null,
+  );
+  const nothingAnywhere = nearest.length === 0;
 
   return (
     <div
@@ -74,32 +76,28 @@ export function EmptyMonth({
       ) : (
         <p className="mt-1 text-[13px] text-muted">
           The nearest month with anything in it is{" "}
-          {[previous, next]
-            .filter((entry): entry is NearestMonth => entry !== null)
-            .map((entry, index, list) => (
-              <span key={entry.month}>
-                <Link
-                  href={calendarHref({ month: entry.month })}
-                  data-testid="calendar-nearest"
-                  data-month={entry.month}
-                  className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  {formatMonth(
-                    parseMonthKey(entry.month) ?? { year: 1970, month: 1 },
-                  )}
-                </Link>{" "}
-                <span className="font-mono text-[11px]">({entry.count})</span>
-                {index < list.length - 1 ? ", or " : "."}
-              </span>
-            ))}
+          {nearest.map((entry, index) => (
+            <span key={entry.month}>
+              <Link
+                href={calendarHref({ month: entry.month })}
+                data-testid="calendar-nearest"
+                data-month={entry.month}
+                className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {labelOf(entry.month)}
+              </Link>{" "}
+              <span className="font-mono text-[11px]">({entry.count})</span>
+              {index < nearest.length - 1 ? ", or " : "."}
+            </span>
+          ))}
         </p>
       )}
     </div>
   );
 }
 
-/** `YYYY-MM` for a date column, through the helper. */
-export function monthOfDate(date: string): string {
-  const parsed = parseMonthKey(date);
-  return parsed === null ? date : monthKey(parsed);
+/** "September 2026", or the raw key if it is somehow not a month. */
+function labelOf(month: string): string {
+  const parsed = parseMonthKey(month);
+  return parsed === null ? month : formatMonth(parsed);
 }
