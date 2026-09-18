@@ -32,6 +32,28 @@ begin
   end loop;
 end $$;
 
+-- videos.checklist_seeded_stages (0005): the marker that decides whether
+-- entering a stage copies its templates. A client that could clear it could
+-- re-seed a stage it had deliberately emptied, which is the whole defect that
+-- migration exists to close -- so it is not in the granted column list.
+do $$
+declare ok boolean := false; st text; msg text;
+begin
+  begin
+    update public.videos set checklist_seeded_stages = '{}'::uuid[]
+     where id = fx.video_a();
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate, msg = message_text;
+    ok := true;
+  end;
+  if not ok then
+    raise exception 'FAILED: a client cleared videos.checklist_seeded_stages';
+  end if;
+  if st <> '42501' then
+    raise exception 'FAILED: updating checklist_seeded_stages gave % (%), expected 42501', st, msg;
+  end if;
+end $$;
+
 -- Identity columns: a client may not rewrite a row's primary key or its
 -- creation time (0003_identity_columns.sql). RLS and the composite FKs do not
 -- cover these two, so the grant is what has to.

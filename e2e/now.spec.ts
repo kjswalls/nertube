@@ -343,23 +343,66 @@ test('the Monday list: three sections, staleness order, and no ideas', async ({
   await expect(rowFor(page, TITLES.idea)).toHaveCount(0);
 });
 
-test('"10 minutes or less" hides the work that needs a block', async ({ page }) => {
+test('"10 minutes or less" leaves only work that can actually be finished', async ({
+  page,
+}) => {
   await openNow(page);
   await expect(rows(page)).toHaveCount(7);
 
   await page.getByTestId('quick-filter').click();
 
-  // Gone: Filming and Editing (they need a block) and the 15-minute packaging
-  // item. Left: four rows that really are ten minutes.
-  await expect(rows(page)).toHaveCount(4);
+  /*
+    Gone: the Filming checklist item (it needs a block), the 15-minute packaging
+    item, and both Waiting rows — "Unblocked" and "Still waiting" are not ten
+    minutes of work, because neither is work.
+
+    Left: three rows that really can be done in ten minutes, one of which is the
+    Overdue "Complete packaging: a working title". That one used to be *hidden*
+    whenever its video happened to sit in Filming or Editing, because the
+    needs-a-block tag was taken from the stage for every rule rather than for
+    the checklist rule it describes — the filter answering "what can I do in ten
+    minutes" by removing the one row that was ten minutes of typing.
+  */
+  await expect(rows(page)).toHaveCount(3);
   await expect(rowFor(page, TITLES.filming)).toHaveCount(0);
   await expect(rowFor(page, TITLES.editing)).toHaveCount(0);
   await expect(rowFor(page, TITLES.packaging)).toHaveCount(0);
   await expect(rowFor(page, TITLES.published)).toHaveCount(1);
-  await expect(page.getByTestId('filtered-out')).toContainText('3 hidden');
+  await expect(rowById(page, ids.overdueTitle)).toHaveCount(1);
+  await expect(
+    page.locator('[data-testid="now-row"][data-section="waiting"]'),
+  ).toHaveCount(0);
+  await expect(page.getByTestId('filtered-out')).toContainText('4 hidden');
 
   await page.getByTestId('quick-filter').click();
   await expect(rows(page)).toHaveCount(7);
+});
+
+/**
+ * Two counts, not one difference.
+ *
+ * "Still waiting" hides a row for this session and writes nothing. Its rows
+ * used to be folded into the same subtraction as the filters, so pressing it
+ * with no chips and no quick filter on printed "1 hidden" in the filter row —
+ * and, when it was the last row on the page, an empty state reading "Nothing
+ * matches those filters. Turn one off to see the rest." to somebody with no
+ * filter to turn off.
+ */
+test('"Still waiting" sets a row aside without blaming the filters', async ({
+  page,
+}) => {
+  await openNow(page);
+
+  const waiting = rowFor(page, TITLES.editing);
+  await waiting.getByTestId('now-still-waiting').click();
+
+  await expect(rowFor(page, TITLES.editing)).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(6);
+
+  // Not reported as a filter hiding something, because no filter is on.
+  await expect(page.getByTestId('filtered-out')).toHaveCount(0);
+  await expect(page.getByTestId('set-aside')).toContainText('1');
+  await expect(page.getByTestId('set-aside')).toContainText('set aside');
 });
 
 test('the channel chips narrow the list to one channel', async ({ page }) => {

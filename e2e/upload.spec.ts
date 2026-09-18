@@ -444,7 +444,14 @@ test('a sketch the app cannot fetch degrades to the empty frame, with no layout 
   // ---- The detail page names the difference rather than pretending.
   await page.goto(`/videos/${dangling}`);
   await expect(sketchImage(page)).toHaveCount(0);
-  await expect(page.getByText('The sketch could not be loaded')).toBeVisible();
+  await expect(
+    page.getByTestId('concept-sketch-frame').getByText('The sketch could not be'),
+  ).toBeVisible();
+  // The YouTube preview beside it says the same thing rather than "no concept
+  // sketch yet", which is the other, wrong, sentence for this state.
+  await expect(
+    page.locator('[data-testid="preview-thumb-empty"][data-state="broken"]'),
+  ).toHaveCount(3);
   await expect(page.getByLabel('Replace the sketch')).toBeVisible();
 
   // ---- The board card just shows the empty frame: no broken-image icon…

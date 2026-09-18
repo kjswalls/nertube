@@ -219,10 +219,22 @@ test('the sidebar is a real nav, 224px wide, and says where you are without colo
     'aria-current',
     'page',
   );
-  for (const name of ['Calendar', 'Ideas']) {
-    const item = sidebar.getByRole('button', { name, exact: true });
+  for (const [name, milestone] of [
+    ['Calendar', 'M6'],
+    ['Ideas', 'M5'],
+  ] as const) {
+    const item = sidebar.getByRole('button', { name: `${name} ${milestone}`, exact: true });
+    // `aria-disabled`, not `disabled`: it says "unavailable" *and* stays in the
+    // tab order, so the explanation is reachable without a mouse.
+    await expect(item).toHaveAttribute('aria-disabled', 'true');
+    await expect(item).not.toHaveAttribute('disabled', /.*/);
     await expect(item).toBeDisabled();
     await expect(item).toHaveAttribute('title', /arrives in M\d/);
+    // The milestone is on screen, not only in the tooltip.
+    await expect(item).toContainText(milestone);
+    // And it can be focused, which a `disabled` button cannot.
+    await item.focus();
+    await expect(item).toBeFocused();
   }
 
   // `/now` was one of those three until M3 built it. It is a link now, and it
@@ -328,4 +340,154 @@ test('the board takes the design metrics: 216px columns, a 16px gap, 8px cards',
   await card.getByTestId('days-in-stage').click();
   await expect(card).toHaveAttribute('data-selected', 'true');
   await expect(card).toHaveCSS('border-top-width', '1px');
+});
+
+/* -------------------------------------------------------------------------- */
+/* The page does not scroll sideways                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The board's column strip scrolls; the document does not.
+ *
+ * It used to do both. `<html>` grew a horizontal scrollbar on `/c/[slug]/board`
+ * at *every* viewport width, and because the sidebar is a static flex item on
+ * the same page, one ordinary trackpad swipe — pointer on the page heading,
+ * nowhere near the strip — scrolled the viewport 860px and took capture, the
+ * channel switcher, the theme control and Sign out off the screen, revealing
+ * ~900px of blank ground. The strip's own `scrollLeft` never moved: its
+ * scrollable overflow was propagating to the viewport.
+ *
+ * Nothing in the 97-spec suite asserted this, which is how it survived. It is
+ * asserted here at a desk width and at a phone width, and with a real wheel
+ * event rather than only a measurement, because the measurement is what was
+ * missing and the swipe is what a person does.
+ */
+test('the board scrolls sideways and the page does not', async ({ page }) => {
+  await signIn(page);
+
+  const documentScroll = () =>
+    page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+
+  for (const width of [1920, 1440, 1280, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/c/personal/board');
+    await expect(page.getByTestId('board')).toHaveAttribute('data-ready', 'true');
+
+    const measured = await documentScroll();
+    expect(
+      measured.scrollWidth,
+      `the document scrolls sideways at ${width}px`,
+    ).toBe(measured.clientWidth);
+  }
+
+  // The strip itself still scrolls — the sideways scroll is supposed to live
+  // there, and a fix that took it away would be the wrong fix.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/c/personal/board');
+  await expect(page.getByTestId('board')).toHaveAttribute('data-ready', 'true');
+
+  const strip = page.getByTestId('board');
+  const scrollable = await strip.evaluate(
+    (node) => node.scrollWidth > node.clientWidth,
+  );
+  expect(scrollable).toBe(true);
+
+  // A horizontal wheel with the pointer on the heading, outside the strip.
+  await page.mouse.move(700, 60);
+  for (let i = 0; i < 6; i += 1) await page.mouse.wheel(200, 0);
+
+  const after = await page.evaluate(() => ({
+    windowScrollX: window.scrollX,
+    sidebarLeft:
+      document
+        .querySelector('[data-testid="app-sidebar"]')
+        ?.getBoundingClientRect().left ?? null,
+  }));
+  expect(after.windowScrollX).toBe(0);
+  expect(after.sidebarLeft).toBe(0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Focus, including where box-shadow is not allowed                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Focus is visible in Windows High Contrast Mode.
+ *
+ * Every interactive element in this app pairs `outline-none` with
+ * `focus-visible:ring-2 focus-visible:ring-accent`. Tailwind's ring is a
+ * `box-shadow`, and the Forced Colors spec forces `box-shadow: none` — so the
+ * ring vanished and `outline-none` had already thrown away the UA ring that
+ * would otherwise still have been drawn. A keyboard user in High Contrast Mode
+ * had no visible focus anywhere in the product.
+ *
+ * The measurement is negative-controlled by the same page in normal mode: the
+ * ring is a box-shadow there and an outline here, and both are something.
+ */
+test('focus is visible under forced colors, where a ring is not', async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto('/now');
+  await expect(page.getByTestId('now')).toHaveAttribute('data-ready', 'true');
+
+  const focusStyle = async () => {
+    const toggle = page.getByTestId('theme-toggle');
+    await toggle.focus();
+    return toggle.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        boxShadow: style.boxShadow,
+        focusVisible: node.matches(':focus-visible'),
+      };
+    });
+  };
+
+  // Normal: the ring is the box-shadow, as designed.
+  const normal = await focusStyle();
+  expect(normal.focusVisible).toBe(true);
+  expect(normal.boxShadow).not.toBe('none');
+
+  // Forced colors: the box-shadow is gone, and an outline has taken over.
+  await page.emulateMedia({ forcedColors: 'active' });
+  const forced = await focusStyle();
+  expect(forced.focusVisible).toBe(true);
+  expect(forced.boxShadow).toBe('none');
+  expect(forced.outlineStyle).toBe('solid');
+  expect(parseFloat(forced.outlineWidth)).toBeGreaterThanOrEqual(2);
+
+  await page.emulateMedia({ forcedColors: null });
+});
+
+/**
+ * The bypass block (WCAG 2.4.1).
+ *
+ * The sidebar is nine tab stops before the page begins, on every signed-in
+ * route, and it grows by one per channel. The first thing Tab reaches is the
+ * way past it.
+ */
+test('the first tab stop is a skip link to the page itself', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/now');
+  await expect(page.getByTestId('now')).toHaveAttribute('data-ready', 'true');
+
+  await page.keyboard.press('Tab');
+
+  const skip = page.getByTestId('skip-to-main');
+  await expect(skip).toBeFocused();
+  // Parked off-screen until it is focused, and on-screen once it is.
+  const onScreen = await skip.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.left >= 0 && rect.top >= 0;
+  });
+  expect(onScreen).toBe(true);
+
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('app-main')).toBeFocused();
+  expect(page.url()).toContain('#main');
 });

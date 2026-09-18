@@ -455,6 +455,12 @@ export default async function VideoDetailPage({
                 <YouTubePreview
                   channelName={channel?.name ?? "Your channel"}
                   sketchUrl={sketchUrl}
+                  // Separately from the URL, and for the reason
+                  // `ConceptSketch` above takes it separately: `sketchUrl` is
+                  // null both when there is no sketch and when signing one
+                  // failed, and telling the second "no concept sketch yet" is a
+                  // lie the person cannot act on.
+                  hasSketch={video.thumbnail_concept_path !== null}
                   savedTitle={video.title}
                 />
               ),

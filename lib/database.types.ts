@@ -16,7 +16,8 @@
  * int/numeric -> number, jsonb -> Json, text[] -> string[]. `Insert` makes a
  * column optional when it is nullable or has a default; `Update` makes
  * everything optional. Note that the four columns revoked from `authenticated`
- * (stage_id, stage_entered_at, published_at, shipped_role) still appear in
+ * (stage_id, stage_entered_at, published_at, shipped_role), and the fifth added
+ * by 0005 (checklist_seeded_stages), still appear in
  * `Update`: the types describe the schema, and the database — not the types —
  * is what refuses those writes.
  */
@@ -92,6 +93,14 @@ export type VideosRow = {
   metrics_logged_at: string | null;
   swap_dismissed_at: string | null;
   brainstorm_last: Json | null;
+  /**
+   * Which stages this video has already entered (0005).
+   *
+   * Written only by `move_video` and `capture_video`. Like the four columns
+   * named in the file comment above, it still appears in `Update` — these types
+   * describe the schema, and the grant is what refuses the write.
+   */
+  checklist_seeded_stages: string[];
 };
 
 export type Database = {
@@ -423,6 +432,7 @@ export type Database = {
           metrics_logged_at?: string | null;
           swap_dismissed_at?: string | null;
           brainstorm_last?: Json | null;
+          checklist_seeded_stages?: string[];
         };
         Update: {
           id?: string;
@@ -467,6 +477,7 @@ export type Database = {
           metrics_logged_at?: string | null;
           swap_dismissed_at?: string | null;
           brainstorm_last?: Json | null;
+          checklist_seeded_stages?: string[];
         };
         Relationships: [
           {

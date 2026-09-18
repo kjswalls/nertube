@@ -156,6 +156,30 @@ export function NowView({
     [allRows, acknowledged, filters],
   );
 
+  /*
+    Two counts, not one difference.
+
+    A row can leave the list for two unrelated reasons — a filter is narrowing
+    it away, or the user pressed "Still waiting" and set it aside — and
+    subtracting `rows.length` from `allRows.length` conflates them. That read
+    "1 hidden" in the filter chip row with no chip and no quick filter on, and,
+    when the acknowledged row was the last one, printed "Nothing matches those
+    filters. Turn one off to see the rest." to somebody with no filter to turn
+    off.
+  */
+  const hiddenByFilters = useMemo(
+    () =>
+      allRows.filter(
+        (row) => !acknowledged.has(row.videoId) && !matchesFilters(row, filters),
+      ).length,
+    [allRows, acknowledged, filters],
+  );
+
+  const setAsideCount = useMemo(
+    () => allRows.filter((row) => acknowledged.has(row.videoId)).length,
+    [allRows, acknowledged],
+  );
+
   const sections = useMemo(
     () =>
       SECTION_ORDER.map((section) => ({
@@ -515,8 +539,6 @@ export function NowView({
   /* Render                                                                  */
   /* ---------------------------------------------------------------------- */
 
-  const hiddenByFilters = allRows.length - rows.length;
-
   return (
     <div
       ref={listRef}
@@ -575,7 +597,7 @@ export function NowView({
           onClick={() =>
             setFilters((previous) => ({ ...previous, quickOnly: !previous.quickOnly }))
           }
-          title="Rows estimated at ten minutes or less. Filming and editing need a real block, so they are hidden."
+          title="Rows estimated at ten minutes or less. Filming and editing checklist items need a real block, and Waiting rows are not work, so both are hidden."
           className={[
             "rounded-full border px-2.5 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
             filters.quickOnly
@@ -591,6 +613,13 @@ export function NowView({
             {hiddenByFilters} hidden
           </span>
         ) : null}
+
+        {setAsideCount > 0 ? (
+          <span data-testid="set-aside" className="text-[11px] text-muted">
+            <span className="font-mono">{setAsideCount}</span> set aside until
+            you reload
+          </span>
+        ) : null}
       </div>
 
       {/* ---- the list ---- */}
@@ -598,7 +627,9 @@ export function NowView({
         <p data-testid="now-empty" className="text-[13px] text-muted">
           {allRows.length === 0
             ? "Nothing is waiting on you. Capture an idea with c, or promote one from the board."
-            : "Nothing matches those filters. Turn one off to see the rest."}
+            : hiddenByFilters > 0
+              ? "Nothing matches those filters. Turn one off to see the rest."
+              : `Everything left is set aside for now. Reload to bring ${setAsideCount === 1 ? "it" : "them"} back.`}
         </p>
       ) : (
         <div className="flex max-w-3xl flex-col gap-5">

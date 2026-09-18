@@ -137,9 +137,19 @@ export function NowRowItem({
           >
             needs a block
           </span>
-        ) : (
-          <span className="font-mono">{row.estMinutes} min</span>
-        )}
+        ) : row.payload.input === "tick" ? (
+          /*
+            The mono face is for *measured* values, and only a checklist row has
+            one: `checklist_items.est_minutes`, seeded per row. Every other rule
+            is built with `DEFAULT_EST_MINUTES` so the quick filter has a number
+            to compare, and printing that here — "10 min" beside "Goes live
+            1 Dec" — was the tool asserting a measurement it never made, in the
+            one face that is supposed to guarantee it did.
+          */
+          <span data-testid="now-est" className="font-mono">
+            {row.estMinutes} min
+          </span>
+        ) : null}
       </div>
 
       <RowControl row={row} now={now} busy={busy} onIntent={onIntent} />

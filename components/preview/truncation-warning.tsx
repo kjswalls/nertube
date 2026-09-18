@@ -122,6 +122,8 @@ export function TitleTruncationWarning({
               >
                 <span className="text-muted">
                   {subject.label} &mdash;{" "}
+                  {/* Graphemes, so an emoji counts as one and a family emoji
+                      counts as one: see `Clamp.cut` in ./measure-title.ts. */}
                   <span className="font-mono">{clamp?.cut}</span> characters cut
                 </span>
                 <span className="font-display text-sm leading-snug">

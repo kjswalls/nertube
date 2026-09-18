@@ -234,10 +234,20 @@ export const CANDIDATE_TARGET = 10;
  * Nothing here ticks anything. PLAN.md review item 21 leaves auto-tick out of
  * v1 on purpose: the app can say *you have written two hooks*, and only the
  * person can say *the strongest is picked*.
+ *
+ * ## The row's own number wins
+ *
+ * `read` is handed the match, so a pattern that matched a digit can *use* that
+ * digit. "Title under 55 characters" was matched by `/under \d+ characters/i`
+ * and then answered with `TITLE_WARN_LENGTH` regardless — which is invisible
+ * today, because the seed happens to say 55, and becomes a chip reading `58/55`
+ * beside a row reading "Title under 60 characters" the moment M7 ships the
+ * template editor. A table that is loose enough to survive a reworded row has
+ * to read the rewording.
  */
 const EVIDENCE_TABLE: readonly {
   readonly match: RegExp;
-  readonly read: (facts: EvidenceFacts) => Evidence;
+  readonly read: (facts: EvidenceFacts, match: RegExpMatchArray) => Evidence;
 }[] = [
   {
     // "Generated 10–20 title candidates, not 3"
@@ -255,13 +265,19 @@ const EVIDENCE_TABLE: readonly {
     }),
   },
   {
-    // "Title under 55 characters"
-    match: /under \d+ characters/i,
-    read: (facts) => ({
-      label: `${facts.titleLength}/${TITLE_WARN_LENGTH}`,
-      overLimit: facts.titleLength > TITLE_WARN_LENGTH,
-      detail: `The working title is ${facts.titleLength} characters; this row asks for ${TITLE_WARN_LENGTH} or fewer`,
-    }),
+    // "Title under 55 characters" — and the number is read off the row, not
+    // assumed. `TITLE_WARN_LENGTH` is the fallback for a row that asks for a
+    // short title without saying how short.
+    match: /under (\d+) characters/i,
+    read: (facts, match) => {
+      const asked = Number(match[1]);
+      const limit = Number.isFinite(asked) && asked > 0 ? asked : TITLE_WARN_LENGTH;
+      return {
+        label: `${facts.titleLength}/${limit}`,
+        overLimit: facts.titleLength > limit,
+        detail: `The working title is ${facts.titleLength} characters; this row asks for ${limit} or fewer`,
+      };
+    },
   },
   {
     // "Hook drafted in 3 versions, strongest picked"
@@ -286,7 +302,10 @@ export function evidenceFor(
   facts: EvidenceFacts,
 ): Evidence | null {
   for (const rule of EVIDENCE_TABLE) {
-    if (rule.match.test(text)) return rule.read(facts);
+    // `match` and not `test`: the groups are what let a rule quote the row's
+    // own number back rather than a constant that may not describe it.
+    const found = text.match(rule.match);
+    if (found) return rule.read(facts, found);
   }
   return null;
 }

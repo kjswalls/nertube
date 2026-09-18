@@ -137,6 +137,25 @@ describe('evidence', () => {
     expect(over?.overLimit).toBe(true);
   });
 
+  it('quotes the row\'s own number, not the constant, when a row is reworded', () => {
+    // M7 ships the template editor, and the first thing anybody does with it is
+    // change a number. A row asking for 60 must be answered with 60.
+    const reworded = evidenceFor('Title under 60 characters', {
+      ...facts,
+      titleLength: 58,
+    });
+    expect(reworded?.label).toBe('58/60');
+    expect(reworded?.overLimit).toBe(false);
+    expect(reworded?.detail).toContain('60 or fewer');
+
+    const stricter = evidenceFor('Title under 50 characters', {
+      ...facts,
+      titleLength: 58,
+    });
+    expect(stricter?.label).toBe('58/50');
+    expect(stricter?.overLimit).toBe(true);
+  });
+
   it('counts the hooks written for the row that asks for three versions', () => {
     const evidence = evidenceFor(SEED_CHECKLISTS.packaging[7].text, facts);
     expect(evidence?.label).toBe(`2/${HOOK_TARGET} written`);

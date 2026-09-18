@@ -201,3 +201,41 @@
     display: inline;
   }
 }
+
+/* ==========================================================================
+   Focus in Windows High Contrast Mode.
+
+   **Deliberately outside every `@layer`.** Unlayered CSS beats layered CSS
+   whatever the specificity, and that is the whole reason this block sits here
+   rather than in `@layer base` above: the treatment it is overriding is
+   Tailwind's `outline-none`, which lives in `@layer utilities` and would win
+   against anything in `base`.
+
+   What it is for: the application has one focus treatment, written everywhere
+   as `outline-none focus-visible:ring-2 focus-visible:ring-accent`. Tailwind's
+   ring is a `box-shadow`, and the CSS Forced Colors spec forces
+   `box-shadow: none` — so under `forced-colors: active` the ring vanished, and
+   `outline-none` had already thrown away the UA focus ring that would otherwise
+   still have been drawn. A keyboard user in High Contrast Mode had no visible
+   focus anywhere in the product: sidebar links, capture, the theme control, the
+   filter chips, the checklist expander, the `/now` tick boxes, the section tabs.
+
+   One rule, because the treatment is already claimed to be uniform. The system
+   colour keywords are the point: `CanvasText` and `Highlight` are whatever the
+   user chose, which is the entire contract of that mode.
+   ========================================================================== */
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
+  /* The board's selection (`j` / `k`) marks itself with `border-accent ring-1
+     ring-accent`, and forced colors takes both the border colour and the ring,
+     so the selected card became indistinguishable from the rest. */
+  [data-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}

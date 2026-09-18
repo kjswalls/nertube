@@ -659,6 +659,55 @@ describe("rule 8 — move to the next stage", () => {
     expect(row).toBeNull();
   });
 
+  /*
+    The entrance to the terminal stage, which is the half the suite was missing.
+
+    BRIEF.md principle 8: *check first-24h performance, swap thumbnail if
+    needed, then repurpose*. Repurposed is terminal, so a move taken before the
+    metrics exist ends the post-publish loop permanently — rules 2 and 3 are
+    keyed on `kind === "published"` and can never fire again.
+  */
+  it("does not offer the move out of Published while the first 24 hours are unlogged", () => {
+    const row = rowFor({
+      stageId: "ch1-published",
+      // 23 hours: rule 2 has not come due yet either, so this is the exact
+      // window in which the old code offered the one-way door.
+      publishedAt: ago(23 * HOUR),
+      stageEnteredAt: ago(23 * HOUR),
+      metricsLoggedAt: null,
+      checklist: checklist([{ checkedAt: ticked }, { checkedAt: ticked }]),
+    });
+
+    expect(row).toBeNull();
+  });
+
+  it("offers it again the moment the metrics are logged", () => {
+    const row = rowFor({
+      stageId: "ch1-published",
+      publishedAt: ago(30 * HOUR),
+      stageEnteredAt: ago(30 * HOUR),
+      metricsLoggedAt: ago(HOUR),
+      first24Impressions: 12_400,
+      first24Ctr: 6.1,
+      checklist: checklist([{ checkedAt: ticked }]),
+    });
+
+    expect(row?.rule).toBe(8);
+    expect(row?.payload).toMatchObject({ toStageId: "ch1-repurposed" });
+  });
+
+  it("still offers a move out of a non-published stage with no metrics", () => {
+    // The guard is about the post-publish loop, not about `published_at` being
+    // null everywhere else in the app.
+    const row = rowFor({
+      stageId: "ch1-scheduled",
+      targetPublishDate: null,
+      checklist: checklist([{ checkedAt: ticked }]),
+    });
+
+    expect(row?.rule).toBe(8);
+  });
+
   it("emits nothing from Published when the Repurposed lane is off", () => {
     const ch = channel({ stages: stagesOf("ch1", ["repurposed"]) });
     const row = nextAction(
@@ -924,19 +973,49 @@ describe("the eight-video week", () => {
     expect(tail.map((row) => row.videoId)).toEqual(["w5", "w7"]);
   });
 
-  it("leaves three rows under the ten-minute filter", () => {
+  it("leaves four actionable rows under the ten-minute filter", () => {
     const quick = rows.filter((row) =>
       matchesFilters(row, { channelIds: [], quickOnly: true }),
     );
 
-    // w6 is Editing (needs a block) and a 45-minute item besides; w5 is Filming.
+    // w6 is a 45-minute Editing item; w5 and w7 are Waiting, and "Unblocked"
+    // is not ten minutes of work because it is not work. What is left is four
+    // rows that can actually be finished: two Overdue, two Ready.
     expect(quick.map((row) => row.videoId).sort()).toEqual([
       "w2",
       "w3",
       "w4",
-      "w7",
       "w8",
     ]);
+
+    // And every one of them has a control that does something.
+    expect(quick.every((row) => row.section !== "waiting")).toBe(true);
+  });
+
+  it("keeps a one-line Overdue typing task whatever column it is sitting in", () => {
+    // The regression this is guarding: `needsABlock` used to be computed from
+    // the stage kind for *every* rule, so w4's "Complete packaging: a working
+    // title" — a single-line text box — was hidden by the quick filter the
+    // moment the video happened to be in Filming or Editing.
+    const inFilming = rankNow(
+      [
+        video({
+          id: "wF",
+          channelId: "ch2",
+          stageId: "ch2-filming",
+          title: "",
+          checklist: checklist([{ checkedAt: ticked }]),
+        }),
+      ],
+      contextOf(personal, softworks),
+      NOW,
+    );
+
+    expect(inFilming[0].rule).toBe(1);
+    expect(inFilming[0].needsABlock).toBe(false);
+    expect(
+      matchesFilters(inFilming[0], { channelIds: [], quickOnly: true }),
+    ).toBe(true);
   });
 
   it("narrows to one channel with the chips", () => {

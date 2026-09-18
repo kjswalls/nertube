@@ -51,10 +51,49 @@ export interface Clamp {
   readonly text: string;
   /** What fits — the string itself when it fits, otherwise the visible prefix. */
   readonly visible: string;
-  /** Characters the clamp would cut. Zero when the whole title fits. */
+  /**
+   * Characters the clamp would cut, counted the way a person counts them.
+   *
+   * **Graphemes, not UTF-16 code units.** `"😀".length` is 2 and
+   * `"👨‍👩‍👧‍👦".length` is 11, so a warning reading "33 characters cut" was
+   * reporting a tail of one space and sixteen emoji. `Intl.Segmenter` is built
+   * into every browser this app supports and adds no dependency; `Array.from`
+   * (code points) is the fallback where it is not, which is right for emoji and
+   * only wrong for a ZWJ sequence.
+   */
   readonly cut: number;
   /** Would the browser draw an ellipsis here? */
   readonly truncated: boolean;
+}
+
+/**
+ * A string as a list of things a person would call characters.
+ *
+ * Grapheme clusters where `Intl.Segmenter` exists, code points otherwise. This
+ * is what the binary search steps over and what the cut is counted in, and both
+ * of those used to be UTF-16 code units:
+ *
+ * - The **search** could land between the two halves of a surrogate pair, so
+ *   `text.slice(0, low)` ended in a lone high surrogate and the browser drew
+ *   U+FFFD. The truncation warning then rendered the visible prefix and the
+ *   remainder separately, which split one emoji into two replacement glyphs,
+ *   one on each side of the ellipsis. Reproduced on six different emoji at the
+ *   same pad length, so it was alignment and not luck.
+ * - The **count** double-counted every astral character.
+ *
+ * Segmenting also means a family emoji or a flag is never cut in half through
+ * its joiners, which code points alone would not prevent.
+ */
+function units(text: string): string[] {
+  const Segmenter = (
+    Intl as unknown as { Segmenter?: typeof Intl.Segmenter }
+  ).Segmenter;
+  if (typeof Segmenter === "function") {
+    return Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (
+      part,
+    ) => part.segment);
+  }
+  return Array.from(text);
 }
 
 /** The whole string fits: the answer for an empty box or an empty string. */
@@ -138,14 +177,23 @@ export function measureClamp(text: string, box: TitleBox): Clamp | null {
   if (full === 0) return null;
   if (full <= limit) return whole(text);
 
-  // The longest prefix that still fits with an ellipsis after it. Chrome's own
-  // line clamp fits the ellipsis inside the last line's width, so it is part of
-  // what is measured rather than something added afterwards.
+  /*
+    The longest prefix that still fits with an ellipsis after it.
+
+    Chrome's own line clamp fits the ellipsis inside the last line's width, so
+    it is part of what is measured rather than something added afterwards.
+
+    The search steps over **graphemes** and not code units — see `units`. A
+    midpoint in the middle of a surrogate pair produced a prefix ending in half
+    a character, which the browser drew as U+FFFD in the title and which the
+    truncation warning then split across its own ellipsis.
+  */
+  const parts = units(text);
   let low = 0;
-  let high = text.length;
+  let high = parts.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    node.textContent = `${text.slice(0, middle).trimEnd()}${ELLIPSIS}`;
+    node.textContent = `${parts.slice(0, middle).join("").trimEnd()}${ELLIPSIS}`;
     if (node.scrollHeight <= limit) {
       low = middle;
     } else {
@@ -153,8 +201,15 @@ export function measureClamp(text: string, box: TitleBox): Clamp | null {
     }
   }
 
-  const visible = text.slice(0, low).trimEnd();
-  return { text, visible, cut: text.length - visible.length, truncated: true };
+  const visible = parts.slice(0, low).join("").trimEnd();
+  // Counted in the same units the search used, so "N characters cut" is a
+  // number a person could arrive at by looking at the tail.
+  return {
+    text,
+    visible,
+    cut: parts.length - units(visible).length,
+    truncated: true,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -179,9 +234,10 @@ export function measureClamp(text: string, box: TitleBox): Clamp | null {
  * `PREVIEW_FACES` lists both weights: asking for 400 does not bring 500, and
  * a search title measured in a synthesised bold-of-400 is not a search title.
  *
- * The concrete family name is read off the document, because `next/font`
- * generates it at build time (`__Roboto_1a2b3c`) and nothing in the source
- * knows it. If the variable is not there — the stylesheet has not applied, or
+ * The concrete family is read off the document, because `next/font` decides at
+ * build time what the generated `@font-face` is called and nothing in the
+ * source knows it. If the variable is not there — the stylesheet has not
+ * applied, or
  * someone removed the face — this falls back to plain `ready`, which is what
  * the code did before and is still better than never re-measuring.
  */

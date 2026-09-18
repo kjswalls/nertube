@@ -18,6 +18,19 @@ export const metadata = { title: "Capture · NerTube" };
  * `?c=<slug>` aims it at a channel, so a phone can hold a bookmark per channel.
  * Without it the form falls back to the last-used channel, the same as the
  * modal does away from a channel route.
+ *
+ * ## No `AppShell`, and 16px of padding rather than the gutter token
+ *
+ * This is the one signed-in route that does not render the shell, which is why
+ * anything claiming "every signed-in route" has to say *except this one*: there
+ * is no sidebar here, and so `c` and `1`..`9` are not bound — the page already
+ * *is* the capture form.
+ *
+ * The padding is `px-4` (16px) and not `--spacing-gutter` (32px) because the
+ * gutter is sized for a 1440px window where 32px is a rest at the edge. On a
+ * 390px phone it is 64px of the 390 — a sixth of the screen — spent on margin
+ * beside a single text field. 16px is the phone's gutter; the token is the
+ * desk's.
  */
 export default async function CapturePage({
   searchParams,

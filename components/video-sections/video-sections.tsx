@@ -212,24 +212,37 @@ export function VideoSections({
               })}
             </div>
 
+            {/*
+              The column is kept on every section; the *landmark* is not.
+
+              Keeping the grid column the same width whatever section is open is
+              the decision argued above — it is what stops the tabs sliding
+              under the pointer when one is pressed. Emitting a labelled
+              `<aside>` to hold that column is a separate thing, and it is not
+              what that argument justifies: on Script, Thumbnails, Flow and
+              Publish the element has no children, so a screen reader's landmark
+              list gained a complementary region called "Alongside this section"
+              containing nothing, on four sections out of five. An empty
+              placeholder keeps the arithmetic and says nothing.
+            */}
             {hasRail ? (
-              <aside
-                data-testid="video-rail"
-                data-filled={rail === null ? "false" : "true"}
-                aria-label="Alongside this section"
-                className={
-                  rail === null
-                    ? undefined
-                    : // The 1px rule and the gutter belong to the rail only
-                      // where there *is* a rail beside something: stacked, a
-                      // left border on a full-width block is a stripe down the
-                      // page. `sticky` keeps the preview in view while the
-                      // packaging block below it is scrolled through.
-                      "min-w-0 min-[1480px]:sticky min-[1480px]:top-gutter min-[1480px]:border-l min-[1480px]:border-border min-[1480px]:pl-gutter"
-                }
-              >
-                {rail}
-              </aside>
+              rail === null ? (
+                <div data-testid="video-rail" data-filled="false" aria-hidden="true" />
+              ) : (
+                <aside
+                  data-testid="video-rail"
+                  data-filled="true"
+                  aria-label="Alongside this section"
+                  // The 1px rule and the gutter belong to the rail only where
+                  // there *is* a rail beside something: stacked, a left border
+                  // on a full-width block is a stripe down the page. `sticky`
+                  // keeps the preview in view while the packaging block below
+                  // it is scrolled through.
+                  className="min-w-0 min-[1480px]:sticky min-[1480px]:top-gutter min-[1480px]:border-l min-[1480px]:border-border min-[1480px]:pl-gutter"
+                >
+                  {rail}
+                </aside>
+              )
             ) : null}
           </div>
         </div>

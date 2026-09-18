@@ -22,7 +22,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
  *   the database while it is still on screen. So a save that arrives while one
  *   is in flight is queued, merged over anything already queued, and sent when
  *   the wire is free. What is on screen is never delayed by this; only the
- *   write is.
+ *   write is. **A failure stops the queue** rather than draining it, so an
+ *   error can never be overwritten by the write behind it.
  * - `useAutosave` — **one text field, saved on blur**, built on a queue of its
  *   own. Blur and not keystroke: a title is written by typing, deleting and
  *   rewriting, and saving each keystroke would put a row of nonsense per
@@ -143,6 +144,7 @@ function mergePatches<Patch>(queued: Patch, next: Patch): Patch {
 export function useSaveQueue<Patch>({
   save,
   merge = mergePatches,
+  onFailure,
 }: {
   save: (patch: Patch) => Promise<SaveResult>;
   /**
@@ -151,6 +153,16 @@ export function useSaveQueue<Patch>({
    * its value passes `(_, next) => next`.
    */
   merge?: (queued: Patch, next: Patch) => Patch;
+  /**
+   * A write failed, and this is whatever was queued behind it — `null` when
+   * nothing was.
+   *
+   * The queue **parks** that work rather than sending it (see the note in
+   * `send`), so a caller that already applied it optimistically has to be told,
+   * and this is where it puts the screen back. Called once per failure, before
+   * the error state lands, so the rollback and the message are one batch.
+   */
+  onFailure?: (parked: Patch | null) => void;
 }): SaveQueue<Patch> {
   const [state, setState] = useState<SaveState<Patch>>({ kind: "idle" });
   const [, startTransition] = useTransition();
@@ -169,9 +181,11 @@ export function useSaveQueue<Patch>({
   // always sees the saver its own render built.
   const saveRef = useRef(save);
   const mergeRef = useRef(merge);
+  const onFailureRef = useRef(onFailure);
   useEffect(() => {
     saveRef.current = save;
     mergeRef.current = merge;
+    onFailureRef.current = onFailure;
   });
 
   /** `send` calling itself, without a self-referencing `useCallback`. */
@@ -192,30 +206,51 @@ export function useSaveQueue<Patch>({
     setState({ kind: "saving" });
 
     startTransition(async () => {
+      let result: SaveResult;
       try {
-        const result = await saveRef.current(patch);
-        setState(
-          result.ok
-            ? { kind: "saved" }
-            : {
-                kind: "error",
-                message: result.error,
-                payload: patch,
-                conflict: result.conflict,
-              },
-        );
+        result = await saveRef.current(patch);
       } catch {
-        setState({ kind: "error", message: UNREACHABLE, payload: patch });
-      } finally {
-        inFlight.current = false;
-        // Cleared whether it landed or not. On success the row now holds it, so
-        // the confirmed baseline has caught up; on failure the row never took
-        // it, so the baseline must fall back rather than pretend it did.
-        sent.current = null;
+        result = { ok: false, error: UNREACHABLE };
+      }
+
+      inFlight.current = false;
+      // Cleared whether it landed or not. On success the row now holds it, so
+      // the confirmed baseline has caught up; on failure the row never took
+      // it, so the baseline must fall back rather than pretend it did.
+      sent.current = null;
+
+      if (result.ok) {
+        setState({ kind: "saved" });
         const next = queued.current;
         queued.current = null;
         if (next) sendRef.current?.(next.patch);
+        return;
       }
+
+      /*
+        A failure **stops** the queue. It used to drain it, and that was a way
+        to lose a write under a "Saved" line: the error state and the follow-up
+        `{kind:"saving"}` landed in the same React batch, so the failure was
+        never rendered at all, and the batch behind it then succeeded and wrote
+        "Saved". A caller that had already rolled its change back was left with
+        no message, no Retry and no trace of it.
+
+        So whatever was queued is *parked*: merged into the payload the error
+        carries, so one Retry replays both, and handed to `onFailure`, so a
+        caller that applied it optimistically can put the screen back for work
+        that is now never going to be sent.
+      */
+      const parked = queued.current;
+      queued.current = null;
+      const payload = parked ? mergeRef.current(patch, parked.patch) : patch;
+
+      onFailureRef.current?.(parked ? parked.patch : null);
+      setState({
+        kind: "error",
+        message: result.error,
+        payload,
+        conflict: result.conflict,
+      });
     });
   }, []);
 

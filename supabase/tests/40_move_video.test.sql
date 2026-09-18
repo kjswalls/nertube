@@ -136,6 +136,43 @@ begin
   end if;
 end $$;
 
+do $$
+declare n int;
+begin
+  -- A stage the user deliberately emptied stays empty.
+  --
+  -- "First entry" is recorded on videos.checklist_seeded_stages, not inferred
+  -- from "this stage has no rows for this video". M3 gives every row a delete
+  -- button and treats a cleared list as a supported choice, so the old
+  -- row-count guard silently reinstated every template row — including the ones
+  -- the user had deleted because they did not apply — the next time the video
+  -- came back.
+  delete from public.checklist_items
+   where video_id = fx.video_a() and stage_id = fx.stage(fx.channel('a-main'), 'scripting');
+
+  select count(*) into n from public.checklist_items ci
+   where ci.video_id = fx.video_a() and ci.stage_id = fx.stage(fx.channel('a-main'), 'scripting');
+  if n <> 0 then raise exception 'FAILED: the Scripting list was not cleared'; end if;
+
+  perform public.move_video(fx.video_a(), fx.stage(fx.channel('a-main'), 'filming'));
+  perform public.move_video(fx.video_a(), fx.stage(fx.channel('a-main'), 'scripting'));
+
+  select count(*) into n from public.checklist_items ci
+   where ci.video_id = fx.video_a() and ci.stage_id = fx.stage(fx.channel('a-main'), 'scripting');
+  if n <> 0 then
+    raise exception 'FAILED: re-entering a deliberately emptied stage re-seeded it (% items)', n;
+  end if;
+
+  -- And the marker says why, rather than the row count saying it.
+  if not exists (
+    select 1 from public.videos
+     where id = fx.video_a()
+       and fx.stage(fx.channel('a-main'), 'scripting') = any (checklist_seeded_stages)
+  ) then
+    raise exception 'FAILED: the entry into Scripting was never recorded';
+  end if;
+end $$;
+
 -- ------------------------------------------------- moves that must refuse ---
 do $$
 declare ok boolean := false; msg text;

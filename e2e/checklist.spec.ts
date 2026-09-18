@@ -457,6 +457,60 @@ test('reset puts the template back and drops the ticks and the custom items', as
   expect(await readItems(videoId, 'idea')).toHaveLength(0);
 });
 
+/**
+ * A custom item added while a reset is in flight is not lost.
+ *
+ * A reset replaces the whole list with the server's template rows, and it used
+ * to replace it with those *only* — so a row still owed by the queue was thrown
+ * away. The add then landed in the database, at position 0, as the next action
+ * — the entire point of the feature — and its own reconcile found no temp row
+ * to replace, so the real row was never put back on screen. The page showed
+ * neither it nor an error, and the strip is keyed by `stage_id`, which does not
+ * change on a reset, so the revalidation did not re-seed it either. The add box
+ * is documented as deliberately never disabled during a write, so this path is
+ * offered to the user on purpose.
+ */
+test('a custom item added while a reset is in flight survives the reset', async ({
+  page,
+}) => {
+  const videoId = await inPackaging('Reset race');
+  const custom = 'CALL THE SPONSOR BACK';
+
+  await signIn(page);
+  await page.goto(`/videos/${videoId}`);
+  await openList(page);
+
+  await page.route(
+    (url) => url.pathname === `/videos/${videoId}`,
+    async (route) => {
+      if (route.request().method() === 'POST') {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+      }
+      await route.continue();
+    },
+  );
+
+  await page.getByTestId('checklist-reset').click();
+  await page.getByTestId('checklist-reset-confirm').click();
+  await expect(status(page)).toHaveText(/Saving…/);
+
+  // While the reset is on the wire.
+  await page.getByTestId('checklist-add-input').fill(custom);
+  await page.getByTestId('checklist-add-submit').click();
+
+  await expectSaved(page);
+
+  // On screen, at the top, and named as the next thing to do.
+  expect(await rowTexts(page)).toEqual([custom, ...PACKAGING]);
+  await expect(page.getByTestId('checklist-next')).toContainText(custom);
+  await expect(ratio(page)).toHaveText(`0/${PACKAGING.length + 1}`);
+
+  // And the screen and the database agree, which is what went wrong before.
+  const stored = await readItems(videoId, 'packaging');
+  expect(stored.map((row) => row.text)).toEqual([custom, ...PACKAGING]);
+  expect(stored[0].position).toBe(0);
+});
+
 /* -------------------------------------------------------------------------- */
 /* 5. A failed tick rolls back                                                 */
 /* -------------------------------------------------------------------------- */
@@ -514,6 +568,135 @@ test('a tick that the database refuses goes back, and says so', async ({
   expect(
     (await readItems(videoId, 'packaging')).every((row) => row.checked_at === null),
   ).toBe(true);
+});
+
+/**
+ * A failure is never followed by "Saved".
+ *
+ * The queue used to *drain* on a failure: the error state and the follow-up
+ * `{kind:"saving"}` landed in the same React batch, so the failure was never
+ * rendered, and the batch behind it then succeeded and wrote "Saved". The
+ * checklist had already rolled the failed tick back and then discarded its
+ * record of it, so there was no message, no Retry and no trace — reachable with
+ * two ordinary clicks, on the one interaction this product has that happens ten
+ * times in a row.
+ */
+test('a failed tick with another queued behind it ends on the failure, not on "Saved"', async ({
+  page,
+}) => {
+  const videoId = await inPackaging('Queued behind a failure');
+  const stored = await readItems(videoId, 'packaging');
+  const doomed = stored[1];
+  const innocent = stored[2];
+
+  await signIn(page);
+  await page.goto(`/videos/${videoId}`);
+  await openList(page);
+
+  await db.query('delete from public.checklist_items where id = $1', [doomed.id]);
+
+  // Held open long enough that the second click lands while the first is still
+  // on the wire, which is the state that produces the queue.
+  await page.route(
+    (url) => url.pathname === `/videos/${videoId}`,
+    async (route) => {
+      if (route.request().method() === 'POST') {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+      await route.continue();
+    },
+  );
+
+  const first = page.getByRole('checkbox', { name: doomed.text });
+  const second = page.getByRole('checkbox', { name: innocent.text });
+
+  await first.check();
+  await expect(status(page)).toHaveText(/Saving…/);
+  await second.check();
+
+  // The failure is what is on screen when the dust settles, and it stays.
+  await expect(status(page)).toHaveAttribute('data-state', 'error');
+  await expect(status(page)).toContainText('not there any more');
+  await page.waitForTimeout(1_500);
+  await expect(status(page)).toHaveAttribute('data-state', 'error');
+  await expect(status(page)).not.toHaveText(/^Saved$/);
+
+  // Both rows are back where they were: the second was parked, not sent.
+  await expect(first).not.toBeChecked();
+  await expect(second).not.toBeChecked();
+  await expect(ratio(page)).toHaveText(`0/${PACKAGING.length}`);
+  expect(
+    (await readItems(videoId, 'packaging')).every((row) => row.checked_at === null),
+  ).toBe(true);
+
+  // And the work that was rolled back is offered back, rather than discarded.
+  await expect(page.getByTestId('checklist-save-status-retry')).toBeVisible();
+});
+
+/**
+ * An aborted request is a failure like any other.
+ *
+ * `runOp` turns a *refusal* into a value, but a dropped connection rejects, and
+ * the exception used to sail past every rollback in `use-checklist.ts` and out
+ * into the queue's own catch. The result was the one outcome that module says
+ * it must not have: the checkbox stayed ticked and the ratio counted it while
+ * the database held nothing, the message shown was the text editor's ("Nothing
+ * you typed has been lost"), which is false for a tick that has just been
+ * discarded, and Retry returned early on an empty list and did nothing at all.
+ */
+test('an offline tick is rolled back, says so, and Retry actually re-sends it', async ({
+  page,
+}) => {
+  const videoId = await inPackaging('Offline tick');
+  const stored = await readItems(videoId, 'packaging');
+  const target = stored[0];
+
+  await signIn(page);
+  await page.goto(`/videos/${videoId}`);
+  await openList(page);
+
+  let offline = true;
+  await page.route(
+    (url) => url.pathname === `/videos/${videoId}`,
+    async (route) => {
+      if (offline && route.request().method() === 'POST') {
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    },
+  );
+
+  const checkbox = page.getByRole('checkbox', { name: target.text });
+  // click(), not check(): check() asserts the box ends up ticked, and the
+  // rollback under test here can land before that assertion runs. The tick
+  // reverting is the behaviour, so asserting it stuck would be asserting the
+  // bug. The real expectations are the four lines below.
+  await checkbox.click();
+
+  await expect(status(page)).toHaveAttribute('data-state', 'error');
+  // The checklist's own sentence, not the field editor's.
+  await expect(status(page)).toContainText('that change was undone');
+  await expect(status(page)).not.toContainText('Nothing you typed');
+  await expect(checkbox).not.toBeChecked();
+  await expect(ratio(page)).toHaveText(`0/${PACKAGING.length}`);
+  expect(
+    (await readItems(videoId, 'packaging')).every((row) => row.checked_at === null),
+  ).toBe(true);
+
+  /* -- back online, and Retry is a real offer ----------------------------- */
+
+  offline = false;
+  await page.getByTestId('checklist-save-status-retry').click();
+
+  await expectSaved(page);
+  await expect(checkbox).toBeChecked();
+  await expect(ratio(page)).toHaveText(`1/${PACKAGING.length}`);
+
+  const after = await readItems(videoId, 'packaging');
+  expect(after.filter((row) => row.checked_at !== null).map((row) => row.id)).toEqual([
+    target.id,
+  ]);
 });
 
 /* -------------------------------------------------------------------------- */

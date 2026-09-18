@@ -45,15 +45,19 @@ export interface SidebarChannel {
  * link like any other). M1's review caught this exact mistake on the
  * gate-refusal toast — a link to a fragment on a page that had no such field —
  * and the answer was the same then: an affordance that says what it will do and
- * refuses to pretend it does it yet. Each one is a real disabled control naming
- * the milestone it arrives in, so the shape of the product is visible without a
- * single dead link in it.
+ * refuses to pretend it does it yet. Each one names the milestone it arrives
+ * in, on the row and not only in a tooltip, so the shape of the product is
+ * visible without a single dead link in it — and it is `aria-disabled` rather
+ * than `disabled`, so a keyboard user can actually reach the thing that says
+ * so. See `SidebarDisabled`.
  *
  * ## What it still does that the header did
  *
- * `CaptureHost` (`c`, everywhere signed in) and `ChannelShortcuts` (`1`..`9`)
- * are mounted here, because this is the one component every signed-in route
- * renders and the one that already knows the channel list. `ShortcutHints`
+ * `CaptureHost` (`c`) and `ChannelShortcuts` (`1`..`9`) are mounted here,
+ * because this is the one component every signed-in route renders — with the
+ * deliberate exception of `/capture`, which is chrome-free by design and where
+ * the page *is* the capture form, so neither key has anything to do. It is also
+ * the component that already knows the channel list. `ShortcutHints`
  * still lists the *live* registrations, so it advertises exactly the keys that
  * work on the route being looked at.
  */
@@ -180,8 +184,12 @@ export function AppSidebar({
                 </SidebarDisabled>
               )}
             </li>
-            <SectionItem label="Calendar" arrivesIn="M6" />
-            <SectionItem label="Ideas" arrivesIn="M5, with the idea bank" />
+            <SectionItem label="Calendar" milestone="M6" />
+            <SectionItem
+              label="Ideas"
+              milestone="M5"
+              note="with the idea bank"
+            />
           </ul>
         </div>
 
@@ -283,39 +291,75 @@ export function AppSidebar({
   );
 }
 
-/** A section that is drawn but not built. See the file comment. */
+/**
+ * A section that is drawn but not built. See the file comment.
+ *
+ * The milestone is drawn on the row, in small mono, exactly the way
+ * `components/preview/assist-pill.tsx` draws M8 on the inert assist buttons. It
+ * used to live only in `title`, which is a tooltip: a keyboard user never
+ * hovers and a touch user cannot, so the one sentence explaining why the row
+ * does nothing was reachable by mouse alone. On screen it is reachable by
+ * everybody, and it joins the control's accessible name — "Calendar M6" — which
+ * is the sentence in miniature.
+ */
 function SectionItem({
   label,
-  arrivesIn,
+  milestone,
+  note,
 }: {
   label: string;
-  arrivesIn: string;
+  milestone: string;
+  /** Anything more than the milestone number, for the tooltip only. */
+  note?: string;
 }) {
   return (
     <li>
-      <SidebarDisabled title={`${label} arrives in ${arrivesIn}.`}>
+      <SidebarDisabled
+        title={`${label} arrives in ${milestone}${note ? `, ${note}` : ""}.`}
+        trailing={
+          <span className="font-mono text-[10px] tracking-wide uppercase">
+            {milestone}
+          </span>
+        }
+      >
         {label}
       </SidebarDisabled>
     </li>
   );
 }
 
+/**
+ * A control that is present and refuses to pretend it works.
+ *
+ * `aria-disabled` and **not** `disabled`. A `disabled` button is removed from
+ * the tab order, so a keyboard or screen-reader user never landed on Calendar
+ * or Ideas at all — the row was visible, its explanation was in a tooltip they
+ * could not summon, and the whole point of drawing it (the shape of the product
+ * is visible) applied to mouse users only. `aria-disabled` keeps it in the tab
+ * order and announces it as unavailable, which is the honest pair.
+ *
+ * There is no click handler, which is what makes it do nothing. Nothing to
+ * intercept, nothing to hydrate: this stays a Server Component.
+ */
 function SidebarDisabled({
   title,
+  trailing,
   children,
 }: {
   title: string;
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
-      disabled
+      aria-disabled="true"
       title={title}
       data-testid="sidebar-unbuilt"
-      className="flex w-full cursor-not-allowed items-center rounded-button px-2 py-1.5 text-left text-[13px] text-muted opacity-55"
+      className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-button px-2 py-1.5 text-left text-[13px] text-muted opacity-75 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      {children}
+      <span className="min-w-0 truncate">{children}</span>
+      {trailing}
     </button>
   );
 }

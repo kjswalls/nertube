@@ -45,6 +45,11 @@ import { GATE_WORDING, packagingGate, type GateField } from "./packaging";
  * > 7. kind `packaging`, checklist done, gate field missing → "Pick a working title" / "Write the thumbnail concept" / "Choose a hook" (Ready)
  * > 8. checklist done (total > 0), a later enabled stage exists, gate passes → "Move to <next stage>" (Ready); terminal kinds emit nothing
  *
+ * One guard is added to rule 8 that PLAN.md's line does not spell out, because
+ * BRIEF.md principle 8 does: *check first-24h performance, swap thumbnail if
+ * needed, **then** repurpose*. A published video with no metrics logged is not
+ * offered the move out. The reasoning is at the rule itself.
+ *
  * ## Two words that mean two different things
  *
  * `gate_ok` in rule 1 is **the field predicate only** — title, written concept,
@@ -453,7 +458,17 @@ export function nextAction(
     input: payload.input,
     payload,
     estMinutes,
-    needsABlock: kind !== null && NEEDS_A_BLOCK.includes(kind),
+    /*
+      A property of the *row*, not of the column the video is parked in.
+
+      Only rule 6 is work done *inside* the stage, so only rule 6 inherits the
+      stage's cost. "Complete packaging: a working title" is a single-line text
+      box whose whole cost is typing a title, and it was being hidden by the
+      quick filter for the sole reason that the video happened to be sitting in
+      Filming — the filter answering "what can I do in ten minutes" by removing
+      the one row that was ten minutes of work.
+    */
+    needsABlock: rule === 6 && kind !== null && NEEDS_A_BLOCK.includes(kind),
     stageEnteredAt: video.stageEnteredAt,
     ageMs,
     daysInStage: Math.floor(ageMs / 86_400_000),
@@ -602,7 +617,31 @@ export function nextAction(
 
   /* -- 8. it is finished here; move it ------------------------------------ */
 
-  if (video.checklist.length > 0) {
+  /*
+    BRIEF.md principle 8 orders the post-publish loop: *check first-24h
+    performance, swap thumbnail if needed, **then** repurpose into clips /
+    newsletter / social*. Rules 2 and 3 are the first two steps and they are
+    keyed on `kind === "published"`; Repurposed is terminal, so a move taken
+    before the metrics exist is a one-way door out of both of them — the 24h
+    prompt and the swap prompt could never fire again, and `first24_*` would
+    stay null with nothing anywhere asking for them.
+
+    So the "then" is made mechanical: while a published video has never had its
+    first 24 hours written down, rule 8 offers no way out of the stage. The
+    seeded Published checklist makes this the default path rather than an edge
+    case — its two rows are ticked through rule 6 without recording anything,
+    and the third keystroke used to take the move.
+
+    Rule 2 is what fills the gap: it fires as soon as `published_at + 24h`
+    passes, so the row is never empty for long, and before then the video
+    simply has nothing to offer, which is true.
+  */
+  const awaitingFirst24 =
+    kind === "published" &&
+    video.publishedAt !== null &&
+    video.metricsLoggedAt === null;
+
+  if (video.checklist.length > 0 && !awaitingFirst24) {
     const to = nextStageAfter(channel.stages, kind);
     if (to !== null && movePasses(video, to)) {
       return build(8, `Move to ${to.name}`, "ready", {
@@ -628,10 +667,17 @@ function swappedSince(lastSwapAt: string | null, metricsLoggedAt: string): boole
 /**
  * Is this calendar date still ahead of us?
  *
- * The comparison is against the **end** of the target day in UTC: a video
- * scheduled for today is live today, so "on/after" has to include the day
- * itself, which `Date.parse(date) > now` would not. PLAN.md's wording is *in
- * the future → Waiting; on/after → Ready*.
+ * The comparison is against the **start** of the target day in UTC —
+ * `now < Date.parse(date + "T00:00:00Z")` — so the day itself counts as
+ * on/after and the row is Ready from midnight UTC on the target date. PLAN.md's
+ * wording is *in the future → Waiting; on/after → Ready*.
+ *
+ * `now` is real UTC and `target_publish_date` is a zoneless `date`, which has a
+ * consequence worth stating rather than discovering: a user east of UTC sees
+ * "Confirm live" from their local morning, and a user west of it sees it during
+ * the evening before. One user, one zone, and a `date` column with no zone in
+ * it — pinning this to a configured zone is a settings question (M7), not an
+ * arithmetic one.
  */
 function isFuture(date: string, now: number): boolean {
   const start = Date.parse(`${date}T00:00:00Z`);
@@ -697,9 +743,20 @@ export const NO_FILTERS: NowFilters = { channelIds: [], quickOnly: false };
  * PLAN.md: *"≤ 10 min" (uses `est_minutes`, null = 10; kinds `filming`/
  * `editing` are tagged "needs a block" and hidden)*.
  *
- * The two halves are separate tests on purpose. A Filming row is hidden even
- * when its checklist item claims five minutes, because the five minutes is the
- * task and the afternoon is the setup.
+ * The three tests are separate on purpose.
+ *
+ * - **Needs a block.** A Filming row is hidden even when its checklist item
+ *   claims five minutes, because the five minutes is the task and the afternoon
+ *   is the setup. Only a rule-6 row carries the tag — see `needsABlock`.
+ * - **The estimate.** Only a checklist row has a real one; every other row is
+ *   built with `DEFAULT_EST_MINUTES` so that this comparison has a number, and
+ *   that default is a filter default and not a claim (the row does not print
+ *   it: see `components/now/now-row.tsx`).
+ * - **Waiting.** Hidden outright. This goes past PLAN.md's letter, and
+ *   deliberately: the filter's promise is *work you can finish now*, and the
+ *   only controls a Waiting row has are "Unblocked" and "Still waiting" —
+ *   neither of which is ten minutes of work, because neither is work. Keeping
+ *   them was the filter answering a question nobody asked.
  */
 export function matchesFilters(row: NowRow, filters: NowFilters): boolean {
   if (
@@ -709,6 +766,7 @@ export function matchesFilters(row: NowRow, filters: NowFilters): boolean {
     return false;
   }
   if (filters.quickOnly) {
+    if (row.section === "waiting") return false;
     if (row.needsABlock) return false;
     if (row.estMinutes > QUICK_MINUTES) return false;
   }

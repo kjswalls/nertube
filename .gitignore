@@ -50,6 +50,10 @@ next-env.d.ts
 # config and uploaded objects. Never committed.
 /.dev-stack/
 
+# Vitest's on-disk cache (vitest 5 writes it beside the config, not in
+# node_modules). Build output, never source.
+/.vitest/
+
 # Playwright
 /test-results/
 /playwright-report/

@@ -31,6 +31,14 @@ import { requireUser } from "@/lib/supabase/require-user";
  * So there is one reader and one ranking. The sidebar's number is
  * `rankNow(...).length` over exactly the rows the page renders.
  *
+ * With one stated exception, which is the page's and not this file's: the
+ * filters and "Still waiting" both narrow what is *drawn* without changing what
+ * there is to do. The badge is the denominator — it counts the work — and
+ * `/now` says so on the page, with "N hidden" beside the chips and "N set aside
+ * until you reload" beside them. Pressing "Still waiting" therefore leaves the
+ * badge one higher than the visible list, on purpose: the thing is still
+ * waiting.
+ *
  * ## `cache()` is what makes that free
  *
  * React's `cache` memoises per *request*, not across requests, so on `/now` —
@@ -38,7 +46,8 @@ import { requireUser } from "@/lib/supabase/require-user";
  * callers get the same object. On the board and the video page the cost is real
  * and it is these five reads, which is the honest price of a count that agrees
  * with the view it counts. PLAN.md sizes the account at one user and hundreds of
- * rows; the reads are flat and RLS-scoped, and `videos` is capped below.
+ * rows; the reads are flat, RLS-scoped and paged (see below), so they are
+ * complete at that size and at any size this app will see.
  *
  * ## Five reads, no embeds
  *
@@ -46,7 +55,76 @@ import { requireUser } from "@/lib/supabase/require-user";
  * one), so a PostgREST embed would be ambiguous — the board hit this first.
  * Five flat selects with the joining done in memory is both easier to reason
  * about and, at this size, faster.
+ *
+ * ## Why three of them are paged
+ *
+ * PostgREST truncates an unbounded read at `db-max-rows` — 1000 on a hosted
+ * project, and `scripts/dev-stack/postgrest.mts` pins the same number so that a
+ * missing `.limit()` behaves here the way it will there. A truncated body is
+ * not an error: the rows simply stop, and nothing in the response says so.
+ *
+ * That is worse here than almost anywhere else in the app, because a missing
+ * checklist does not merely lose a row — it **removes the whole video from the
+ * page**. Rule 6 needs an item and rule 8 requires `checklist.length > 0`, so a
+ * video whose rows fell past the cut is silently answered with a different rule
+ * or with nothing at all, and the sidebar's count under-reports by the same
+ * amount. `components/checklist/ratios.ts` documents this hazard and refuses to
+ * answer rather than answer short; this file cannot refuse, because the page it
+ * feeds *is* the answer, so it pages instead and reads every row.
+ *
+ * `videos`, `checklist_items` and `thumbnail_swaps` therefore go through
+ * `readPaged` below. The `in (...)` lists are chunked as well, because a URL
+ * carrying two thousand uuids is its own kind of silent failure.
  */
+
+/**
+ * One page of a paged read.
+ *
+ * Deliberately under `db-max-rows`: a page that asked for exactly the ceiling
+ * could not tell "there are exactly this many" from "you have been truncated".
+ * Asking for fewer than the ceiling means a short page is always the end.
+ */
+const PAGE_SIZE = 500;
+
+/** How many uuids go into one `in (...)` list, so the URL stays a URL. */
+const ID_CHUNK = 200;
+
+/**
+ * A stop, so a read that never terminates fails loudly instead of hanging.
+ * PLAN.md sizes the account at one user and hundreds of rows; this is 50,000.
+ */
+const MAX_PAGES = 100;
+
+/** Every row of a read, one page at a time. Throws rather than answering short. */
+async function readPaged<Row>(
+  what: string,
+  page: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>,
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  for (let index = 0; index < MAX_PAGES; index += 1) {
+    const from = index * PAGE_SIZE;
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`Could not load the ${what}: ${error.message}`);
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) return rows;
+  }
+  throw new Error(
+    `Could not load the ${what}: more than ${MAX_PAGES * PAGE_SIZE} rows, which is past anything this app is designed for.`,
+  );
+}
+
+/** `ids` in groups small enough for one `in (...)` list. */
+function chunked(ids: readonly string[]): string[][] {
+  const out: string[][] = [];
+  for (let index = 0; index < ids.length; index += ID_CHUNK) {
+    out.push(ids.slice(index, index + ID_CHUNK));
+  }
+  return out;
+}
 export interface NowInputs {
   readonly channels: readonly NowChannel[];
   readonly videos: readonly NowVideo[];
@@ -80,20 +158,20 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     throw new Error(`Could not load the stages: ${stagesError.message}`);
   }
 
-  const { data: videoRows, error: videosError } = await supabase
-    .from("videos")
-    // One literal on one line: supabase-js types the result from the select
-    // string, and a concatenation is no longer a literal type to read.
-    // prettier-ignore
-    .select("id, channel_id, title, stage_id, stage_entered_at, thumbnail_concept, hooks, packaging_skipped_at, waiting_on, waiting_since, target_publish_date, published_at, youtube_url, first24_impressions, first24_ctr, metrics_logged_at, swap_dismissed_at")
-    .is("archived_at", null)
-    .limit(2000);
+  const videoRows = await readPaged("videos", (from, to) =>
+    supabase
+      .from("videos")
+      // One literal on one line: supabase-js types the result from the select
+      // string, and a concatenation is no longer a literal type to read.
+      // prettier-ignore
+      .select("id, channel_id, title, stage_id, stage_entered_at, thumbnail_concept, hooks, packaging_skipped_at, waiting_on, waiting_since, target_publish_date, published_at, youtube_url, first24_impressions, first24_ctr, metrics_logged_at, swap_dismissed_at")
+      .is("archived_at", null)
+      // A total order, because paging without one can repeat and skip rows.
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  if (videosError) {
-    throw new Error(`Could not load the videos: ${videosError.message}`);
-  }
-
-  const videoIds = (videoRows ?? []).map((video) => video.id);
+  const videoIds = videoRows.map((video) => video.id);
 
   /*
     The checklist rows for every video at once, then grouped in memory.
@@ -104,17 +182,17 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     simpler and reads the same rows.
   */
   const itemsByVideoAndStage = new Map<string, ChecklistItem[]>();
-  if (videoIds.length > 0) {
-    const { data: itemRows, error: itemsError } = await supabase
-      .from("checklist_items")
-      .select(`${CHECKLIST_COLUMNS}, video_id, stage_id`)
-      .in("video_id", videoIds);
+  for (const ids of chunked(videoIds)) {
+    const itemRows = await readPaged("checklists", (from, to) =>
+      supabase
+        .from("checklist_items")
+        .select(`${CHECKLIST_COLUMNS}, video_id, stage_id`)
+        .in("video_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (itemsError) {
-      throw new Error(`Could not load the checklists: ${itemsError.message}`);
-    }
-
-    for (const row of itemRows ?? []) {
+    for (const row of itemRows) {
       const key = `${row.video_id}:${row.stage_id}`;
       const list = itemsByVideoAndStage.get(key);
       if (list) list.push(readChecklistItem(row));
@@ -129,17 +207,17 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     videos is one read and the max is taken here.
   */
   const lastSwapAt = new Map<string, string>();
-  if (videoIds.length > 0) {
-    const { data: swapRows, error: swapsError } = await supabase
-      .from("thumbnail_swaps")
-      .select("video_id, swapped_at")
-      .in("video_id", videoIds);
+  for (const ids of chunked(videoIds)) {
+    const swapRows = await readPaged("thumbnail swaps", (from, to) =>
+      supabase
+        .from("thumbnail_swaps")
+        .select("video_id, swapped_at")
+        .in("video_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
-    if (swapsError) {
-      throw new Error(`Could not load the thumbnail swaps: ${swapsError.message}`);
-    }
-
-    for (const row of swapRows ?? []) {
+    for (const row of swapRows) {
       const current = lastSwapAt.get(row.video_id);
       if (!current || current < row.swapped_at) {
         lastSwapAt.set(row.video_id, row.swapped_at);
@@ -172,7 +250,7 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     computed from the same rows the rules are about.
   */
   const ctrsByChannel = new Map<string, { publishedAt: string; ctr: number }[]>();
-  for (const video of videoRows ?? []) {
+  for (const video of videoRows) {
     if (video.first24_ctr === null || video.published_at === null) continue;
     const list = ctrsByChannel.get(video.channel_id) ?? [];
     list.push({ publishedAt: video.published_at, ctr: Number(video.first24_ctr) });
@@ -197,7 +275,7 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     };
   });
 
-  const videos: NowVideo[] = (videoRows ?? []).map((video) => ({
+  const videos: NowVideo[] = videoRows.map((video) => ({
     id: video.id,
     channelId: video.channel_id,
     title: video.title,

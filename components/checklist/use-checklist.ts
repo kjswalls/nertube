@@ -36,6 +36,13 @@ import { sortItems, topPosition, type ChecklistItem } from "@/lib/checklist";
  *    reconciled with the row the action returned — the real id of an added
  *    item, the real `checked_at` of a tick — so the screen holds database
  *    values a moment later rather than plausible ones.
+ * 4. **A failure is never followed by "Saved".** The queue underneath stops on
+ *    a failure instead of draining what was behind it, and everything it parks
+ *    is rolled back through `onFailure` and offered to one Retry. A batch that
+ *    reverted rows cannot be overwritten by an unrelated later success.
+ * 5. **A dropped connection is a failure like any other.** `runOp` is wrapped,
+ *    because an exception escaping this callback would skip every rule above
+ *    it and leave a tick on screen that the database never took.
  *
  * ## Why it is built on `useSaveQueue`
  *
@@ -112,6 +119,17 @@ export interface Checklist {
  * of it.
  */
 export const TEMP_PREFIX = "temp:";
+
+/**
+ * Said when the request never reached the server.
+ *
+ * Deliberately *not* the generic string in `components/autosave.tsx`. That one
+ * is written for a text field, which keeps what was typed and needs to be told
+ * so; a tick carries no text and has just been taken back off the screen, so
+ * the honest sentence is a different one.
+ */
+const UNREACHABLE =
+  "Could not reach the server, so that change was undone. Try it again when you are back online.";
 
 export function isPending(item: ChecklistItem): boolean {
   return item.id.startsWith(TEMP_PREFIX);
@@ -211,7 +229,21 @@ function reconcileOp(
     case "delete":
       return [...items];
     case "reset":
-      return sortItems(result.items ?? []);
+      /*
+        The server's list, plus anything the queue still owes.
+
+        A reset replaces the whole list, and it used to replace it with the
+        template rows *only* — which threw away a custom item added while the
+        reset was on the wire. The add then landed in the database (at position
+        0, i.e. as the next action, which is the entire point of the feature)
+        and its own reconcile found no temp row to replace, so the map was the
+        identity and the real row was never put back on screen. The row existed
+        and the page showed neither it nor an error.
+
+        A pending row is one this client invented and the server has not
+        answered for yet, so it is exactly the set the reset cannot know about.
+      */
+      return sortItems([...(result.items ?? []), ...items.filter(isPending)]);
   }
 }
 
@@ -258,45 +290,97 @@ export function useChecklist({
    * that already landed — harmless for a tick, a duplicate row for an add.
    */
   const failed = useRef<readonly ChecklistOp[]>([]);
+  /** False when re-sending `failed` would be wrong rather than merely useless. */
+  const retryable = useRef(true);
 
   const { state, pending, send, touch } = useSaveQueue<readonly ChecklistOp[]>({
     // A list's patch is a sequence, so a write that arrives while one is in
     // flight joins the queue behind it rather than replacing it.
     merge: (queued, next) => [...queued, ...next],
+
+    /*
+      The single rollback point.
+
+      `save` below records what did not land; this puts the screen back, once,
+      for all of it — the unsent tail of the batch that failed *and* whatever
+      the queue had parked behind it. It has to be one pass, newest-first
+      (`revertAll`), because two passes in dispatch order would undo a repeated
+      toggle to the wrong value.
+    */
+    onFailure: (parked) => {
+      const all = parked ? [...failed.current, ...parked] : failed.current;
+      failed.current = all;
+      if (all.length > 0) setItems((current) => revertAll(current, all));
+    },
+
     save: async (ops) => {
       for (let index = 0; index < ops.length; index += 1) {
         const op = ops[index];
-        const result = await runOp(videoId, op);
+
+        /*
+          `runOp` turns a refusal into a value, but it cannot turn a *dropped
+          connection* into one: an aborted request rejects, and an exception
+          thrown from here would sail past every rollback in this file and out
+          into the queue's own catch, where the generic message is the field
+          editor's — "Nothing you typed has been lost" — which is false for a
+          tick that has just been discarded. The tick would stay on screen, the
+          ratio would count it, the database would hold nothing, and the Retry
+          the app offered would return early on an empty `failed` and do
+          nothing at all.
+
+          So the throw is caught here and answered exactly like a refusal.
+        */
+        let result: ChecklistResult;
+        try {
+          result = await runOp(videoId, op);
+        } catch {
+          failed.current = ops.slice(index);
+          retryable.current = true;
+          return { ok: false, error: UNREACHABLE };
+        }
 
         if (!result.ok) {
-          const tail = ops.slice(index);
-          failed.current = tail;
-          setItems((current) => revertAll(current, tail));
+          failed.current = ops.slice(index);
+          retryable.current = true;
           return { ok: false, error: result.error };
         }
 
-        if (op.kind === "add" && result.stageId !== stageId) {
+        if (result.stageId !== stageId) {
           /*
-            The video moved while this page was open. The row landed — in the
-            stage the video is in now — so it is not in *this* list, and
-            pretending otherwise would put a row on screen that no read of this
-            stage will ever return.
+            The video moved to another stage while this page was open.
 
-            In practice this branch is the fallback, not the usual path: the
-            action revalidates `/videos/[id]`, the route re-renders with the new
-            stage, and the strip is keyed by that stage, so it remounts onto the
-            real list with the new row at the top of it before any of this is
-            read. What this covers is the case where that re-render does not
-            arrive — the state below is then the last word, and it is honest.
+            Every action in `app/actions/checklist.ts` reads the video's current
+            stage itself and returns it, with a header comment saying why: *a
+            client showing a different one can say the video has moved instead
+            of silently dropping the write*. This is that comparison, and it
+            used to be made for `add` alone — so a tab left open on a departed
+            stage would happily tick and delete rows in it and reconcile the
+            answer in as a success.
+
+            What to put back on screen differs by kind, and the difference is
+            real. An `add` lands in the stage the video is in *now*, so the temp
+            row on screen names something no read of this list will ever return
+            and has to go. A tick or a delete named a row by id, and that row is
+            one of the ones on screen: the write landed on it, so reverting it
+            would be the second lie. Either way the operations *behind* the one
+            that ran were never sent, so they come back.
+
+            In practice this is the fallback, not the usual path: the action
+            revalidates `/videos/[id]`, the route re-renders with the new stage,
+            and the strip is keyed by that stage, so it remounts onto the real
+            list. What this covers is the case where that re-render does not
+            arrive — the state here is then the last word, and it is honest.
           */
-          const tail = ops.slice(index);
-          failed.current = [];
+          failed.current =
+            op.kind === "add" ? ops.slice(index) : ops.slice(index + 1);
+          retryable.current = false;
           setMovedAway(true);
-          setItems((current) => revertAll(current, tail));
           return {
             ok: false,
             error:
-              "This video moved to another stage while the page was open, so that item was added to the stage it is in now. Reload to see it.",
+              op.kind === "add"
+                ? "This video moved to another stage while the page was open, so that item was added to the stage it is in now. Reload to see it."
+                : "This video moved to another stage while the page was open, so this list is the stage it has left. That change was saved there. Reload to see where it is now.",
             conflict: true,
           };
         }
@@ -305,6 +389,7 @@ export function useChecklist({
       }
 
       failed.current = [];
+      retryable.current = true;
       return { ok: true };
     },
   });
@@ -362,7 +447,7 @@ export function useChecklist({
 
   const retry = useCallback(() => {
     const ops = failed.current;
-    if (ops.length === 0) return;
+    if (ops.length === 0 || !retryable.current) return;
     failed.current = [];
     // Re-dispatched rather than re-sent: the rows are back where they were, so
     // the optimistic half has to happen again too. A stale `previous` is not a

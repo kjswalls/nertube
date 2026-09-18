@@ -679,7 +679,21 @@ export function Board({
         ref={boardRef}
         data-testid="board"
         data-ready="false"
-        className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-4"
+        /*
+          `contain: paint` is not decoration.
+
+          Without it this strip's scrollable overflow propagates all the way to
+          the viewport: `<html>` grows a horizontal scrollbar at *every* width,
+          and because the 224px sidebar is a static flex item on the same page,
+          an ordinary trackpad swipe — with the pointer nowhere near the strip —
+          takes capture, the channel switcher, the theme control and Sign out
+          off the left of the screen and reveals 900px of blank ground, while
+          the strip's own `scrollLeft` never moves. Making this a real paint
+          container stops that at the strip, which is where the sideways scroll
+          is supposed to live. `components/app-shell.tsx` clips the shell as
+          well, so nothing else can reintroduce it either.
+        */
+        className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-4 [contain:paint]"
       >
         {columns.map(({ stage, total, visible, overflow }) => {
           const wipWarning =

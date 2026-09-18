@@ -1244,9 +1244,14 @@ describe what is coming, and may not pretend to be it.
 - **The sidebar** (`components/app-sidebar.tsx`), replacing
   `components/app-header.tsx`, which is deleted. Sections, then channels from
   the database, then the account. `c` and `1`..`9` are still bound here, because
-  this is still the one component every signed-in route renders and the one that
-  already knows the channel list; `ShortcutHints` still lists the *live*
-  registrations rather than a hard-coded set.
+  this is still the one component every signed-in route renders **except
+  `/capture`** — which is deliberately chrome-free (PLAN.md's phone bookmark: it
+  renders no `AppShell`, no sidebar, and its own 16px padding rather than the
+  32px gutter, because 32px of a 390px screen is a sixth of it). The
+  consequence, corrected here by the M3 review: `c` and `1`..`9` are *not* bound
+  on `/capture`, and nothing is lost by that, because the page already is the
+  capture form. `ShortcutHints` still lists the *live* registrations rather than
+  a hard-coded set.
 - **The shell** (`components/app-shell.tsx`). Every signed-in route was opening
   with its own `min-h-dvh` wrapper, its own header call and its own `<main>`
   padding — four copies of three lines, and four chances for the gutters to
@@ -1730,11 +1735,20 @@ difference.
    control naming that milestone, following M1's settled rule about affordances
    that cannot be honoured yet.
 5. **The weekly strip is not aligned to the columns.** The obvious design is a
-   cell above each column. The board scrolls horizontally and the page does not,
-   so that would need a second synchronised scroller or would drift out of
-   alignment the moment anybody scrolled — and a header that lies about which
-   column it describes is worse than one that names them. Each cell names its
-   stage, and a column holding nothing is not drawn at all.
+   cell above each column. That would need a second scroller synchronised with
+   the strip, or it would drift out of alignment the moment anybody scrolled the
+   board — and a header that lies about which column it describes is worse than
+   one that names them. Each cell names its stage, and a column holding nothing
+   is not drawn at all.
+
+   *Corrected by the M3 review.* This paragraph used to give its reason as "the
+   board scrolls horizontally and the page does not", and that premise was
+   false: the strip's scrollable overflow was reaching the viewport, so `<html>`
+   had a horizontal scrollbar on the board at every width and a trackpad swipe
+   anywhere on the page took the sidebar off the screen. That is now fixed
+   (`contain: paint` on the strip, `overflow-x: clip` on the shell) and asserted
+   at 1920/1440/1280/1024/390. The decision about the strip is unchanged; only
+   its stated reason is, and it is the correct one.
 
 ### Honest limits
 
@@ -2211,7 +2225,7 @@ which is exactly why a character-count rule of thumb was never going to work.
 | **The preview is a panel PLAN.md does not mention at all.** | BRIEF.md principle 1 is that the title and thumbnail are decided before the shoot; the two questions that decision needs — where does the title get cut, does the concept read at tile size — cannot be answered from an editor. It is the only new *surface* this milestone invented. |
 | **Three inert assist controls** beside the candidates, the concept and the hooks. | M8 fills them. Drawn disabled, naming the milestone on the control itself as well as in `title`, because a disabled button is not focusable and its tooltip reaches no keyboard user. The two empty tabs (Thumbnails, Publish) are the opposite case and are empty *states*: a disabled control claims the feature exists and is unavailable to you, and behind those two nothing exists yet. |
 | **The Script section is read-only.** PLAN.md lists `script` on the detail page. | `script` is not in `lib/video-fields.ts`'s patch vocabulary and `updateVideo` has no branch for it. A textarea over a column with no save path would accept an evening's work and lose it silently. It renders the column `move_video` fills and says plainly that it cannot be written here. The field and its save path should arrive together. |
-| **The weekly strip is not aligned to the board's columns.** | The board scrolls horizontally and the page does not, so an aligned strip would need a second synchronised scroller or would drift the moment anyone scrolled. Each cell names its stage instead. |
+| **The weekly strip is not aligned to the board's columns.** | An aligned strip would need a second scroller synchronised with the column strip, or it would drift the moment anyone scrolled the board. Each cell names its stage instead. (This row used to say "the board scrolls horizontally and the page does not"; the page *did* scroll, which the M3 review found and fixed — see §5 above.) |
 | **A Scheduled video with no `target_publish_date` produces no `/now` row.** | Rule 5 has no honest branch without a date, and Scheduled has no seeded checklist. Named rather than papered over; the video is still on the board. |
 | **"Reset from template" is two requests, not a transaction.** | No fifth SQL function was added — `supabase/tests/90_schema_contract.test.sql` pins the count at four, and reset has no cross-row invariant to protect. If the insert fails the action says the list was cleared and the template did not go back; pressing Reset again is a complete retry. |
 
@@ -2224,7 +2238,17 @@ which is exactly why a character-count rule of thumb was never going to work.
    what makes the sidebar's count the same number as the page. They are flat,
    RLS-scoped and `cache()`d per request, and PLAN.md sizes the account at one
    user and hundreds of rows — but it is a real cost and this is where it is
-   written down. `videos` is capped at 2000 rows by the query.
+   written down.
+
+   *Corrected by the M3 review.* This used to end "`videos` is capped at 2000
+   rows by the query", which was wrong in the dangerous direction: PostgREST's
+   `db-max-rows` is 1000 (the dev stack pins the same number on purpose), so the
+   effective cap was 1000, and `checklist_items` and `thumbnail_swaps` had no
+   `.limit()` at all. A truncated body is not an error, and a video whose
+   checklist fell past the cut does not lose a row — it leaves `/now`
+   altogether, because rule 6 needs an item and rule 8 requires
+   `checklist.length > 0`. All three reads are now **paged** (500 a page, `in
+   (...)` lists chunked at 200) and read every row.
 2. **The rail is only side by side above 1480px.** That is a wide window. The
    alternative was scaling YouTube's metrics down, which would make the one
    component whose job is fidelity lie about it.
@@ -2242,8 +2266,13 @@ which is exactly why a character-count rule of thumb was never going to work.
    count. Only the two labelled sample tiles in the phone rendering carry
    invented counts, because a metadata line of the right length is part of the
    layout being judged.
-7. **`--spacing-rail-min` finally has a consumer** (the rail's assertion floor);
-   the shell's honest limit about it having none is closed.
+7. **`--spacing-rail-min` finally has a consumer** (the rail's assertion floor).
+   *Corrected by the M3 review:* when this was written the spec hard-coded 276
+   and 452 as literals, so the tokens still had no consumer and the sentence was
+   false. `e2e/preview.spec.ts` now reads both off `:root` at run time and
+   asserts the rail's measured width against them, so changing either token
+   changes the assertion. The shell's honest limit about it having none is
+   closed, and this time by something.
 8. Everything was verified against `scripts/dev-stack`, never a hosted Supabase
    project. **M1's deploy gap is still open.**
 
@@ -2279,3 +2308,412 @@ stack, on a stack seeded with nothing but ideas:
   maximum rail. The feed clamp cut **32 characters**; search fitted the whole
   title, which is the entire reason both are drawn.
 - At 1280px the rail stacked and the page did not scroll sideways.
+
+---
+
+## M3 — adversarial review, applied
+
+Four reviewers went at M3 from four angles (the ranking, the YouTube preview's
+fidelity, the checklist's write path, and the shell's accessibility and scope)
+and returned 34 findings: 4 blockers, 10 majors, 20 minors. Every one was
+re-verified here before anything was changed; the three that were wrong or out
+of scope are listed with their reasons rather than quietly dropped.
+
+Three of the four blockers were in the same place — the optimistic write path
+behind the checklist — and they were three faces of one thing: the queue in
+`components/autosave.tsx` treated a failure as an event to get past rather than
+a state to stay in.
+
+### Blockers — fixed
+
+1. **A failed write with anything queued behind it ended on "Saved".**
+   `useSaveQueue`'s `finally` set the error state and then immediately drained
+   the queue, which set `{kind:"saving"}` in the same React batch — so the
+   failure was never rendered, and the batch behind it then succeeded and wrote
+   "Saved" over a list that had already been silently rolled back. Two ordinary
+   clicks reached it, on the one interaction this product has that happens ten
+   times in a row.
+
+   The queue now **stops** on a failure. Whatever was queued is parked: merged
+   into the payload the error carries, so one Retry replays both, and handed to
+   a new `onFailure` callback so the caller can put the screen back for work
+   that is never going to be sent. `useChecklist` uses that as its single
+   rollback point, so the revert happens once, newest-first, over the unsent
+   tail *and* the parked operations together. Guarded by
+   `e2e/checklist.spec.ts` → *a failed tick with another queued behind it ends
+   on the failure, not on "Saved"*.
+
+2. **An aborted (offline) tick was never rolled back.** `runOp` turns a
+   *refusal* into a value, but a dropped connection **rejects**, and the
+   exception sailed past every rollback in `use-checklist.ts` into the queue's
+   own `catch`. The checkbox stayed ticked and the ratio counted it while the
+   database held nothing; the message shown was the text editor's ("Nothing you
+   typed has been lost — try again"), which is false for a tick that has just
+   been discarded; and the Retry the app offered returned early on an empty list
+   and did nothing.
+
+   `runOp` is now wrapped, a throw is answered exactly like a refusal, and the
+   checklist has its own unreachable message — *"Could not reach the server, so
+   that change was undone."* — because the generic one in `autosave.tsx` is
+   written for a field that keeps what was typed. Guarded by *an offline tick is
+   rolled back, says so, and Retry actually re-sends it*, which drives the
+   failure, the rollback, the message and a real re-send after the network comes
+   back.
+
+3. **A custom item added while a reset was in flight was written to the database
+   and disappeared from the screen.** A reset's reconcile replaced the whole
+   list with the server's template rows, which threw away the optimistic row the
+   queue still owed; the add then landed (at position 0, i.e. as the next
+   action, which is the entire point of the feature) and its own reconcile found
+   no temp row to replace. The row existed and the page showed neither it nor an
+   error — and the strip is keyed by `stage_id`, which a reset does not change,
+   so the revalidation did not re-seed it either. The add box is documented as
+   deliberately never disabled during a write, so this is a path the user is
+   offered on purpose.
+
+   The reset's reconcile now merges the server's list with any rows still
+   pending. Guarded by *a custom item added while a reset is in flight survives
+   the reset*, which asserts the screen and the database agree afterwards.
+
+4. **The board scrolled the whole document sideways, at every width.** The
+   column strip's scrollable overflow was propagating to the viewport: `<html>`
+   had a horizontal scrollbar on `/c/[slug]/board` at 1920, 1440, 1280, 1024 and
+   390, and a trackpad swipe with the pointer on the page heading scrolled the
+   viewport 860px — taking capture, the channel switcher, the theme control and
+   Sign out off the screen and revealing blank ground, while the strip's own
+   `scrollLeft` never moved. Two design decisions in this document were argued
+   *from* the opposite claim.
+
+   `contain: paint` on the strip makes it a real clipping box; `overflow-x:
+   clip` on the shell's root is the belt to that brace (`clip` and not `hidden`,
+   because `hidden` on one axis forces the other to compute to `auto` and would
+   take the sticky sidebar's scrollport away). `e2e/shell.spec.ts` → *the board
+   scrolls sideways and the page does not* asserts
+   `documentElement.scrollWidth === clientWidth` at all five widths, asserts the
+   strip still scrolls, and drives a real horizontal wheel outside it. The two
+   paragraphs that used the false premise are corrected above.
+
+5. **No focus indicator at all under `forced-colors: active`.** Every
+   interactive element pairs `outline-none` with `focus-visible:ring-2
+   focus-visible:ring-accent` — 75 and 74 call sites, and zero
+   `focus-visible:outline`. Tailwind's ring is a `box-shadow`, which the Forced
+   Colors spec forces to `none`, and `outline-none` had already thrown away the
+   UA ring that would otherwise still have been drawn. A keyboard user in
+   Windows High Contrast Mode had no visible focus anywhere in the application,
+   and the board's `j`/`k` selection (a border colour and a ring) was invisible
+   too.
+
+   One rule in `app/globals.css`, **deliberately outside every `@layer`**:
+   unlayered CSS beats layered CSS whatever the specificity, and the rule it has
+   to beat is `outline-none` in `@layer utilities`, so a block in `@layer base`
+   would have lost (it did — the first attempt measured `outline: none` and the
+   spec caught it). `:focus-visible` gets `2px solid CanvasText`, and
+   `[data-selected="true"]` gets `2px solid Highlight`. Asserted in
+   `e2e/shell.spec.ts` with the normal-mode box-shadow as its own negative
+   control.
+
+### Majors — fixed
+
+6. **`/now` offered "Move to Repurposed" before the 24-hour metrics existed**,
+   and Repurposed is terminal, so taking it ended the post-publish loop for
+   good: rules 2 and 3 are keyed on `kind === "published"` and could never fire
+   again, and `first24_*` stayed null with nothing anywhere asking for them. The
+   seeded Published checklist made it the *default* path — two ticks and a move.
+   BRIEF.md principle 8 fixes the order ("check first-24h performance, swap
+   thumbnail if needed, **then** repurpose"), so the "then" is now mechanical:
+   rule 8 offers no way out of `published` while `metrics_logged_at` is null and
+   `published_at` is set. Three cases added to `lib/next-action.test.ts`,
+   including the 23-hour window in which the old code handed over the one-way
+   door.
+
+7. **The measured feed title box was 12px wider than the card the preview
+   draws**, and the phone tile had the same error eating its declared padding.
+   `FEED_TITLE_BOX.width` subtracts one `avatarGap`; the row was laid out with a
+   flex `gap`, which applies between *every* pair of children, so 36 + 12 + 288
+   + 12 + 24 = 372px of row was drawn inside a card declared to be 360 — the ⋮
+   column's right edge 12px outside it. A title that fits 288 but not 276 was
+   measured as fitting and drawn into a card with no room for it, which is the
+   one question this component exists to answer. Same arithmetic on the phone:
+   378px of content in a 366px box, absorbed out of the right padding, on a
+   rendering whose whole claim is that 390px is what a phone is.
+
+   The gap now belongs to the text column (`marginLeft`) rather than to the
+   flex container, so the drawn row and the metric are the same numbers.
+   `e2e/preview.spec.ts` → *every row closes inside the card it is drawn in*
+   asserts `scrollWidth === clientWidth === cardWidth`, the phone row's padding
+   on both sides, and the arithmetic itself.
+
+8. **The clamp could cut an emoji in half.** The binary search ran over UTF-16
+   code units, so it could land between the halves of a surrogate pair: the
+   drawn title ended in a lone high surrogate (U+FFFD on screen) and the
+   truncation warning rendered the prefix and the tail separately, splitting one
+   emoji into two replacement glyphs, one on each side of its ellipsis. It
+   reproduced on six different emoji at the same pad length. The search now
+   steps over **grapheme clusters** (`Intl.Segmenter`, built in, no dependency;
+   code points as the fallback), which also means a ZWJ sequence is never cut
+   through its joiners. Asserted over a sweep of pad lengths, with explicit
+   checks for lone surrogates and U+FFFD.
+
+9. **A sketch that could not be loaded degraded into a silent grey box, or into
+   the lie that no sketch was uploaded.** `Thumb` had no `onError`, so a failed
+   fetch left a full-size `<img>` with `naturalWidth` 0 and `alt=""` — Chromium
+   painted nothing, and the only text on the user's own tile was the duration
+   chip. Separately, the preview was handed `sketchUrl` and never `hasSketch`,
+   and `sketchUrl` is null both when there is no sketch *and* when signing one
+   failed — in the second case it printed "No concept sketch yet". The sibling
+   `ConceptSketch` on the same page goes to deliberate trouble to avoid exactly
+   that ("saying 'no sketch yet' to the second would be a lie the person cannot
+   act on"). `hasSketch` is now threaded through, `Thumb` has an `onError` using
+   the same `brokenUrl` pattern, and the two states say different things.
+
+10. **A channel name the app itself allows blew the phone tile past 390px.**
+    `Meta` declares `text-overflow: ellipsis`, and nothing constrained its
+    width: it is a block in a flex column that was itself a flex item with no
+    `min-width: 0` and no width, so max-content won and the row grew. At 37
+    characters — well inside `app/actions/channels.ts`'s 80 — the tile measured
+    421px. The new `TextColumn` carries the title box's own width plus
+    `minWidth: 0`, so the declared ellipsis does what YouTube does. Asserted
+    with a 48-character channel name.
+
+11. **`/now` and the sidebar badge read `checklist_items` with no limit.**
+    PostgREST caps an unbounded read at `db-max-rows` (1000, pinned in
+    `scripts/dev-stack/postgrest.mts` precisely so a missing `.limit()` behaves
+    like production) and truncates the body with no error. Here that does not
+    lose a row — it removes the whole **video** from the page, because rule 6
+    needs an item and rule 8 requires `checklist.length > 0`. Measured: 140
+    identical videos, 1120 rows, 1000 returned, and 15 of the 140 answered with
+    a different rule. `components/checklist/ratios.ts` documents this hazard and
+    refuses to answer rather than answer short; this file cannot refuse, because
+    the page it feeds *is* the answer, so it pages instead: `videos`,
+    `checklist_items` and `thumbnail_swaps` all go through `readPaged` (500 a
+    page, ordered by `id` so paging cannot repeat or skip, `in (...)` lists
+    chunked at 200). Honest limit 1 is corrected above.
+
+12. **A stage the user deliberately emptied was re-filled from the template.**
+    `move_video`'s snapshot guard was `not exists (… where video_id = … and
+    stage_id = …)` — "this stage has no rows", not "this video has never been
+    here". M3 gave every row a delete button and an empty state that treats a
+    cleared list as a supported choice, so a user who cleared Packaging, moved
+    the video on and moved it back got all eight rows silently reinstated.
+
+    **New migration `0005_checklist_seeded_stages.sql`**: a `uuid[]` on `videos`
+    recording which stages the video has entered, backfilled so no existing
+    video changes behaviour, deliberately *not* in the client UPDATE grant (a
+    client that could clear it could re-seed a list it had emptied), and read
+    and written by `move_video` and `capture_video`. An array rather than a
+    `stage_entries` table because there is exactly one fact per (video, stage)
+    with nothing to join to — PLAN.md's review log already records `stage_events`
+    as dropped. Two SQL tests added: the deliberate-empty round trip in
+    `40_move_video.test.sql`, and the column privilege in
+    `20_column_privileges.test.sql`.
+
+13. **`AppShell` let a `/now` read failure take down the board, the video page
+    and `/c/new`.** It awaited `countNowRows` unguarded, and `readNowInputs`
+    throws on any of its five reads — on every signed-in route, including three
+    that need none of that data. The line immediately above it was already
+    deliberately tolerant of its own failure, which made the inconsistency
+    visible inside six lines of one function. The read is now wrapped: the
+    sidebar degrades to no count and no channels, and the page underneath
+    renders. `/now` itself still throws, because there the data is the page.
+
+### Minors — fixed
+
+14. **The "10 minutes or less" filter hid an Overdue one-line typing task and
+    kept two rows with no action at all.** `needsABlock` was computed from the
+    stage kind for *every* rule, so "Complete packaging: a working title" — a
+    single-line text box — was hidden whenever its video happened to sit in
+    Filming or Editing, while "Waiting on the sponsor" and "Goes live 1 Dec"
+    survived on the synthetic 10-minute default. It is now a property of the
+    row (`rule === 6`), and **Waiting rows are excluded from the quick filter
+    outright**. That second half goes past PLAN.md's letter on purpose and is
+    recorded as a deviation below.
+
+15. **Rows with no estimate printed a fabricated "10 min" in the mono face.**
+    `DEFAULT_EST_MINUTES` is a filter default, not a measurement, and JetBrains
+    Mono is reserved for what the tool measured. The minutes now render only for
+    a `tick` row, which is the only one that carries a real `est_minutes`.
+
+16. **"Still waiting" was reported as a filter, and could produce an empty state
+    blaming filters that were all off.** One subtraction did for two unrelated
+    reasons. The counts are now separate: `N hidden` for the filters, `N set
+    aside until you reload` for the acknowledgements, and an empty state that
+    matches whichever happened.
+
+17. **`isFuture`'s comment described the opposite comparison** — "the end of the
+    target day", and it rejected the very expression the code is. Corrected to
+    what the code does, with the consequence the old comment hid (a user east of
+    UTC sees "Confirm live" from local morning; one west of it, the evening
+    before).
+
+18. **"N characters cut" counted UTF-16 code units**, so an emoji counted twice
+    and 👨‍👩‍👧‍👦 counted as eleven. Now counted in the same grapheme clusters
+    the search steps over, and asserted: a tail of one space and sixteen emoji
+    reads 17, where it used to read 33.
+
+19. **The thumbnails were not 16:9.** `Math.round(360 / (16/9))` is 203 (1.7734)
+    and `Math.round(390 / …)` is 219 (1.78082). The elements now carry
+    `aspect-ratio: 16 / 9` with only the width given; `thumbHeight` survives,
+    documented as the integer approximation it is. Asserted to within 0.005 of
+    16/9 on every thumbnail.
+
+20. **The page scrolled sideways at phone width, and only with the rail
+    filled.** The cause was a 29-character file path in a mono `<code>` in the
+    preview's caption — the one token on the page that could not wrap. It now
+    has `overflow-wrap: anywhere`. The path stays: it is the one pointer from
+    the rendering to the numbers it is drawn from.
+
+21. **Numbers the preview's own docstring promised were in `metrics.ts` were
+    still literals in the component.** The empty-slot label's size and padding,
+    the avatar's `0.45` and weight, the ⋮ column's line box and the sample
+    tile's opacity now live in new `AVATAR` and `PLACEHOLDER` blocks.
+
+22. **A tick or delete from a page whose video had moved stage was accepted
+    silently.** `app/actions/checklist.ts` returns the video's *current* stage on
+    every result, with a header comment explaining that a client showing a
+    different one can say so — and the client compared it for `add` alone. The
+    check is hoisted to every operation. What goes back on screen differs by
+    kind and the difference is real: an `add` lands in the stage the video is in
+    now, so its optimistic row must go; a tick or a delete named a row by id and
+    that row is one of the ones on screen, so reverting it would be the second
+    lie. Both end in a Reload offer rather than a Retry.
+
+23. **No skip link**: nine sidebar tab stops stood in front of the page on every
+    signed-in route, growing by one per channel (WCAG 2.4.1). `AppShell` now
+    renders one as its first focusable child, pointing at the `<main id="main"
+    tabIndex={-1}>` it already owns. Parked off-screen by `transform` rather
+    than `sr-only` + `focus:not-sr-only`, because that pair toggles `position`
+    in two utilities whose order in the sheet decides the winner. Asserted by
+    tabbing from a fresh `/now`.
+
+24. **An empty labelled landmark, 452px wide, on four of the five video
+    sections.** Keeping the grid *column* the same width on every section is a
+    deliberate, well-argued decision (it stops the tabs sliding under the
+    pointer); emitting a labelled `<aside>` to hold it is a different thing and
+    is not what that argument justifies. The column stays; the landmark is now
+    emitted only when there is something in it.
+
+25. **Calendar and Ideas were unreachable by keyboard and explained themselves
+    only through a hover tooltip.** A `disabled` button is out of the tab order,
+    so the one sentence saying why the row does nothing was reachable by mouse
+    alone — in rows whose entire purpose is that the shape of the product is
+    visible. They are now `aria-disabled` on a focusable button with no handler,
+    and the milestone is drawn *on the row* in small mono, the way
+    `AssistPill` already draws M8. Contrast raised from 2.18:1 to about 3:1.
+
+26. **The evidence chip matched a number in a checklist row and then ignored
+    it.** `/under \d+ characters/i` was answered with `TITLE_WARN_LENGTH`
+    regardless — invisible today because the seed says 55, and a chip reading
+    `58/55` beside a row reading "Title under 60 characters" the moment M7 ships
+    the template editor. The pattern now captures the digits and the table reads
+    them, with the constant as the fallback. Unit-tested at 60 and at 50.
+
+27. **The preview's comments described a `next/font` family name the build does
+    not emit.** `--font-face-youtube` resolves to `"Roboto", "Roboto Fallback"`,
+    not `__Roboto_1a2b3c`. That made the justification for the bare `Roboto`
+    after the variable wrong — it named the same family the generated
+    `@font-face` claims, so it selected the same face rather than a locally
+    installed one. Both comments corrected and the redundant literal dropped.
+
+28. **`AppShell` re-queried channels that `readNowInputs` had already read** in
+    the same request, in the same order, with one column fewer — two answers to
+    one question, six lines apart, in the milestone whose theme is one reader
+    per question. The shell now takes the list out of the `cache()`d read.
+
+29. **The docs claimed the shell is on every signed-in route.** `/capture` is
+    signed in and renders neither shell nor sidebar, which also means `c` and
+    `1`..`9` are not bound there — and that claim was the justification for
+    where those shortcuts live. Corrected in `docs/MILESTONES.md`,
+    `components/app-shell.tsx` and `components/app-sidebar.tsx`, and
+    `/capture`'s 16px padding is now explained where it is written rather than
+    left looking like a miss.
+
+30. **`--spacing-rail-min` was declared closed and still had no consumer.** The
+    spec that was supposed to be the consumer hard-coded 276 and 452. It now
+    reads both tokens off `:root`. Honest limit 7 is corrected above.
+
+### Partly rejected
+
+31. **"Make `/now` revalidation consistent across the four server actions."**
+    Half accepted, half refused.
+
+    *Accepted:* the claim that the badge always equals the list is written
+    without its exception, and "Still waiting" is that exception. `lib/now-data.ts`
+    now states it, and the page shows it — `N set aside until you reload` beside
+    the filter chips, and an empty state that says what actually happened. The
+    badge stays the denominator on purpose: it counts the work, and a row you
+    acknowledged is still waiting.
+
+    *Refused:* adding `revalidatePath("/now")` to `app/actions/checklist.ts` and
+    `app/actions/videos.ts` for symmetry with `app/actions/metrics.ts`. In the
+    App Router a server action that revalidates the current route re-renders it,
+    and `/now`'s design is that a completed row re-ranks **locally** from a
+    patch — that is why the page is handed videos rather than rows. Revalidating
+    from the tick action would put a server round trip and a full re-render
+    behind every tick, on the page whose whole claim is that four rows take ten
+    minutes. Consistency is the wrong axis: the two actions are doing different
+    things.
+
+### Deferred, with the milestone named
+
+32. **The shell has no responsive breakpoint; at phone width the 224px sidebar
+    takes 57% of the screen.** Measured: at 390×844 `main` is 166px with 32px
+    gutters, leaving a 102px content column; at 360px it is 136px / 72px. On
+    `/now` every row wraps to two or three words a line and the tick box sits
+    over the text. The only breakpoint in the application is `min-[1480px]` in
+    `components/video-sections/video-sections.tsx`.
+
+    **Deferred to M9**, which PLAN.md:199 already assigns the *"mobile pass on
+    `/now` and `/capture`"*. Building half of it now — dropping the gutter
+    without collapsing the sidebar — would leave the screen unusable and the
+    milestone still owed. It is recorded here, with the numbers, so the next
+    reviewer does not have to rediscover it, and because M3's honest-limits list
+    did not mention it and the integration report's only responsive claim
+    ("at 1280px it stacked with no horizontal page scroll") was made 3.3× above
+    the width at which it falls apart.
+
+    `/capture` is correctly unaffected: it renders no shell, so PLAN.md:116's
+    phone bookmark still works.
+
+### Deviations this review introduced
+
+| Deviation | Why |
+|---|---|
+| **The "10 minutes or less" filter hides Waiting rows outright.** PLAN.md defines the filter as `est_minutes` plus the needs-a-block tag, and says nothing about sections. | The filter's promise is *work you can finish now*, and a Waiting row's only controls are "Unblocked" and "Still waiting" — neither is ten minutes of work, because neither is work. Before this, the filter's answer to "what can I do in ten minutes" on the eight-video week was two rows that could not be acted on and not the one that could. |
+| **Rule 8 will not move a published video on until its first 24 hours are logged.** PLAN.md's rule 8 has no such clause. | BRIEF.md principle 8 orders the loop and Repurposed is terminal, so the move is a one-way door out of rules 2 and 3. The guard is that "then" made mechanical; the reasoning is at the rule. |
+| **A fifth migration** (`0005_checklist_seeded_stages.sql`) and a fifth revoked column on `videos`. `supabase/tests/90_schema_contract.test.sql` still pins the function count at four — no new function was added. | See major 12. The alternative was to change the empty-state copy and admit that a cleared checklist is not a supported state, which contradicts the UI M3 shipped. |
+
+### Gates, re-run after every change above
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes, compiled |
+| `./scripts/verify-db.sh m3_final` | **5** migrations applied, **13** SQL test files passed (0005 is new; two test files gained assertions) |
+| `npm run test` | **196 passed** (9 files) — 191 before, plus the five this review added |
+| `npm run e2e` | **109 passed, 1 skipped, 0 failed** (5.6m). 97 before; the review added twelve, and not one existing assertion was weakened. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`. |
+
+The twelve new end-to-end specs, by what they guard:
+
+- `e2e/checklist.spec.ts` — a failed tick with another queued behind it ends on
+  the failure; an offline tick is rolled back and Retry really re-sends; a
+  custom item added during a reset survives it. (Blockers 1–3.)
+- `e2e/shell.spec.ts` — the board scrolls sideways and the page does not, at
+  five widths and under a real wheel; focus is visible under forced colors, with
+  the normal-mode ring as its negative control; the first tab stop is a skip
+  link; and the unbuilt sidebar rows are focusable, `aria-disabled` and carry
+  their milestone on screen. (Blockers 4–5, minors 23 and 25.)
+- `e2e/preview.spec.ts` — every row closes inside the card it is drawn in; a
+  long channel name ellipsises instead of widening the tile; the thumbnails are
+  16:9 to within 0.005; a sketch that will not load says which of the two things
+  happened; a clamp never cuts an emoji in half and counts it once; and the rail
+  reads its bounds off the tokens. (Majors 7–10, minors 18, 19, 30.)
+- `e2e/now.spec.ts` — the quick filter leaves only work that can be finished,
+  including the Overdue typing task; "Still waiting" sets a row aside without
+  blaming the filters. (Minors 14 and 16.)
+
+Two existing specs changed, both to follow a fix rather than to accommodate one:
+the quick-filter test now expects three actionable rows where it expected four
+(one of which was a Waiting row), and the upload spec's "could not be loaded"
+assertion is scoped to the sketch frame now that the preview beside it says the
+same true thing.

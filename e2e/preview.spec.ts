@@ -8,6 +8,13 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
+import {
+  FEED,
+  FEED_TITLE_BOX,
+  PHONE,
+  PHONE_TITLE_BOX,
+  THUMB_ASPECT,
+} from '../components/preview/metrics';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
 
 /**
@@ -531,9 +538,21 @@ test('the preview is a right rail when there is room, and stacks when there is n
 
   // Beside, not below: the rail starts to the right of where the block ends.
   expect(wideRail.x).toBeGreaterThanOrEqual(wideBlock.x + wideBlock.width);
-  // Within the design's range for a rail.
-  expect(wideRail.width).toBeLessThanOrEqual(452);
-  expect(wideRail.width).toBeGreaterThanOrEqual(276);
+  // Within the design's range for a rail — read off the tokens rather than
+  // retyped, which is what makes `--spacing-rail-min` a real consumer of
+  // something rather than a number nobody reads. Change either token and this
+  // assertion changes with it; that is the point.
+  const railRange = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    return {
+      min: parseFloat(root.getPropertyValue('--spacing-rail-min')),
+      max: parseFloat(root.getPropertyValue('--spacing-rail-max')),
+    };
+  });
+  expect(railRange.min).toBeGreaterThan(0);
+  expect(railRange.max).toBeGreaterThanOrEqual(railRange.min);
+  expect(wideRail.width).toBeLessThanOrEqual(railRange.max);
+  expect(wideRail.width).toBeGreaterThanOrEqual(railRange.min);
 
   // The page does not scroll sideways, however wide the search frame is.
   const overflows = () =>
@@ -547,6 +566,12 @@ test('the preview is a right rail when there is room, and stacks when there is n
   const tabsBefore = (await tabs.boundingBox())!;
   await page.getByTestId('section-tab-script').click();
   await expect(rail).toHaveAttribute('data-filled', 'false');
+  // An empty rail is not a landmark: a complementary region called "Alongside
+  // this section" with nothing in it is noise in a landmark list, and it was
+  // there on four of the five sections.
+  await expect(
+    page.getByRole('complementary', { name: 'Alongside this section' }),
+  ).toHaveCount(0);
   const tabsAfter = (await tabs.boundingBox())!;
   expect(tabsAfter.y).toBe(tabsBefore.y);
   expect(tabsAfter.width).toBe(tabsBefore.width);
@@ -562,4 +587,264 @@ test('the preview is a right rail when there is room, and stacks when there is n
   expect(narrowRail.y).toBeGreaterThan(narrowBlock.y);
   expect(narrowRail.x).toBeLessThan(narrowBlock.x + narrowBlock.width);
   expect(await overflows()).toBe(false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Fidelity: the drawn box is the measured box                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The closure the metrics claim.
+ *
+ * `FEED_TITLE_BOX.width` subtracts **one** `avatarGap` from the card, and the
+ * row has to draw exactly one. It used to lay the row out with a flex `gap`,
+ * which applies between every pair of children, so 36 + 12 + 288 + 12 + 24 =
+ * 372px of row was drawn inside a card declared to be 360 — the ⋮ column's
+ * right edge 12px outside the card, and a title measured in a box 12px wider
+ * than the one the card has room for. A title that fitted 288 but not 276 was
+ * reported as fitting and drawn into a card it does not fit.
+ */
+test('every row closes inside the card it is drawn in', async ({ page }) => {
+  const videoId = await capture('Closure');
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.goto(`/videos/${videoId}`);
+  await expect(page.getByTestId('youtube-preview')).toBeVisible();
+
+  const box = (testId: string) =>
+    page.getByTestId(testId).first().evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        width: rect.width,
+        right: rect.right,
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        paddingLeft: parseFloat(style.paddingLeft),
+        paddingRight: parseFloat(style.paddingRight),
+      };
+    });
+
+  /* -- the feed card ------------------------------------------------------ */
+
+  const card = await box('preview-feed-card');
+  expect(card.width).toBe(FEED.cardWidth);
+  // Nothing hangs out of it: the row fits, so there is nothing to scroll.
+  expect(card.scrollWidth).toBe(card.clientWidth);
+  expect(card.scrollWidth).toBe(FEED.cardWidth);
+
+  const details = await box('preview-feed-details');
+  expect(details.scrollWidth).toBe(details.clientWidth);
+  // And the arithmetic the metric asserts, drawn: avatar + one gap + box + ⋮.
+  expect(
+    FEED.avatarSize + FEED.avatarGap + FEED_TITLE_BOX.width + FEED.menuReserve,
+  ).toBe(FEED.cardWidth);
+
+  /* -- the phone tile ----------------------------------------------------- */
+
+  const tile = await box('preview-phone-tile');
+  expect(tile.width).toBe(PHONE.deviceWidth);
+  expect(tile.scrollWidth).toBe(tile.clientWidth);
+
+  const row = await box('preview-phone-row');
+  expect(row.paddingLeft).toBe(PHONE.rowPaddingX);
+  // The padding is still there, on both sides: the overflow used to be
+  // absorbed by the right one, leaving the ⋮ column flush with the device edge
+  // on a rendering whose whole claim is that 390px is what a phone is.
+  expect(row.paddingRight).toBe(PHONE.rowPaddingX);
+  expect(row.clientWidth - row.paddingLeft - row.paddingRight).toBe(
+    PHONE.deviceWidth - 2 * PHONE.rowPaddingX,
+  );
+  expect(row.scrollWidth).toBe(row.clientWidth);
+  expect(
+    PHONE.avatarSize + PHONE.avatarGap + PHONE_TITLE_BOX.width + PHONE.menuReserve,
+  ).toBe(PHONE.deviceWidth - 2 * PHONE.rowPaddingX);
+});
+
+/**
+ * A channel name the app itself allows must not widen the tile.
+ *
+ * `Meta` declares `text-overflow: ellipsis`, and for a long time that was dead
+ * code: nothing constrained its width, so the column grew to max-content and
+ * took the row with it. `app/actions/channels.ts` allows 1–80 characters; at 37
+ * the phone tile measured 421px against a 390px device.
+ */
+test('a long channel name is cut with an ellipsis, not drawn past the phone', async ({
+  page,
+}) => {
+  const longName = 'The Sunday Softworks Workshop Channel and Friends';
+  expect(longName.length).toBeLessThanOrEqual(80);
+
+  await db.query(
+    `delete from public.videos
+      where channel_id in (select id from public.channels where slug = $1)`,
+    ['m3-preview-long'],
+  );
+  await db.query('delete from public.channels where slug = $1', [
+    'm3-preview-long',
+  ]);
+  const longChannel = await createChannel(longName, 'm3-preview-long');
+
+  const videoId = await asUser(async () => {
+    const result = await db.query<{ id: string }>(
+      'select id from capture_video($1::uuid, $2::text)',
+      [longChannel, 'Long channel name'],
+    );
+    return result.rows[0].id;
+  });
+
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.goto(`/videos/${videoId}`);
+  await expect(page.getByTestId('youtube-preview')).toBeVisible();
+
+  for (const testId of ['preview-phone-tile', 'preview-feed-card']) {
+    const measured = await page
+      .getByTestId(testId)
+      .first()
+      .evaluate((node) => ({
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+      }));
+    expect(measured.scrollWidth).toBe(measured.clientWidth);
+  }
+
+  // The column is exactly the box the title was measured in, whatever the name.
+  const columns = await page
+    .getByTestId('preview-text-column')
+    .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
+  expect(columns).toContain(FEED_TITLE_BOX.width);
+  expect(columns).toContain(PHONE_TITLE_BOX.width);
+});
+
+/**
+ * 16:9 means 16:9.
+ *
+ * `Math.round(360 / (16 / 9))` is 203, which is 1.7734. The preview's claim is
+ * that this is the shape a thumbnail is, so the element carries the ratio and
+ * nothing rounds.
+ */
+test('the thumbnails are 16:9 and not a rounded approximation of it', async ({
+  page,
+}) => {
+  const videoId = await capture('Aspect');
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.goto(`/videos/${videoId}`);
+  await expect(page.getByTestId('youtube-preview')).toBeVisible();
+
+  const ratios = await page
+    .getByTestId('preview-thumb-empty')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const rect = (node.parentElement as HTMLElement).getBoundingClientRect();
+        return rect.width / rect.height;
+      }),
+    );
+
+  expect(ratios.length).toBeGreaterThanOrEqual(3);
+  for (const ratio of ratios) {
+    expect(Math.abs(ratio - THUMB_ASPECT)).toBeLessThan(0.005);
+  }
+});
+
+/**
+ * A sketch that cannot be drawn says which of the two things happened.
+ *
+ * `sketchUrl === null` covers both "there is no sketch" and "there is one and
+ * the app could not sign a URL for it", and a URL that signs can still fail to
+ * fetch. All three used to render as either a silent grey rectangle or the
+ * sentence "No concept sketch yet", which is the second one's lie.
+ */
+test('a sketch that will not load says so, instead of claiming there is none', async ({
+  page,
+}) => {
+  const videoId = await capture('Broken sketch');
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+
+  /* -- no sketch: the honest empty frame ---------------------------------- */
+
+  await page.goto(`/videos/${videoId}`);
+  await expect(page.getByTestId('youtube-preview')).toBeVisible();
+  await expect(
+    page.getByTestId('preview-thumb-empty').first(),
+  ).toHaveAttribute('data-state', 'empty');
+  await expect(page.getByTestId('preview-thumb-empty').first()).toHaveText(
+    'No concept sketch yet',
+  );
+
+  /* -- a sketch whose object never arrives -------------------------------- */
+
+  await asUser(async () => {
+    await db.query(
+      'update public.videos set thumbnail_concept_path = $2 where id = $1',
+      [videoId, `${userId}/${videoId}/concept.png`],
+    );
+  });
+
+  // Whether the URL signs and the fetch fails, or signing fails and there is no
+  // URL at all, the answer on screen has to be the same one.
+  await page.route('**/storage/v1/object/**', (route) => route.abort());
+  await page.goto(`/videos/${videoId}`);
+  await expect(page.getByTestId('youtube-preview')).toBeVisible();
+
+  const slot = page.getByTestId('preview-thumb-empty').first();
+  await expect(slot).toHaveAttribute('data-state', 'broken');
+  await expect(slot).toHaveText('The sketch could not be loaded');
+
+  // All three of the user's own slots say it, and none of them says the other
+  // thing. (The two sample neighbours in the phone rendering keep their own
+  // empty frames: they are invented tiles, and there is no sketch to fail.)
+  await expect(
+    page.locator('[data-testid="preview-thumb-empty"][data-state="broken"]'),
+  ).toHaveCount(3);
+  await expect(
+    page.locator(
+      '[data-sample="true"] [data-testid="preview-thumb-empty"][data-state="empty"]',
+    ),
+  ).toHaveCount(2);
+});
+
+/**
+ * The clamp cuts between characters, not through one.
+ *
+ * The binary search used to step over UTF-16 code units, so it could land
+ * between the halves of a surrogate pair: the drawn title ended in a lone high
+ * surrogate (U+FFFD on screen) and the truncation warning split one emoji into
+ * two replacement glyphs, one on each side of its ellipsis. The count was the
+ * same units, so an emoji counted as two and a family emoji as eleven.
+ */
+test('a clamp never cuts an emoji in half, and counts it once', async ({ page }) => {
+  const videoId = await capture('Emoji clamp');
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.goto(`/videos/${videoId}`);
+
+  const title = page.getByTestId('working-title');
+  const feed = page.getByTestId('preview-title-feed');
+
+  for (let pad = 54; pad <= 59; pad += 1) {
+    const text = `${'a'.repeat(pad)} word 😀 and the rest of a long enough title to run past two whole lines in the feed column here`;
+    await title.fill(text);
+    await expect(feed).toHaveAttribute('data-truncated', 'true');
+
+    const drawn = (await feed.textContent()) ?? '';
+    // U+FFFD is what a browser paints for half a surrogate pair.
+    expect(drawn).not.toContain('\uFFFD');
+    expect(drawn).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(drawn).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  }
+
+  /* -- and the count is in characters a person would count ---------------- */
+
+  const tail = ' 😀🎬🎥🔥😀🎬🎥🔥😀🎬🎥🔥😀🎬🎥🔥';
+  await title.fill(
+    `Studio build in a cupboard for two hundred quid and it really did work out${tail}`,
+  );
+  await expect(feed).toHaveAttribute('data-truncated', 'true');
+
+  const cut = Number(await feed.getAttribute('data-cut'));
+  // 16 emoji plus the space in front of them. As UTF-16 code units that was 33.
+  expect(cut).toBe(17);
 });

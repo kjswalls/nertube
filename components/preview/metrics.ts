@@ -28,11 +28,20 @@
  * The CSS custom property the real Roboto arrives on.
  *
  * `app/layout.tsx` asks `next/font/google` for Roboto at weights 400 and 500
- * and publishes it here, self-hosted, on `<html>`. The generated family name is
- * a build-time hash (`__Roboto_1a2b3c`), which is why the stack below reaches
- * it through the variable rather than by name, and why
- * `measure-title.ts` resolves this variable at runtime when it needs a concrete
- * family to hand `document.fonts.load()`.
+ * and publishes it here, self-hosted, on `<html>`.
+ *
+ * What the variable actually resolves to in this version of Next is
+ * `"Roboto", "Roboto Fallback"` — read out of the build with
+ * `grep -rho -- "--font-face-youtube:[^;]*" .next`. The first is the family the
+ * generated `@font-face` claims; the second is the metric-adjusted local
+ * fallback `next/font` synthesises so the swap does not reflow. (Older notes
+ * here said the name was a build-time hash such as `__Roboto_1a2b3c`. It is
+ * not, and the difference matters below.)
+ *
+ * The stack still reaches it through the variable rather than by name, because
+ * the variable is the one thing that is true whatever `next/font` decides to
+ * call the family; and `measure-title.ts` resolves the variable at runtime for
+ * the same reason, because `document.fonts.load()` needs a concrete family.
  */
 export const YOUTUBE_FONT_VAR = "--font-face-youtube";
 
@@ -46,14 +55,20 @@ export const YOUTUBE_FONT_VAR = "--font-face-youtube";
  * slightly narrower, so every clamp was reported a character or two early: the
  * warning said a title was cut when YouTube would have fitted it.
  *
- * The literal `Roboto` after the variable is not redundant. It is what a
- * machine that genuinely has Roboto installed uses if the self-hosted file
- * fails to fetch, and the rest is what is painted during `display: swap` —
- * a window `measure-title.ts` explicitly waits out before it trusts a
+ * The stack behind the variable is what is painted during `display: swap` — a
+ * window `measure-title.ts` explicitly waits out before it trusts a
  * measurement.
+ *
+ * The bare `Roboto` that used to sit between the variable and those fallbacks
+ * has been removed. It was justified as "what a machine that genuinely has
+ * Roboto installed uses if the self-hosted file fails to fetch", and that
+ * justification was wrong: the variable already resolves to `"Roboto", "Roboto
+ * Fallback"`, so the literal named the same family the generated `@font-face`
+ * claims and selected the same face. A locally installed Roboto is reached by
+ * the first name in the variable, not by a second copy of it.
  */
 export const YOUTUBE_FONT_STACK =
-  `var(${YOUTUBE_FONT_VAR}), Roboto, "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif`;
+  `var(${YOUTUBE_FONT_VAR}), "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif`;
 
 /**
  * The weights the preview draws in, and the sizes it draws them at.
@@ -96,7 +111,26 @@ export const TITLE_LINES = 2;
 /** 16:9, the only aspect a YouTube thumbnail is ever served at. */
 export const THUMB_ASPECT = 16 / 9;
 
-/** The 16:9 height for a thumbnail of this width, rounded the way a browser lays it out. */
+/**
+ * The same ratio as a CSS value, which is how the thumbnails are actually
+ * drawn.
+ *
+ * A browser given `aspect-ratio: 16 / 9` at width 360 lays out **202.5px**, and
+ * at 390 it lays out 219.375. `thumbHeight` below rounds those to 203 and 219,
+ * which are ratios of 1.7734 and 1.78082 rather than 1.77778 — so a preview
+ * whose whole claim is "this is the shape your thumbnail is" was drawing a
+ * shape it is not. The element gets the ratio; nothing rounds.
+ */
+export const THUMB_ASPECT_CSS = "16 / 9";
+
+/**
+ * The 16:9 height for a thumbnail of this width, **rounded to an integer**.
+ *
+ * An approximation, and only for the places that genuinely need a whole number
+ * — reserving vertical space, or a test that wants one figure to compare. The
+ * drawn boxes use `THUMB_ASPECT_CSS` and are fractional, because that is what
+ * 16:9 is.
+ */
 export const thumbHeight = (width: number): number => Math.round(width / THUMB_ASPECT);
 
 /**
@@ -158,7 +192,23 @@ export const FEED = {
   chipInset: 8,
 } as const;
 
-/** The box a feed title wraps in: the card, less the avatar column and the ⋮ button. */
+/**
+ * The box a feed title wraps in: the card, less the avatar column and the ⋮
+ * button.
+ *
+ * **One gap, and exactly one**, because the row draws exactly one: the avatar
+ * has `avatarGap` after it and the ⋮ column sits flush with the card's right
+ * edge. This used to be laid out with a flex `gap`, which applies between
+ * *every* pair of children, so the rendered row needed 36 + 12 + 288 + 12 + 24
+ * = 372px inside a card declared to be 360 (`scrollWidth` 372 against
+ * `clientWidth` 360, with the ⋮ column's right edge 12px outside the card).
+ * One of the two documented numbers had to be false, and it was the one that
+ * decides where a title is cut: a title that fitted 288 but not 276 was
+ * measured as fitting and drawn into a card with no room for it.
+ *
+ * `e2e/preview.spec.ts` asserts the closure — `scrollWidth === clientWidth ===
+ * FEED.cardWidth` — so the two cannot drift apart again.
+ */
 export const FEED_TITLE_BOX: TitleBox = {
   width: FEED.cardWidth - FEED.avatarSize - FEED.avatarGap - FEED.menuReserve,
   fontSize: FEED.titleFontSize,
@@ -254,6 +304,14 @@ export const PHONE = {
   chipInset: 6,
 } as const;
 
+/**
+ * The same arithmetic as `FEED_TITLE_BOX`, and the same one gap: the row draws
+ * `avatarGap` after the avatar only, so the padded content box closes at
+ * 12 + 36 + 12 + 294 + 24 + 12 = 390. With a flex `gap` it needed 378px of
+ * content in a 366px box, and the 12px went out of the tile's right padding —
+ * the ⋮ column ended up flush with the device edge, on a rendering whose entire
+ * claim is that 390px is what a phone is.
+ */
 export const PHONE_TITLE_BOX: TitleBox = {
   width:
     PHONE.deviceWidth -
@@ -344,6 +402,40 @@ export const SAMPLE_NEIGHBOURS = [
  * That is a thing the preview exists to show.
  */
 export const SAMPLE_DURATION = "10:24";
+
+/**
+ * The channel avatar's own metrics.
+ *
+ * YouTube draws the channel's picture here; this application does not have one
+ * and would not invent one, so the disc carries the channel's initial — which
+ * is YouTube's own fallback for a channel with no picture. These two numbers
+ * were literals in the component, which is the drift this file exists to
+ * prevent.
+ */
+export const AVATAR = {
+  /** Roughly half the disc, which is where YouTube's own initial sits. */
+  initialScale: 0.45,
+  /** Roboto Medium, same as a title. */
+  fontWeight: 500,
+} as const;
+
+/**
+ * The empty thumbnail slot's label, and the ⋮ column's line box.
+ *
+ * Ours rather than YouTube's — they never draw an empty thumbnail — but they
+ * are still numbers the preview draws with, and the rule in this file is that
+ * those live here.
+ */
+export const PLACEHOLDER = {
+  /** The "No concept sketch yet" label. */
+  fontSize: 12,
+  /** Keeps the label off the slot's edges at phone width. */
+  padding: 8,
+  /** The ⋮ column's line box, so the glyph sits on the title's first line. */
+  menuLineHeight: 18,
+  /** A neighbour tile is a touch back from the user's own. */
+  sampleOpacity: 0.85,
+} as const;
 
 /**
  * The duration chip's own metrics (`ytd-thumbnail-overlay-time-status-renderer`).
