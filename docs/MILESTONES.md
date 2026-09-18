@@ -4608,3 +4608,84 @@ and the part that was declined is stated here rather than quietly dropped:
   `components/autosave.tsx`, `components/modal.tsx` and `lib/shortcuts.ts` are
   all still the single path for what they own. Nothing in this pass added a
   second one.
+
+### Gates for the review pass
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled, 9 routes |
+| `./scripts/verify-db.sh m5_final` | OK — migrations applied, 14 SQL test files passed |
+| `npm run test` | 14 files, **261** tests passed (4 of them the new `describeScope` cases) |
+| `npm run e2e` | **163 passed, 1 skipped, 0 failed** (10.5m) — and again, **163 passed, 1 skipped, 0 failed** (10.2m) |
+
+`npx playwright test --list` is **164 tests in 21 files** at this commit, which is
+the number the `npm run e2e` figure is over: 155 before this pass, plus six new
+cases in `e2e/ideas.spec.ts` and three in `e2e/matrix.spec.ts`, with the five
+`zz-adv*` scratch specs deleted. The one skip is `e2e/session-refresh.spec.ts:60`,
+which only runs under `npm run e2e:refresh` (it needs a stack minting
+five-second access tokens) — its designed behaviour, not a skip this pass added.
+
+Two consecutive clean full runs, on the default ports and the default database.
+A third, earlier run was started and **deliberately killed at test 40**: a
+comment was being edited while it was in flight, and a run against a tree that
+is changing underneath it is not a result. Both runs above are against the tree
+as committed.
+
+The nine new browser cases, and what each one would catch if the fix were
+reverted:
+
+| Spec | Would fail as |
+|---|---|
+| `ideas: reads past PostgREST’s 1000-row ceiling` | 1000 / 1000 / 1104 — the page, its rows and the sidebar badge disagreeing |
+| `ideas: j/k move focus and say what is selected` | an empty live region and focus left on `<main>` |
+| `ideas: an emptied bank says whether anything was ever captured` | "Nothing captured for M5 Ideas yet." over three captured videos |
+| `ideas: a channel with Packaging switched off explains Promote` | a `disabled` button with the reason only in `title` |
+| `ideas: one write at a time is visible, and a hung write ends in a message` | row 2's buttons enabled and inert, and row 1 pulsing for ever |
+| `ideas: the view switch keeps the bank’s filters` | an unfiltered list after a round trip through the grid |
+| `matrix: a prefilled capture keeps both buckets` | `vertical_id` and `horizontal_id` null on the written row |
+| `matrix: capturing into a cell leaves focus on the replacement` | `document.activeElement === document.body` |
+| `matrix: the drill-down takes the reading position and caps at ten` | twelve `<li>`s, no `#cell` in the href, and focus still on the cell |
+
+### The orchestrator's own verification — and the flake both workflow runs missed
+
+The M5 workflow reported two consecutive clean full runs, and the section above
+records them. I re-ran all six gates myself, which is the standing rule for this
+project: typecheck, lint, `npm run build`, 261 unit tests across 14 files, the
+14-file SQL suite via `./scripts/verify-db.sh`, and the browser suite twice.
+
+The first browser run was 163 passed / 1 skipped. **The second failed**, on
+`e2e/ideas.spec.ts:485` — *"j, k and p promote the selected idea without touching
+the mouse"* — with a 60s `page.waitForURL` timeout at the last line.
+
+The cause was in the test, not the product, but it was not a wrong assertion; it
+was a missing one. The step is:
+
+```
+await page.getByTestId('idea-search').fill('');
+await rowFor(page, TITLES.desk).click();
+await page.keyboard.press('Enter');
+```
+
+Clearing the filter re-renders the list. A click dispatched inside that window
+can land on a row React is replacing: the node is detached, `onSelect` never
+runs, focus stays in the search box, and `lib/shortcuts.ts` then does exactly
+what it should by refusing to read `Enter` as a shortcut inside a text input.
+Nothing navigated, and the failure was reported 60 seconds later against the
+navigation — the step *after* the one that actually broke.
+
+The fix wraps the click in `untilTaken` (`e2e/hydration.ts`, the helper this
+codebase already uses for this shape) and asserts `data-selected` **before**
+pressing `Enter`. Re-clicking a row is idempotent, so the retry is what a person
+whose first click did nothing would do, and the new assertion means the next
+failure here names the selection rather than the navigation. Verified by running
+`e2e/ideas.spec.ts` three times in a row (13 passed each) and then the full
+suite twice more.
+
+Recorded because of what it says about the rule rather than about this test:
+**a milestone's own two clean runs are not the same as two clean runs by someone
+who did not write the code.** M3's review made the same point about a different
+flake. This is the second time the independent re-run has been the thing that
+caught it, and the first time it caught something after the workflow had
+reported green twice.

@@ -532,7 +532,31 @@ test('j, k and p promote the selected idea without touching the mouse', async ({
 
   // `Enter` opens the selected idea.
   await page.getByTestId('idea-search').fill('');
-  await rowFor(page, TITLES.desk).click();
+
+  /*
+    The click is retried, and the selection is asserted before `Enter` is
+    pressed.
+
+    Clearing the filter re-renders the list, so a click dispatched in that
+    window can land on a row React is in the middle of replacing: the node is
+    detached, `onSelect` never runs, and focus stays in the search box — where
+    `lib/shortcuts.ts` correctly refuses to treat `Enter` as a shortcut. The
+    result was a 60s `waitForURL` timeout that blamed the navigation for a
+    selection that had never happened.
+
+    `untilTaken` is the codebase's answer to exactly this shape (`e2e/
+    hydration.ts`), and re-clicking a row is idempotent. Asserting
+    `data-selected` first also means the next failure here names the real step
+    instead of the one after it.
+  */
+  const deskRow = rowFor(page, TITLES.desk);
+  await untilTaken(
+    () => deskRow.click(),
+    () =>
+      expect(deskRow).toHaveAttribute('data-selected', 'true', {
+        timeout: 2_000,
+      }),
+  );
   await page.keyboard.press('Enter');
   await page.waitForURL(`**/videos/${ids.desk}`);
 });
