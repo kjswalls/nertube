@@ -11,14 +11,27 @@ import {
   type EvidenceFacts,
 } from "@/lib/checklist";
 import { compareKinds } from "@/lib/defaults";
-import { readHooks, readTitleCandidates } from "@/lib/packaging";
-import { cacheBusted, signedUrlsFor } from "@/lib/storage";
+import { GATE_ANCHOR, readHooks, readTitleCandidates } from "@/lib/packaging";
+import {
+  cacheBusted,
+  isThumbnailRole,
+  signedUrlsFor,
+  THUMBNAIL_ROLES,
+  type ThumbnailRole,
+} from "@/lib/storage";
+import { readExpectation } from "@/lib/expectation";
+import { formatPublishDate } from "@/lib/next-action";
 import { requireUser } from "@/lib/supabase/require-user";
 
 import { AssistPill } from "@/components/preview/assist-pill";
 import { TitleTruncationWarning } from "@/components/preview/truncation-warning";
 import { YouTubePreview } from "@/components/preview/youtube-preview";
-import { NotYet } from "@/components/video-sections/not-yet";
+import {
+  ThumbnailsSection,
+  type ThumbnailVariantView,
+} from "@/components/thumbnails/thumbnails-section";
+import type { SwapEntry } from "@/components/thumbnails/swap-log";
+import { PostPublishBlock } from "@/components/post-publish/post-publish-block";
 import { ScriptSection } from "@/components/video-sections/script-section";
 import {
   parseSection,
@@ -102,7 +115,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -113,6 +126,19 @@ export default async function VideoDetailPage({
     notFound();
   }
 
+  /*
+    The three thumbnail variants, as paths on the row.
+
+    Three columns rather than a child table, which is PLAN.md's decision and
+    the reason the section can never be asked "which of these two is the safe
+    one": there is one safe slot and it is a column.
+  */
+  const variantPaths: Readonly<Record<ThumbnailRole, string | null>> = {
+    wild_card: video.thumb_wild_card_path,
+    moderate: video.thumb_moderate_path,
+    safe: video.thumb_safe_path,
+  };
+
   // Two plain selects rather than embeds: `videos` reaches both tables through
   // composite foreign keys, and the board page next door already takes the same
   // line for the same reason. They do not depend on each other, so they run
@@ -122,6 +148,7 @@ export default async function VideoDetailPage({
     { data: stage },
     { data: stageRows },
     { data: checklistRows },
+    { data: swapRows },
     sketchUrls,
   ] = await Promise.all([
     supabase
@@ -159,9 +186,26 @@ export default async function VideoDetailPage({
       .eq("video_id", id)
       .eq("stage_id", video.stage_id)
       .order("position", { ascending: true }),
-    // One path, but through the batching helper the board uses — so there is
-    // one signing code path in the app and not two that can drift.
-    signedUrlsFor(supabase, [video.thumbnail_concept_path]),
+    /*
+      The swap log, newest first.
+
+      Append-only by grant, not by convention: `0001_init.sql` revokes UPDATE
+      and DELETE on `thumbnail_swaps` from `authenticated` altogether, so this
+      read has no editing counterpart anywhere in the app.
+    */
+    supabase
+      .from("thumbnail_swaps")
+      .select("id, swapped_at, from_role, to_role, reason")
+      .eq("video_id", id)
+      .order("swapped_at", { ascending: false }),
+    // Four paths in one request: the concept sketch and the three variants.
+    // `createSignedUrls` is batched for exactly this reason — see the helper.
+    signedUrlsFor(supabase, [
+      video.thumbnail_concept_path,
+      variantPaths.wild_card,
+      variantPaths.moderate,
+      variantPaths.safe,
+    ]),
   ]);
 
   // `updated_at` versions the URL. The object path is stable on purpose, so
@@ -173,6 +217,81 @@ export default async function VideoDetailPage({
         video.updated_at,
       )
     : null;
+
+  /*
+    The three variants as the section wants them.
+
+    `hasAsset` travels separately from `url` on purpose. `url === null` means
+    two different things — nothing was ever uploaded, or there is an object and
+    the app could not sign a URL for it — and telling the second "no image yet"
+    is a lie the person cannot act on. M3's reviewers caught exactly that on the
+    concept sketch; the fix is the same shape here.
+  */
+  const variants: ThumbnailVariantView[] = THUMBNAIL_ROLES.map((role) => {
+    const path = variantPaths[role];
+    return {
+      role,
+      hasAsset: path !== null,
+      url: path ? cacheBusted(sketchUrls.get(path), video.updated_at) : null,
+    };
+  });
+
+  const swaps: SwapEntry[] = (swapRows ?? []).map((row) => ({
+    id: row.id,
+    swappedAt: row.swapped_at,
+    fromRole: row.from_role,
+    toRole: row.to_role,
+    reason: row.reason,
+  }));
+
+  const shippedRole = isThumbnailRole(video.shipped_role) ? video.shipped_role : null;
+
+  /*
+    The post-publish block's own reads.
+
+    Separate from the batch above because they depend on which channel the
+    video is in and on which stage the Repurposed lane is, and because the
+    expectation is two queries of its own (`lib/expectation.ts`). This is a
+    detail page for one video; the extra round trip buys a block that can say
+    *why* a number is below expectation rather than only that it is.
+
+    The Repurposed stage is read **without** the `is_enabled` filter the stage
+    select uses: this is the switch for that flag, so it has to be able to see
+    the lane when it is off.
+  */
+  const [expectation, { data: repurposedStage }] = await Promise.all([
+    readExpectation(supabase, video.channel_id),
+    supabase
+      .from("stages")
+      .select("id, name, is_enabled")
+      .eq("channel_id", video.channel_id)
+      .eq("kind", "repurposed")
+      .maybeSingle(),
+  ]);
+
+  /*
+    What is sitting in the Repurposed lane, so the switch is already disabled
+    with a reason underneath it rather than refusing after a click. Archived
+    videos do not count — PLAN.md review item 10 — because they are already off
+    the board and out of `/now`.
+  */
+  const { count: repurposedOccupied } = repurposedStage
+    ? await supabase
+        .from("videos")
+        .select("id", { count: "exact", head: true })
+        .eq("stage_id", repurposedStage.id)
+        .is("archived_at", null)
+    : { count: 0 };
+
+  /*
+    Has a swap been logged since the numbers were? The same question `/now`'s
+    rule 3 asks (`swappedSince`), asked of the log this page has already read.
+    `swaps` is newest first, so the first row is the most recent.
+  */
+  const swappedSinceMetrics =
+    video.metrics_logged_at !== null &&
+    swaps.length > 0 &&
+    Date.parse(swaps[0].swappedAt) >= Date.parse(video.metrics_logged_at);
 
   const displayTitle = video.title.trim() === "" ? "Untitled" : video.title;
 
@@ -215,6 +334,12 @@ export default async function VideoDetailPage({
     scriptFilled: (video.script ?? "").trim() !== "",
     targetDateSet: video.target_publish_date !== null,
     published: video.published_at !== null,
+    variantsReady: variants.filter((variant) => variant.hasAsset).length,
+    thumbnailShipped: shippedRole !== null,
+    metricsLogged: video.metrics_logged_at !== null,
+    // Both answers count: keeping the thumbnail and changing it are decisions
+    // about the same question.
+    swapDecided: video.swap_dismissed_at !== null || swappedSinceMetrics,
   };
 
   /*
@@ -234,6 +359,23 @@ export default async function VideoDetailPage({
     id: row.id,
     name: row.name,
   }));
+
+  /*
+    Is the target date here yet?
+
+    The same arithmetic `lib/next-action.ts` rule 5 makes, against the same
+    single clock read: `target_publish_date` is a zoneless `date`, so the
+    comparison is with the start of that day in UTC and the day itself counts
+    as due. Computed on the server for the usual reason — a client component
+    reading the clock while rendering is a hydration mismatch waiting to
+    happen.
+  */
+  const targetStart =
+    video.target_publish_date === null
+      ? null
+      : Date.parse(`${video.target_publish_date}T00:00:00Z`);
+  const dueToConfirm =
+    targetStart === null || Number.isNaN(targetStart) ? true : now >= targetStart;
 
   const header = (
     <div className="flex flex-col gap-2">
@@ -375,23 +517,33 @@ export default async function VideoDetailPage({
                 />
               ),
 
+              /*
+                The assets, and the concept they are executions of.
+
+                The section opens by quoting the *written* concept from
+                Packaging, read-only, with a link back to it — BRIEF.md
+                principle 2 is that the concept and the files are two fields at
+                two stages, and the one place they are most likely to be
+                conflated is the screen where the files are uploaded.
+              */
               thumbnails: (
-                <NotYet title="Thumbnails" milestone="M4">
-                  <p>
-                    Three role slots — wild card, moderate, safe — with one
-                    shipped, the swap dialog and its append-only log. The
-                    database side of all of it exists already:{" "}
-                    <code className="font-mono">swap_thumbnail</code>, the{" "}
-                    <code className="font-mono">thumbnail_swaps</code> table and
-                    the CHECK that refuses a shipped role without an asset.
-                  </p>
-                  <p>
-                    Until then the one image a video has is the{" "}
-                    <strong className="font-medium">concept sketch</strong> in
-                    Packaging, which is a reference picture and never the
-                    shipped thumbnail.
-                  </p>
-                </NotYet>
+                <ThumbnailsSection
+                  videoId={video.id}
+                  userId={user.id}
+                  title={video.title}
+                  channelName={channel?.name ?? "Your channel"}
+                  concept={video.thumbnail_concept}
+                  conceptHref={`/videos/${video.id}#${GATE_ANCHOR.thumbnail_concept}`}
+                  variants={variants}
+                  shippedRole={shippedRole}
+                  swaps={swaps}
+                  assist={
+                    <AssistPill
+                      verb="Critique at tile size"
+                      what="Judges each variant against the concept at 360px, the way a viewer sees it."
+                    />
+                  }
+                />
               ),
 
               /* Everything about the video's flow rather than its packaging:
@@ -416,23 +568,53 @@ export default async function VideoDetailPage({
                 />
               ),
 
+              /*
+                The post-publish loop, in the order it happens: go live, write
+                the first twenty-four hours down, decide about the thumbnail,
+                then repurpose. Manual entry and one question — PLAN.md calls
+                this block "simple, manual entry", and analytics are out of
+                scope for v1 on purpose.
+              */
               publish: (
-                <NotYet title="Publish" milestone="M4">
-                  <p>
-                    The first 24 hours: impressions and click-through rate as
-                    one pair (neither is readable without the other), views, the
-                    note about new viewers, and the &ldquo;swap the
-                    thumbnail?&rdquo; prompt measured against this channel&rsquo;s
-                    expectation.
-                  </p>
-                  <p>
-                    The live URL and the target date are on{" "}
-                    <strong className="font-medium">Schedule</strong> meanwhile,
-                    and <code className="font-mono">/now</code> already raises
-                    the 24-hour check when a published video has no metrics
-                    logged.
-                  </p>
-                </NotYet>
+                <PostPublishBlock
+                  videoId={video.id}
+                  stageKind={sectionFacts.stageKind}
+                  publishedAt={video.published_at}
+                  publishedLabel={formatPublished(video.published_at)}
+                  youtubeUrl={video.youtube_url}
+                  targetPublishDate={video.target_publish_date}
+                  targetLabel={
+                    video.target_publish_date
+                      ? formatPublishDate(video.target_publish_date)
+                      : null
+                  }
+                  dueToConfirm={dueToConfirm}
+                  metrics={{
+                    impressions: video.first24_impressions,
+                    // `numeric(5,2)` can arrive as a string; one place decides.
+                    ctr:
+                      video.first24_ctr === null
+                        ? null
+                        : Number(video.first24_ctr),
+                    views: video.first24_views,
+                    newViewersNote: video.new_viewers_note,
+                  }}
+                  metricsLoggedAt={video.metrics_logged_at}
+                  swapDismissedAt={video.swap_dismissed_at}
+                  expectation={expectation}
+                  shippedRole={shippedRole}
+                  swappedSinceMetrics={swappedSinceMetrics}
+                  repurposed={
+                    repurposedStage
+                      ? {
+                          id: repurposedStage.id,
+                          name: repurposedStage.name,
+                          isEnabled: repurposedStage.is_enabled,
+                        }
+                      : null
+                  }
+                  repurposedOccupied={repurposedOccupied ?? 0}
+                />
               ),
             }}
             /*

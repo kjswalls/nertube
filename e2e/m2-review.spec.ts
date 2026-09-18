@@ -601,7 +601,24 @@ test('the skip button is not silently dead while an unrelated save is in flight'
   await signIn(page);
   await page.goto(`/videos/${videoId}`);
 
-  await page.getByTestId('packaging-skip-open').click();
+  /*
+    Opened with a retry, which is about this page rather than about this test.
+
+    The disclosure is a server-rendered button whose handler only exists once
+    the route has hydrated, and M4 made the video page heavier — all five
+    sections stay mounted so that switching one never costs an unsaved edit, and
+    two of the five stopped being a heading and a paragraph. A click that lands
+    in that window is swallowed with nothing on screen to say so, which is
+    exactly what a person would do about it: click again. `toPass` is that,
+    written down.
+  */
+  await expect(async () => {
+    await page.getByTestId('packaging-skip-open').click();
+    await expect(page.getByTestId('skip-reason-input')).toBeVisible({
+      timeout: 1_000,
+    });
+  }).toPass({ timeout: 20_000 });
+
   await page
     .getByTestId('skip-reason-input')
     .fill('No time before the sponsor deadline');

@@ -11,7 +11,7 @@ import {
   describeSketchRejection,
   MAX_SKETCH_LABEL,
   sketchExtensionFor,
-  uploadSketch,
+  uploadImage,
 } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/client";
 
@@ -98,10 +98,10 @@ export function ConceptSketch({
     const path = conceptSketchPath(userId, videoId, extension);
 
     setBusy("uploading");
-    // The browser's own session does the writing. `uploadSketch` is the one
+    // The browser's own session does the writing. `uploadImage` is the one
     // place that names the bucket and the upsert; a *format* change lands on a
     // different object name, which is what `recordConceptSketch` cleans up.
-    const { error: uploadError } = await uploadSketch(createClient(), path, file);
+    const { error: uploadError } = await uploadImage(createClient(), path, file);
 
     if (uploadError) {
       setBusy(null);
@@ -217,6 +217,10 @@ export function ConceptSketch({
         <input
           id={inputId}
           type="file"
+          /* Named, because it is no longer the only file picker on this page:
+             every section stays mounted, and the Thumbnails section brings
+             three more. A bare `input[type=file]` now matches four. */
+          data-testid="concept-sketch-file"
           accept={CONCEPT_SKETCH_ACCEPT}
           disabled={busy !== null}
           onChange={onFile}

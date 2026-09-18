@@ -5,6 +5,7 @@ import {
   type ChecklistItem,
 } from "./checklist";
 import { kindOrder, type StageKind } from "./defaults";
+import { formatCtr, formatImpressions } from "./metrics";
 import { GATE_WORDING, packagingGate, type GateField } from "./packaging";
 
 /**
@@ -347,15 +348,13 @@ export function formatPublishDate(value: string): string {
   }).format(parsed);
 }
 
-/** Impressions, grouped. Fixed locale, for the same hydration reason. */
-function formatImpressions(value: number): string {
-  return new Intl.NumberFormat("en-GB").format(Math.round(value));
-}
-
-/** A CTR as the post-publish block writes it: at most two decimals, no trailing zeros. */
-function formatCtr(value: number): string {
-  return `${Number(value.toFixed(2))}`;
-}
+/*
+  Impressions and CTR are formatted by `lib/metrics.ts`, imported above rather
+  than re-typed here: rule 3's label and the Publish section's prompt describe
+  the same two numbers about the same video, and "12,400 impr / 4.2% CTR" in one
+  place and "12400 impr / 4.20%" in the other is the kind of difference that
+  makes a reader check whether they are looking at the same row.
+*/
 
 /**
  * The gate as a *field* predicate, ignoring the skip — rule 1 and rule 7.

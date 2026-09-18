@@ -499,7 +499,8 @@ test('a sketch uploaded on the detail page shows up on the board card', async ({
     'false',
   );
 
-  await page.locator('input[type="file"]').setInputFiles(SKETCH);
+  // By name: the Thumbnails section adds three more pickers to this page.
+  await page.getByTestId('concept-sketch-file').setInputFiles(SKETCH);
   await expect(page.getByTestId('sketch-status')).toHaveText('Sketch saved');
 
   // The browser decoded real bytes from a real signed URL, at the size the

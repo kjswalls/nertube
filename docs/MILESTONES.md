@@ -2717,3 +2717,376 @@ the quick-filter test now expects three actionable rows where it expected four
 (one of which was a Waiting row), and the upload spec's "could not be loaded"
 assertion is scoped to the sketch frame now that the preview beside it says the
 same true thing.
+
+## M4 — The first 24 hours, the swap prompt, and confirm live
+
+The post-publish half of M4. The thumbnail assets — three role slots, the feed
+strip, the shipped radio, the swap dialog and its log — are the other half and
+are written up separately; this section covers the Publish section of
+`/videos/[id]`, the reconciliation of `app/actions/metrics.ts`, and the
+Repurposed lane switch.
+
+### What it delivers
+
+- **One metrics component.** `components/post-publish/metrics-pair.tsx` renders
+  impressions, click-through, views and the new-viewers note. Impressions and
+  CTR are emitted unconditionally from one function, inside one `<fieldset>`,
+  and **no prop can hide either of them** — `withViews` and `withNote` reach
+  only the two fields that are genuinely optional. `/now`'s rule-2 row and the
+  video page render the same component; they differ by `density`, which is
+  spacing. M3's `components/now/metrics-pair.tsx` is gone, moved rather than
+  copied.
+- **One write path.** `logMetrics` in `app/actions/metrics.ts`, parsing one
+  schema (`lib/metrics.ts`), called by both surfaces. `dismissSwap`,
+  `reopenSwap` and `confirmLive` live beside it for the same reason.
+- **The swap prompt**, `components/post-publish/swap-prompt.tsx`. It renders
+  whenever metrics exist — PLAN.md says *always renders*, not "renders when
+  underperforming" — in three states: urgent below expectation, quiet at or
+  above, and **no verdict at all** when there is nothing to compare against.
+  "Keep it" writes `swap_dismissed_at` and stops `/now` asking; the block stays,
+  says when the decision was made, and offers to reopen it.
+- **Confirm live.** A Scheduled video offers "confirm live and record the URL",
+  validated as a URL, which writes `youtube_url` and then moves the video
+  through `move_video` with the **target date** as `p_published_at`.
+- **The Repurposed lane switch**, per channel, refusing to switch off a lane
+  that still holds non-archived videos.
+
+### Deviations, stated plainly
+
+| Deviation | Why |
+|---|---|
+| **`/now` no longer confirms a video live in two calls.** M3's `now-view` wrote the URL with `updateVideo` and then moved the video with `moveVideo`, holding PLAN.md rule 5's "stamp it with the target date" itself. Both surfaces now call `confirmLive`, which resolves the Published stage server-side. | Two surfaces holding the same rule is the drift this milestone exists to prevent. The page would have needed its own copy of "which stage is Published" and its own copy of the date rule. |
+| **The `/now` metrics row gained a Views box.** M3 left views to the detail page. | There is one component now, and PLAN.md's rule 2 is *"impressions + CTR pair with optional views"*. The note about new viewers is still page-only: a row is a line, not a page, and `logMetrics` leaves a column alone when the key is absent, so the row cannot clear a note the page wrote. |
+| **The median fallback needs two logged videos, not one.** PLAN.md says *median first24_ctr of the channel's last 10 published*. | The sample includes the video being judged (so does `lib/now-data.ts`, deliberately — it computes the fallback from the same rows the rules are about). With one sample that is the video compared with itself, and the prompt would read "at or above the 4.2% median of its last 1 logged video". Below one real comparison there is no expectation. This **agrees** with `/now` rather than diverging: with a one-video sample rule 3's `ctr < expectation` is false and the rule never fires, so silence there and "no verdict" here are the same claim. |
+| **The "cannot disable an occupied stage" rule is in the application, not the database.** Everywhere else in this app an invariant of that weight is in SQL. | `stages.is_enabled` is in the client's UPDATE grant on purpose, and `supabase/tests/20_column_privileges.test.sql` asserts that a client *can* disable a core stage. Moving the rule into the database means revoking that column and rewriting a passing test of a deliberate decision — M7's argument to have with the whole settings screen in front of it. The check is read-then-write, so a video moved into the lane between the two would be hidden; one user, one session. `app/actions/stages.ts` says all of this at the top. |
+| **The Repurposed switch is optimistic.** | It is a controlled checkbox whose state follows a round trip: without the optimistic step the box springs back the instant it is clicked and only moves when the server answers, which reads as "that did nothing". It rolls back on refusal and on a failed request, and the e2e polls the row rather than trusting the screen. |
+| **`components/video-sections/not-yet.tsx` is no longer used by the video page.** | Both tabs it stood in for are built. The component is left in place; nothing else imports it yet. |
+
+### Honest limits
+
+- The expectation shown on a first load is computed before that page's own
+  metrics are logged, so the prompt drawn immediately after a first log is
+  measured against a sample that does not yet include this video. The
+  `router.refresh()` that follows the write corrects it within the same
+  interaction; a reader watching closely could see the earlier verdict for a
+  frame.
+- `confirmLive` writes the URL and then calls `move_video`. Those are two round
+  trips, not one transaction: if the second fails the link is saved and the
+  video has not moved, which the message says in those words. Making it atomic
+  means a third SQL function, and PLAN.md's rule is that a function earns its
+  place by protecting an invariant — there is none here that a re-click does not
+  fix.
+- The swap prompt links to the Thumbnails section rather than opening a dialog
+  of its own. That is deliberate (the question is *which of the three wins in a
+  feed*), but it does mean the decision and the act are on two tabs.
+- `expected_ctr` still has no UI. It is read from `channels.expected_ctr` and
+  set in M7's settings screen; until then the median fallback is the only
+  expectation a user can produce, by logging videos.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes, compiled |
+| `./scripts/verify-db.sh` | 5 migrations applied, 13 SQL test files passed — **no migration was added**; every column and function M4 needed was already in `0001_init.sql` |
+| `npm run test` | passing, including `lib/metrics.test.ts` (the pair cannot be parsed half-filled; the verdict is `<`, the same comparison rule 3 makes) and `components/post-publish/metrics-pair.test.tsx`, which renders the component through `react-dom/server` and asserts that **no combination of its props emits one number without the other** |
+| `npm run e2e` | **122 passed, 1 skipped, 0 failed** (7.1m), which is M3's 109 plus this slice's 7, the thumbnails slice's 6 and the two the thumbnails slice retitled. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`. |
+
+### One more existing spec changed, by the weight of the page rather than by a selector
+
+`e2e/m2-review.spec.ts` — *"the skip button is not silently dead while an
+unrelated save is in flight"* — began failing in a **full** suite run while
+passing on its own, twice in a row, at its very first interaction: it clicks the
+packaging-skip disclosure immediately after `page.goto` and the click is
+swallowed.
+
+The cause is the video page getting heavier. `components/video-sections`
+deliberately keeps all five sections mounted so that switching one never costs
+an unsaved edit (M3's decision, and the right one), and M4 turned two of those
+five from a heading and a paragraph into the thumbnail slots and this
+post-publish block. Hydration now takes long enough that a click landing in that
+window reaches a server-rendered button whose handler does not exist yet, and
+nothing on screen says so.
+
+The spec now opens the disclosure inside `expect(...).toPass()` — click, check,
+click again — which is what a person does about a button that appears not to
+have worked. That is a real property of the page as of M4 and it is written
+down here rather than filed as a flake. The honest fix, if it gets worse, is not
+to unmount the panels: it is to make the two new sections lighter.
+
+## M4 — The three thumbnail variants, the shipped role, and the swap log
+
+### What this slice delivers
+
+- **`components/thumbnails/**` — the Thumbnails section**, which replaces the
+  "arrives in M4" placeholder on `/videos/[id]`:
+  - the locked thumbnail **concept** quoted read-only at the top, with a link
+    back to the field on Packaging that owns it (`concept-brief.tsx`);
+  - three slots at 16:9 — wild card, moderate, safe — each with an upload, a
+    replace, a remove and a "Ship this one", and a note saying what that role is
+    *for* (`variant-slot.tsx`);
+  - the same three drawn as 360px feed tiles beside an invented neighbour,
+    because the decision is which one wins in a feed rather than which looks
+    best alone. `feed-strip.tsx` is only the seam: it turns three *roles* into
+    tiles and hands them to the preview's comparison mode
+    (`components/preview/comparison.tsx`), so this row and the packaging
+    preview are the same card out of the same `metrics.ts` — one correction to
+    the real layout moves both;
+  - the swap dialog, a real `<dialog>` with a required typed reason
+    (`swap-dialog.tsx`), and the append-only log, newest first, with date, from,
+    to and reason (`swap-log.tsx`).
+- **`app/actions/thumbnails.ts`** — `recordThumbnailVariant`,
+  `removeThumbnailVariant` and `shipThumbnail`. The first two write a
+  `videos.thumb_*_path` column; the third has no UPDATE available to it and goes
+  through the `swap_thumbnail` RPC.
+- **`lib/storage.ts`** — `thumbnailVariantPath` / `parseThumbnailVariantPath`
+  beside the concept-sketch pair, plus `THUMBNAIL_ROLES` and `isThumbnailRole`.
+  `uploadSketch` and `removeSketches` are now `uploadImage` and `removeObjects`:
+  they serve two subjects, and `removeSketches([variant])` read as a bug.
+- **`e2e/thumbnails.spec.ts`** — six specs, all green (`npx playwright test
+  thumbnails`).
+
+**No migration.** Everything this slice needs was already in `0001_init.sql`:
+the three path columns, `shipped_role` with its CHECK, the `thumbnail_swaps`
+table with its append-only grants, and `swap_thumbnail`. The only schema-shaped
+change is that nothing changed.
+
+### The three decisions worth arguing with
+
+**1. The CHECK is the guard, and the button is not disabled.**
+`videos_shipped_role_has_asset` is what makes a shipped role always have an
+image. So "Ship this one" on an empty slot is *enabled*: pressing it asks the
+database, the database refuses, and `shipThumbnail` turns
+`new row for relation "videos" violates check constraint
+"videos_shipped_role_has_asset"` into *"Safe has no image yet — upload one
+before shipping it."* A greyed-out button would have been the application
+claiming a rule while quietly not being the thing that enforces it, and
+`shipThumbnail` deliberately does not read the path columns before calling the
+RPC for the same reason.
+
+The spec presses that button and then reads `public.videos` **and**
+`public.thumbnail_swaps`. The second read is the one that matters:
+`swap_thumbnail` inserts the log row *before* it updates `shipped_role`, so a
+refused update has to take the insert with it. It does — the log gains nothing.
+That is the atomicity claim, proved from the outside.
+
+**2. The first ship is one click; every change after it is explained.**
+`swap_thumbnail` writes a log row on every call, including the first, where
+`from_role` is null. There is nothing being replaced then and nothing to
+explain, so demanding a typed justification for choosing a thumbnail at launch
+would be friction for its own sake (BRIEF.md principle 6) — and inventing a
+sentence in the user's voice would be worse. The first ship is logged as
+`Chosen at launch.` in the app's voice, the section says so before the button is
+pressed, and every later change opens the dialog. The reason floor is 12
+characters, the same floor and the same argument as `MIN_SKIP_REASON_LENGTH`: a
+reason of `x` satisfies `reason <> ''` and tells a reader nothing.
+
+**3. No optimistic state at all.**
+Everything on this section is a command — upload this, ship that, clear the
+other — not an edit, so there is no draft to hold and nothing to merge. The
+component runs the action, adopts the `updated_at` it reports (the page's shared
+version token, so the next packaging save is not refused as a conflict that
+never happened) and calls `router.refresh()`. M2 and M3 produced seven blockers
+between them in optimistic-save code and every one was a local copy disagreeing
+with the row; the cheapest way not to have an eighth was not to keep a copy.
+`components/autosave.tsx` is therefore deliberately *not* used here.
+
+### Deviations from PLAN.md, stated plainly
+
+1. **PLAN.md names a `shipThumbnail` action and a separate `swapThumbnail`.**
+   There is one action, `shipThumbnail`, because there is one database call:
+   `swap_thumbnail(p_video, p_to_role, p_reason)` is what sets `shipped_role`
+   whether or not something was live before, and two actions over one RPC would
+   have been two places for the reason rule to drift.
+2. **"each with a note" is the role's note, not a per-variant free-text field.**
+   The design brief asks for a note under each variant. There is no column for
+   one, and adding three would be a migration for a field neither BRIEF.md nor
+   PLAN.md asks for. What is drawn instead is honest and needed more: what the
+   role *is* ("the risky one", "the fallback"), because three slots with three
+   identical captions quietly invite three crops of one image — and, on the live
+   slot, the date and reason from the log, which is a real per-variant note
+   written by the person rather than a second empty box.
+3. **The section tab's readiness now counts variants.** `sectionReadiness`
+   gained `variantsReady` and `thumbnailShipped` (both optional). The tick is
+   reserved for "all three exist *and* one is live": three files with nothing
+   marked live means nobody can tell which one is on YouTube, so that reads 3/3
+   without a tick and the tooltip says why.
+4. **`uploadSketch` → `uploadImage`, `removeSketches` → `removeObjects`.** Two
+   call sites, mechanical. `describeSketchRejection` gained an optional subject
+   so a thumbnail slot does not say "a concept sketch has to be an image" on the
+   one screen where concept and asset must not be blurred.
+
+### What M4's own arrival broke, and what it cost
+
+Every section of `/videos/[id]` stays mounted, so adding three file pickers and
+one assist pill to the Thumbnails panel changed what a **bare selector** matches
+on that page. Four specs failed on the first full run and all four were right to:
+
+- `e2e/upload.spec.ts` and `e2e/m1-acceptance.spec.ts` reached for
+  `input[type="file"]`, which now matches four elements — a strict-mode
+  violation, and the correct failure, because it *was* ambiguous. The concept
+  sketch's picker is now `data-testid="concept-sketch-file"` and both specs name
+  it.
+- `e2e/preview.spec.ts` asserted three assist pills, all visible. There are four,
+  and the fourth is on a hidden section. It now asserts four attached, three
+  visible on Packaging, and the fourth visible once the Thumbnails tab is open.
+
+### Honest limits
+
+- **A shipped role cannot be un-shipped.** `swap_thumbnail` takes a non-null
+  `p_to_role` and direct UPDATE is revoked, so once a video has a live
+  thumbnail it always has one; the only move is to ship a different variant.
+  Removing the image behind the live role is refused by the same CHECK, read
+  from the other direction, and the section says so in those words. Nothing in
+  BRIEF.md asks for "no thumbnail at all" as a state, so this is left as it is
+  rather than given a new SQL function.
+- **Two round trips per upload**, as in M1: the browser puts the bytes in
+  Storage and the action records the path. If the second fails the object is an
+  orphan at a *stable* path, so the next successful upload of the same format
+  lands on it and it stops being one. A format change is a different object
+  name, which the action removes — proved in the spec by counting
+  `storage.objects`.
+- **The feed strip scrolls sideways** in the 672px page column, because four
+  360px cards and their gaps are wider than any column here and shrinking
+  YouTube's own pixel sizes is the one thing a rendering like that must not do.
+  The frame is focusable so it can be scrolled from a keyboard.
+- **The comparison row and the packaging preview are never on screen together.**
+  The right rail renders only the active section's content, so opening
+  Thumbnails unmounts the single-video preview. That is the existing layout
+  rule rather than anything this slice chose, and it caught one spec that read
+  the packaging preview's card without switching back to its tab.
+- **The "Critique at tile size" assist is inert**, disabled, and says M8 on its
+  face as well as in its tooltip. It is placed now because where the control
+  goes is a layout decision about this section, not about the API.
+- The section does not know a video's *stage*. The tab locks before Editing, but
+  the panel itself will happily take three uploads on an Idea — which is the
+  right way round: the lock never blocks, and someone who has the images early
+  should not be argued with.
+
+## M4 — The preview's comparison mode: three variants, one feed
+
+### What this slice delivers
+
+- **`components/preview/parts.tsx`** — the pieces every YouTube rendering in
+  the application is drawn out of: `PreviewStyles`, `Frame`, `Thumb`, `Avatar`,
+  `Meta`, `MenuColumn`, `TextColumn`, `DrawnTitle` / `ClampedTitle`, and one
+  `FeedCard`. All of it moved out of `youtube-preview.tsx` unchanged in
+  behaviour; `youtube-preview.tsx` re-exports `PreviewStyles` so nothing that
+  already imported it from there had to move.
+- **`components/preview/comparison.tsx`** — `<FeedComparison>`: the same
+  `FeedCard` once per variant, side by side, with an invented neighbour at the
+  end for scale. Same width, same title, same channel, same metadata line;
+  the only difference between one card and the next is the picture.
+- **`components/thumbnails/feed-strip.tsx`** is now ~80 lines: this section's
+  heading, its sentence, and the roles mapped onto comparison tiles. The ~300
+  lines of tile, avatar, chip, clamp and greys it held before were a hand-copy
+  of the preview's and are gone.
+- **`e2e/preview.spec.ts`** — three cases added to the file that already owns
+  the preview's guarantees, rather than a new file where they would drift from
+  them.
+
+### The constants added, and what each represents
+
+All in `components/preview/metrics.ts`, because the rule in that file is that a
+number the preview draws with lives there with a note saying what it is:
+
+- **`FRAME_PADDING` (12)** — *moved*, not new. It was a `const` in
+  `youtube-preview.tsx` while the preview was the only surface that drew a
+  frame; the comparison row draws one too, and a second literal `12` beside it
+  is exactly the drift `metrics.ts` exists to prevent. Its comment (the 452px
+  rail arithmetic, and why 16 clipped the duration chip) moved with it.
+- **`COMPARISON.cardGap` (16)** — between one card and the next in the row.
+  YouTube's rich grid gutters its columns at 16px. Deliberately *not* aliased to
+  `PHONE.tileGap`, which is the same number for a different reason: correcting
+  the desktop gutter should not silently move the phone feed's vertical rhythm.
+- **`COMPARISON.labelFontSize` (11) / `labelLineHeight` (16)** — our label above
+  each card. Ours, not YouTube's: they never write "wild card" over a tile, so
+  it is drawn outside the card, in their secondary grey, smaller than anything
+  in their own layout.
+- **`COMPARISON.labelGap` (6)** — between that label and the top of the
+  thumbnail.
+- **`COMPARISON.labelPartsGap` (6)** — between the slot's name and the "· live"
+  marker beside it.
+- **`comparisonRowWidth(cards)`** — the width of a row of *n* feed cards, gaps
+  included: 1,488px for four. The row is drawn at it and `e2e/preview.spec.ts`
+  measures the drawn row against it, so the two cannot drift.
+
+Nothing else was added. The card, the title box, the clamp, the chip, the
+avatar, the greys and the neighbour's invented metadata were all already there,
+which is the point: a tile in the comparison is a `FEED` card, because the
+question is which of these wins *in the feed*.
+
+### The decisions worth arguing with
+
+**1. The strip was a fork, and forks of a layout do not stay one layout.**
+`feed-strip.tsx` arrived as a copy of the preview's tile — its own `Thumb`, its
+own avatar, its own clamped title, its own duration chip. Both copies read the
+same `metrics.ts`, so the numbers agreed on the day it was written. But that
+file is written on the assumption that someone with the real page open will
+correct it one value at a time, and a correction only ever reaches the drawing
+that is still there: the two would have diverged at the first fix. A comparison
+between a card drawn the new way and a card drawn the old way is not a
+comparison of thumbnails at all. So there is one `FeedCard` now, in
+`parts.tsx`, and the strip is the words around it.
+
+**2. The title is measured once for the whole row.**
+`useClamps` lays out the user's title and the neighbour's in one pass, and the
+same `Clamp` is drawn into all three of the user's cards. Measuring per card
+would give the same answer — same string, same box — but then "every card says
+the same thing" would be a property of the measurement being deterministic
+rather than a property of the markup, and the row's entire claim is about the
+markup. The spec asserts the three drawn strings collapse to a set of one, and
+that the string and the cut are the ones the packaging preview's own feed card
+shows on the other tab.
+
+**3. Three empty states, not two, and none of them a grey rectangle.**
+`Thumb` now reports `data-state` of `empty` (nothing uploaded), `broken` (there
+is an object and it is not on screen) or `sample` (an invented neighbour, which
+was never going to hold a picture of ours). The wording differs with the state
+because the next action does: *"No wild card image yet"* is an instruction to
+upload one and *"The wild card image could not be loaded"* is an instruction to
+check the one that is there. `broken` deliberately covers both "the app could
+not sign a URL" and "the URL signed and the fetch failed": the person's move is
+the same either way and the difference is not something they can see.
+
+**4. The neighbour is not dimmed.**
+The phone rendering fades its two sample tiles (`PLACEHOLDER.sampleOpacity`)
+because they are scenery around the thing being judged. The comparison row's
+competitor is the opposite — it is *what the user's tile is being judged
+against*, and a competitor you can pick out at a glance is not doing its job. It
+is drawn at full strength and says what it is in words instead.
+
+### Deviations, stated plainly
+
+1. **`components/thumbnails/feed-strip.tsx` was rewritten**, although this slice
+   owns `components/preview/**`. Leaving it would have meant shipping two
+   implementations of a YouTube feed card in one application — the exact thing
+   the task said not to do — so the strip now calls `<FeedComparison>` and keeps
+   only its own heading and copy. Its public props (`FeedStrip`,
+   `StripVariant`) are unchanged, so `thumbnails-section.tsx` did not move.
+2. **The strip's test ids changed** from `feed-strip-tile` / `feed-strip-title`
+   / `feed-strip-empty` to `preview-comparison-tile` / `-title` / `-thumb`,
+   because the row is now the preview's and its hooks should say so. The one
+   assertion in `e2e/thumbnails.spec.ts` that used the old name was updated in
+   place, with a comment pointing at where the row's geometry is asserted.
+3. **The phone rendering's two sample neighbours now say "A neighbour's
+   thumbnail"** and report `data-state="sample"`. They previously said "No
+   concept sketch yet" and reported `empty`, which read as though a stranger's
+   tile were waiting on an upload from us — and, with the comparison row using
+   the same `Thumb`, would have made "count the empty slots" ambiguous. The
+   assertion in `e2e/preview.spec.ts` that counted those two was updated.
+
+### What is deliberately not here
+
+- **No "Critique at tile size".** The assist pill on this section is inert and
+  disabled and says M8 on its face, as everywhere else.
+- **No per-variant note in the row.** The label above each card is the slot's
+  name and, on one of them, "· live". The role's *note* ("the risky one…")
+  belongs beside the slot where the upload happens; repeating it over a 360px
+  card would be twice the words at a third of the size.
+- **The row is not a decision control.** Nothing in it can be clicked. Shipping
+  a variant happens in the slot above, where the button is, because a row whose
+  job is "look at these" should not also be a place you can change what is live
+  by accident.

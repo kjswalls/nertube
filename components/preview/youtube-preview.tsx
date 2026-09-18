@@ -1,29 +1,68 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-
 import { usePackagingDraft } from "./live-packaging";
-import { useClamp, type Clamp } from "./measure-title";
 import {
-  AVATAR,
-  CHIP,
-  FEED,
   FEED_TITLE_BOX,
   PHONE,
   PHONE_TITLE_BOX,
-  SAMPLE_DURATION,
+  PLACEHOLDER,
   SAMPLE_NEIGHBOURS,
   SEARCH,
   SEARCH_ROW_WIDTH,
   SEARCH_TITLE_BOX,
-  PLACEHOLDER,
-  TEXT_RENDERING,
-  THUMB_ASPECT_CSS,
-  YOUTUBE_COLORS,
-  YOUTUBE_FONT_STACK,
-  type TitleBox,
-  type YoutubePalette,
 } from "./metrics";
+import {
+  Avatar,
+  ClampedTitle,
+  FeedCard,
+  Frame,
+  Meta,
+  MenuColumn,
+  NOT_PUBLISHED,
+  PreviewStyles,
+  TextColumn,
+  Thumb,
+  UNTITLED,
+  type ThumbCopy,
+} from "./parts";
+
+/**
+ * Exported because a second surface draws YouTube tiles: the thumbnail
+ * section's feed strip (`components/thumbnails/feed-strip.tsx`), which is on a
+ * different tab from this preview and therefore cannot rely on this component
+ * being mounted. It lives in `./parts` now, with the rest of the drawing both
+ * surfaces share; this re-export is so nothing that already imports it from
+ * here has to care.
+ */
+export { PreviewStyles };
+
+/**
+ * What the concept sketch's slot says when there is no picture in it.
+ *
+ * The two states are kept apart on purpose — see `ThumbCopy`. "No concept
+ * sketch yet" is true of a video nobody has uploaded one for and a lie about a
+ * video whose sketch the app cannot reach, and the second person cannot act on
+ * being told the first thing.
+ */
+const SKETCH_COPY: ThumbCopy = {
+  empty: "No concept sketch yet",
+  broken: "The sketch could not be loaded",
+};
+
+/**
+ * What a neighbour's frame says.
+ *
+ * The phone rendering stacks the user's tile between two invented ones. Their
+ * thumbnails are empty because nobody's picture belongs there, which is not the
+ * same fact as the user's own slot being empty — and for a while both said "No
+ * concept sketch yet", which read as though the sample tiles were waiting on
+ * something of ours.
+ */
+const NEIGHBOUR_COPY: ThumbCopy = {
+  empty: "A neighbour's thumbnail",
+  broken: "A neighbour's thumbnail",
+  sample: "A neighbour's thumbnail",
+};
 
 /**
  * The YouTube preview: this title and this thumbnail, drawn at the sizes they
@@ -102,9 +141,6 @@ export interface YouTubePreviewProps {
   savedTitle: string;
 }
 
-/** What an empty title is drawn as, so the frame is never a blank rectangle. */
-const UNTITLED = "Untitled — the working title shows here";
-
 export function YouTubePreview({
   channelName,
   sketchUrl,
@@ -151,10 +187,21 @@ export function YouTubePreview({
         testId="preview-feed"
       >
         <FeedCard
-          title={title}
+          title={
+            <ClampedTitle
+              text={title}
+              box={FEED_TITLE_BOX}
+              color="var(--yt-text)"
+              testId="preview-title-feed"
+            />
+          }
           channelName={channelName}
-          sketchUrl={sketchUrl}
-          hasSketch={hasSketch}
+          url={sketchUrl}
+          hasAsset={hasSketch}
+          copy={SKETCH_COPY}
+          cardTestId="preview-feed-card"
+          detailsTestId="preview-feed-details"
+          thumbTestId="preview-thumb-empty"
         />
       </Frame>
 
@@ -189,546 +236,6 @@ export function YouTubePreview({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Colour                                                                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * YouTube's greys, in both of its themes, following the app's choice.
- *
- * The same three-block pattern `app/globals.css` uses and for the same reason:
- * a bare `@media (prefers-color-scheme: dark)` would take the manual override
- * straight back on a dark OS. It is a `<style>` in the component rather than a
- * block in `globals.css` because these values are YouTube's, not the product's,
- * and keeping them beside the metrics they belong to is what stops someone
- * "tidying" them into the palette.
- */
-function PreviewStyles() {
-  const { light, dark } = YOUTUBE_COLORS;
-  const vars = (theme: YoutubePalette) => `
-    --yt-surface: ${theme.surface};
-    --yt-text: ${theme.textPrimary};
-    --yt-text-2: ${theme.textSecondary};
-    --yt-placeholder: ${theme.placeholder};
-    --yt-placeholder-text: ${theme.placeholderText};
-    --yt-fill: ${theme.fill};
-  `;
-
-  const css = `
-[data-yt-surface] { ${vars(light)} }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) [data-yt-surface] { ${vars(dark)} }
-}
-:root[data-theme="dark"] [data-yt-surface] { ${vars(dark)} }
-`;
-
-  return <style dangerouslySetInnerHTML={{ __html: css }} />;
-}
-
-/* -------------------------------------------------------------------------- */
-/* The frame around each rendering                                             */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The frame's own padding — ours, not YouTube's, and it is load-bearing
- * arithmetic rather than taste.
- *
- * The preview lives in a 452px right rail. The rail's own rule and gutter take
- * 33 and this section draws no box of its own (see the note on it), so a frame
- * gets 419 — 417 inside its 1px border.
- *
- * The widest rendering that has to fit there *whole* is the phone tile, and it
- * is 390px because that is what a phone is: 390 + 2 × 12 = 414, with three to
- * spare. At 16 it was 422 and clipped the duration chip off the right-hand
- * edge, which — in a component where the chip exists to show what covers the
- * thumbnail's corner — was a funny way to fail.
- *
- * The search row is the one rendering that does not fit at any padding; it is
- * 976px and it scrolls. See `Frame`.
- */
-const FRAME_PADDING = 12;
-
-/**
- * One rendering, at its true pixel size, with a caption saying what it is.
- *
- * `overflow-x: auto` and not a scale transform: a search row is 976px wide and
- * no rail is, and shrinking it to fit would be the one thing this component
- * must not do. Type drawn at 80% is type that answers "does this read?"
- * wrongly. So it scrolls, inside its own frame, and the page itself never
- * scrolls sideways.
- *
- * Two things follow from a frame that scrolls, and both are easy to leave out:
- *
- * - **It is focusable.** A scroll container that nothing can focus cannot be
- *   scrolled from a keyboard at all, which is a straightforward WCAG failure
- *   and not a detail. `tabIndex={0}` with a group role and the caption as its
- *   name.
- * - **It starts where the question is.** `startAt` scrolls a clipped frame to
- *   the part worth seeing first. For the search row that is the text column:
- *   drawn from the left, a 419px rail shows 419px of a 360px thumbnail and
- *   nothing else — a grey rectangle where a title was supposed to be. The
- *   thumbnail is answered at true size by the other two renderings; what only
- *   search can answer is how much later *its* column cuts.
- */
-function Frame({
-  caption,
-  testId,
-  startAt = 0,
-  children,
-}: {
-  caption: string;
-  testId: string;
-  /** Where to park the scroll when the frame is too narrow for its content. */
-  startAt?: number;
-  children: ReactNode;
-}) {
-  const scroller = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const node = scroller.current;
-    if (node === null || startAt === 0) return;
-    // Only when it is actually clipped: in a wide page the whole row is
-    // visible and moving it would just hide the thumbnail for no reason.
-    if (node.scrollWidth <= node.clientWidth) return;
-    node.scrollLeft = startAt;
-  }, [startAt]);
-
-  return (
-    <figure className="flex flex-col gap-2" data-testid={testId}>
-      <figcaption className="text-xs text-muted">{caption}</figcaption>
-      <div
-        ref={scroller}
-        role="group"
-        aria-label={caption}
-        tabIndex={0}
-        className="overflow-x-auto rounded-card border border-border outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
-        <div
-          data-yt-surface=""
-          style={{
-            background: "var(--yt-surface)",
-            color: "var(--yt-text)",
-            fontFamily: YOUTUBE_FONT_STACK,
-            padding: FRAME_PADDING,
-            // `max-content` so a 976px row is 976px and scrolls; `min-width:
-            // 100%` so a 360px card does not leave a strip of *our* page
-            // showing down the right of a frame that is supposed to be a
-            // picture of theirs. YouTube's own background runs past the card.
-            width: "max-content",
-            minWidth: "100%",
-            boxSizing: "border-box",
-            // The application smooths its own faces and YouTube does not, and
-            // the measurer pins the same four properties. See `TEXT_RENDERING`.
-            ...TEXT_RENDERING,
-          }}
-        >
-          {children}
-        </div>
-      </div>
-    </figure>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Shared parts                                                                */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A title in a real title box: clamped by CSS always, and replaced by its
- * measured prefix once the browser has laid it out.
- *
- * `data-cut` is the number of characters the clamp removes, and it is the same
- * number the truncation warning quotes, because both come from `useClamp`.
- */
-function ClampedTitle({
-  text,
-  box,
-  color,
-  testId,
-}: {
-  text: string;
-  box: TitleBox;
-  color: string;
-  testId?: string;
-}) {
-  const clamp: Clamp | null = useClamp(text, box);
-  const drawn = clamp === null ? text : clamp.truncated ? `${clamp.visible}…` : clamp.text;
-
-  const style: CSSProperties = {
-    width: box.width,
-    fontSize: box.fontSize,
-    lineHeight: `${box.lineHeight}px`,
-    fontWeight: box.fontWeight,
-    color,
-    margin: 0,
-    // The safety net. Before the measurement lands — server render, first
-    // paint, a browser without `document.fonts` — this is what keeps a long
-    // title from pushing the card's metadata down the page.
-    display: "-webkit-box",
-    WebkitLineClamp: box.lines,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-    overflowWrap: "break-word",
-  };
-
-  return (
-    <p
-      style={style}
-      data-testid={testId}
-      data-cut={clamp === null ? undefined : clamp.cut}
-      data-truncated={clamp === null ? undefined : String(clamp.truncated)}
-    >
-      {drawn}
-    </p>
-  );
-}
-
-/**
- * The thumbnail slot: the concept sketch, or an honest empty frame.
- *
- * ## Three states, not two
- *
- * `sketchUrl === null` collapses two of them, and they are not the same thing:
- *
- * - **No sketch.** Nothing has been uploaded. "No concept sketch yet" is true.
- * - **A sketch the app could not reach.** There is a
- *   `thumbnail_concept_path`, and signing a URL for it failed
- *   (`app/videos/[id]/page.tsx` hands this `null` in that case too). Saying "no
- *   sketch yet" here is a lie the person cannot act on — the sibling
- *   `ConceptSketch` on the same page takes `hasSketch` separately for exactly
- *   this reason, and this component now does the same.
- * - **A sketch whose object will not load.** The URL was signed and the fetch
- *   failed or the bytes are not an image. With no `onError` the `<img>` stayed
- *   in the layout at full size with `naturalWidth` 0 and `alt=""`, so Chromium
- *   painted nothing: a blank grey rectangle with a duration chip on it and not
- *   one word of explanation anywhere on the user's own tile.
- *
- * The `brokenUrl` pattern is the one already written in
- * `app/videos/[id]/concept-sketch.tsx`: remember *which* URL failed, so a newly
- * signed one is tried rather than being written off by the last one's failure.
- */
-function Thumb({
-  width,
-  radius,
-  sketchUrl,
-  hasSketch,
-  chipFontSize,
-  chipInset,
-}: {
-  width: number;
-  radius: number;
-  sketchUrl: string | null;
-  hasSketch: boolean;
-  chipFontSize: number;
-  chipInset: number;
-}) {
-  /*
-    *Which* URL failed, not "it failed".
-
-    Storing a boolean would write a new signed URL off because the previous
-    object could not be fetched; comparing the stored one against the current
-    one means a re-signed URL is tried again, with no effect to reset it — the
-    comparison is the reset. Same pattern, same reason, as
-    `app/videos/[id]/concept-sketch.tsx`.
-  */
-  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
-  const broken = sketchUrl !== null && brokenUrl === sketchUrl;
-  const drawImage = sketchUrl !== null && !broken;
-
-  // With no image drawn, there are two things it can be: there is a sketch
-  // (this one broke, or the app could not sign a URL for it), or there is not.
-  const missing = broken || hasSketch;
-
-  return (
-    <div
-      style={{
-        position: "relative",
-        width,
-        // The ratio, not a rounded height: `Math.round(360 / (16/9))` is 203,
-        // which is 1.7734 rather than 1.77778. See `THUMB_ASPECT_CSS`.
-        aspectRatio: THUMB_ASPECT_CSS,
-        borderRadius: radius,
-        overflow: "hidden",
-        background: "var(--yt-placeholder)",
-        flex: "none",
-      }}
-    >
-      {drawImage ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={sketchUrl}
-          alt=""
-          onError={() => setBrokenUrl(sketchUrl)}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      ) : (
-        <span
-          data-testid="preview-thumb-empty"
-          data-state={missing ? "broken" : "empty"}
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: PLACEHOLDER.fontSize,
-            color: "var(--yt-placeholder-text)",
-            textAlign: "center",
-            padding: PLACEHOLDER.padding,
-          }}
-        >
-          {missing ? "The sketch could not be loaded" : "No concept sketch yet"}
-        </span>
-      )}
-
-      {/* The duration chip. A placeholder number, drawn because the chip is
-          part of the layout: it sits on the thumbnail's bottom-right corner on
-          every YouTube surface, so a concept whose subject lives in that corner
-          is a concept that gets sat on. */}
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: chipInset,
-          bottom: chipInset,
-          padding: `${CHIP.paddingY}px ${CHIP.paddingX}px`,
-          borderRadius: CHIP.radius,
-          background: CHIP.background,
-          color: CHIP.color,
-          fontSize: chipFontSize,
-          lineHeight: `${CHIP.lineHeight}px`,
-          fontWeight: CHIP.fontWeight,
-        }}
-      >
-        {SAMPLE_DURATION}
-      </span>
-    </div>
-  );
-}
-
-/**
- * The channel avatar: a filled circle carrying the channel's initial.
- *
- * YouTube draws the channel's picture here, which this application does not
- * have and would not be allowed to invent. A blank grey disc is honest but
- * reads as a hole in the layout; the initial is what YouTube itself falls back
- * to for a channel with no picture, so it is both closer to the real thing and
- * still nobody's asset. `aria-hidden`, because the channel's name is written
- * out in full on the line beside it.
- */
-function Avatar({ size, channelName }: { size: number; channelName: string }) {
-  // `Array.from` and not `[0]`: a channel called "🎬 Sunday Softworks" has a
-  // first *code unit* that is half a character.
-  const initial = (Array.from(channelName.trim())[0] ?? "?").toUpperCase();
-
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: "var(--yt-fill)",
-        color: "var(--yt-text-2)",
-        flex: "none",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.round(size * AVATAR.initialScale),
-        lineHeight: 1,
-        fontWeight: AVATAR.fontWeight,
-        userSelect: "none",
-      }}
-    >
-      {initial}
-    </span>
-  );
-}
-
-/** The ⋮ column YouTube reserves at the right of a title row. */
-function MenuColumn({ width }: { width: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width,
-        flex: "none",
-        textAlign: "right",
-        color: "var(--yt-text-2)",
-        lineHeight: `${PLACEHOLDER.menuLineHeight}px`,
-      }}
-    >
-      &#8942;
-    </span>
-  );
-}
-
-/**
- * One metadata line: nowrap, and cut with an ellipsis when it does not fit.
- *
- * The ellipsis only works if something constrains the width, and for a long
- * time nothing did. This is a block inside a flex column that was itself a flex
- * item with no `min-width: 0` and no width of its own, so the column's
- * max-content width won and the *row grew* instead of the text ellipsising —
- * `text-overflow` was dead code on the feed and the phone. On the phone tile
- * the line is `{channelName} · Not published yet`, so a 37-character channel
- * name (the app allows up to 80: `app/actions/channels.ts`) pushed the row 31px
- * past a device that is 390px wide by definition.
- *
- * The fix is on the text column — an explicit width, which is the number
- * `FEED_TITLE_BOX` / `PHONE_TITLE_BOX` already compute, plus `minWidth: 0` so
- * the flex item's automatic minimum size cannot override it. See `TextColumn`.
- */
-function Meta({
-  children,
-  fontSize,
-  lineHeight,
-  testId,
-}: {
-  children: ReactNode;
-  fontSize: number;
-  lineHeight: number;
-  testId?: string;
-}) {
-  return (
-    <p
-      data-testid={testId}
-      style={{
-        margin: 0,
-        fontSize,
-        lineHeight: `${lineHeight}px`,
-        color: "var(--yt-text-2)",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
-    >
-      {children}
-    </p>
-  );
-}
-
-/**
- * The title-and-metadata column of a details row, at exactly the width the
- * title was measured in.
- *
- * `flex: none` and `minWidth: 0`: the width here *is* the clamp's width, so
- * neither growing nor shrinking it is allowed. Without `minWidth: 0` a flex
- * item's automatic minimum size is its min-content width, which for a nowrap
- * metadata line is however long that line is.
- */
-function TextColumn({
-  width,
-  gap,
-  marginLeft,
-  children,
-}: {
-  width: number;
-  gap: number;
-  /**
-   * The row's one gap, drawn here rather than by the flex container.
-   *
-   * A flex `gap` applies between *every* pair of children, so with three of
-   * them — avatar, text, ⋮ — it drew two gaps where the metrics subtract one,
-   * and the row came out 12px wider than the card that is supposed to contain
-   * it. The ⋮ column sits flush with the card's right edge, so the gap belongs
-   * to this column alone.
-   */
-  marginLeft: number;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      data-testid="preview-text-column"
-      style={{
-        width,
-        flex: "none",
-        minWidth: 0,
-        marginLeft,
-        display: "flex",
-        flexDirection: "column",
-        gap,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
- * The metadata line for the user's own video.
- *
- * YouTube would show "12K views · 2 days ago" here. Inventing a view count for
- * a video that has not been published would be the preview telling a lie in the
- * middle of a component whose entire job is to tell the truth, so it says what
- * is actually the case.
- */
-const NOT_PUBLISHED = "Not published yet";
-
-/* -------------------------------------------------------------------------- */
-/* 1. The home feed card                                                       */
-/* -------------------------------------------------------------------------- */
-
-function FeedCard({
-  title,
-  channelName,
-  sketchUrl,
-  hasSketch,
-}: {
-  title: string;
-  channelName: string;
-  sketchUrl: string | null;
-  hasSketch: boolean;
-}) {
-  return (
-    <div data-testid="preview-feed-card" style={{ width: FEED.cardWidth }}>
-      <Thumb
-        width={FEED.thumbWidth}
-        radius={FEED.thumbRadius}
-        sketchUrl={sketchUrl}
-        hasSketch={hasSketch}
-        chipFontSize={FEED.chipFontSize}
-        chipInset={FEED.chipInset}
-      />
-
-      {/* No flex `gap` here: 36 + 12 + 288 + 24 is exactly `cardWidth`, and a
-          gap between every pair would make it 372 in a 360px card. The one gap
-          belongs to the text column. See `TextColumn`. */}
-      <div
-        data-testid="preview-feed-details"
-        style={{
-          display: "flex",
-          marginTop: FEED.detailsGap,
-          alignItems: "flex-start",
-        }}
-      >
-        <Avatar size={FEED.avatarSize} channelName={channelName} />
-        <TextColumn
-          width={FEED_TITLE_BOX.width}
-          gap={FEED.metaGap}
-          marginLeft={FEED.avatarGap}
-        >
-          <ClampedTitle
-            text={title}
-            box={FEED_TITLE_BOX}
-            color="var(--yt-text)"
-            testId="preview-title-feed"
-          />
-          <div>
-            <Meta fontSize={FEED.metaFontSize} lineHeight={FEED.metaLineHeight}>
-              {channelName}
-            </Meta>
-            <Meta fontSize={FEED.metaFontSize} lineHeight={FEED.metaLineHeight}>
-              {NOT_PUBLISHED}
-            </Meta>
-          </div>
-        </TextColumn>
-        <MenuColumn width={FEED.menuReserve} />
-      </div>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /* 2. The search result row                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -748,10 +255,12 @@ function SearchRow({
       <Thumb
         width={SEARCH.thumbWidth}
         radius={SEARCH.thumbRadius}
-        sketchUrl={sketchUrl}
-        hasSketch={hasSketch}
+        url={sketchUrl}
+        hasAsset={hasSketch}
         chipFontSize={SEARCH.chipFontSize}
         chipInset={SEARCH.chipInset}
+        copy={SKETCH_COPY}
+        testId="preview-thumb-empty"
       />
 
       <div
@@ -874,10 +383,13 @@ function PhoneTile({
       <Thumb
         width={PHONE.thumbWidth}
         radius={PHONE.thumbRadius}
-        sketchUrl={sketchUrl}
-        hasSketch={hasSketch}
+        url={sketchUrl}
+        hasAsset={hasSketch}
         chipFontSize={PHONE.chipFontSize}
         chipInset={PHONE.chipInset}
+        copy={sample ? NEIGHBOUR_COPY : SKETCH_COPY}
+        sample={sample}
+        testId="preview-thumb-empty"
       />
       {/* Again no flex `gap`: 36 + 12 + 294 + 24 is exactly the padded content
           box, 390 − 2 × 12. See `TextColumn`. */}

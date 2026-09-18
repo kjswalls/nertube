@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { dismissSwap, logMetrics } from "@/app/actions/metrics";
+import { confirmLive, dismissSwap, logMetrics } from "@/app/actions/metrics";
 import { moveVideo } from "@/app/actions/moves";
 import { toggleChecklistItem } from "@/app/actions/checklist";
 import { updateVideo } from "@/app/actions/videos";
@@ -344,20 +344,28 @@ export function NowView({
           }
 
           case "metrics": {
+            /*
+              The one metrics write path, shared with the video page's Publish
+              section (`app/actions/metrics.ts`). `newViewersNote` is not sent:
+              this row has no room for a sentence, and sending the key would
+              clear a note the page wrote.
+            */
             const result = await logMetrics({
               videoId: row.videoId,
               impressions: intent.impressions,
               ctr: intent.ctr,
+              views: intent.views,
             });
             if (!result.ok) {
               toast.push({ message: result.error, tone: "error" });
               return;
             }
+            const state = result.state;
             patch(row.videoId, (video) => ({
               ...video,
-              first24Impressions: result.impressions,
-              first24Ctr: result.ctr,
-              metricsLoggedAt: result.metricsLoggedAt,
+              first24Impressions: state.impressions,
+              first24Ctr: state.ctr,
+              metricsLoggedAt: state.metricsLoggedAt,
             }));
             toast.push({ message: "First 24 hours logged." });
             return;
@@ -371,7 +379,7 @@ export function NowView({
             }
             patch(row.videoId, (video) => ({
               ...video,
-              swapDismissedAt: result.swapDismissedAt,
+              swapDismissedAt: result.state.swapDismissedAt,
             }));
             toast.push({ message: "Keeping the thumbnail." });
             return;
@@ -394,48 +402,37 @@ export function NowView({
 
           case "confirm-live": {
             if (row.payload.input !== "url") return;
-            const { publishedStageId, publishedStageName, targetPublishDate } =
-              row.payload;
 
-            // The URL first: if the move then fails, the link is still recorded
-            // and the row simply stays. The other order would move the video
-            // into Published and lose what was typed.
-            const saved = await updateVideo({
-              videoId: row.videoId,
-              youtubeUrl: intent.url,
-            });
-            if (!saved.ok) {
-              toast.push({ message: saved.error, tone: "error" });
-              return;
-            }
+            /*
+              One action, shared with the video page's Publish section.
 
-            const moved = await moveVideo({
+              It used to be two calls from here — `updateVideo` for the link,
+              then `moveVideo` for the stage — with this component holding the
+              rule that `published_at` is the *target date* rather than the
+              moment somebody ticked the row. That rule (PLAN.md ranking rule 5)
+              now lives in `confirmLive`, along with resolving which stage
+              Published is, so the row and the page cannot come to different
+              answers about when a video went live. The URL still lands first;
+              see the action.
+            */
+            const result = await confirmLive({
               videoId: row.videoId,
-              stageId: publishedStageId,
-              slug: row.channelSlug,
-              // PLAN.md rule 5: `published_at` is the date it was scheduled
-              // for, not the moment somebody got round to confirming it — rule
-              // 2 counts its 24 hours from here.
-              ...(targetPublishDate === null
-                ? {}
-                : { publishedAt: `${targetPublishDate}T00:00:00.000Z` }),
+              url: intent.url,
             });
-            if (!moved.ok) {
-              toast.push({ message: moved.message, tone: "error" });
+            if (!result.ok) {
+              toast.push({ message: result.error, tone: "error" });
               return;
             }
 
             patch(row.videoId, (video) => ({
               ...video,
-              youtubeUrl: saved.video.youtubeUrl,
-              stageId: moved.stageId,
-              stageEnteredAt: moved.stageEnteredAt,
-              publishedAt: targetPublishDate
-                ? `${targetPublishDate}T00:00:00.000Z`
-                : new Date(now).toISOString(),
+              youtubeUrl: result.youtubeUrl,
+              stageId: result.stageId,
+              stageEnteredAt: result.stageEnteredAt,
+              publishedAt: result.publishedAt,
               checklist: [],
             }));
-            toast.push({ message: `Live. Moved to ${publishedStageName}.` });
+            toast.push({ message: `Live. Moved to ${result.stageName}.` });
             // The new stage's checklist was snapshot-copied by `move_video`
             // and only the server knows what it says.
             router.refresh();

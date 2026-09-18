@@ -21,8 +21,13 @@ export type NowIntent =
   | { readonly kind: "text"; readonly value: string }
   /** Rules 1 and 7: mark one hook chosen. */
   | { readonly kind: "choose-hook"; readonly hookId: string }
-  /** Rule 2: the pair, never one half. */
-  | { readonly kind: "metrics"; readonly impressions: number; readonly ctr: number }
+  /** Rule 2: the pair, never one half — plus views, which genuinely is optional. */
+  | {
+      readonly kind: "metrics";
+      readonly impressions: number;
+      readonly ctr: number;
+      readonly views: number | null;
+    }
   /** Rule 5: record the URL and move into Published, stamped with the target date. */
   | { readonly kind: "confirm-live"; readonly url: string }
   /** Rule 4: `waiting_on` cleared. */

@@ -9,7 +9,10 @@ import {
   SEED_STAGES,
 } from '../lib/defaults';
 import {
+  COMPARISON,
+  comparisonRowWidth,
   FEED,
+  FRAME_PADDING,
   FEED_TITLE_BOX,
   PHONE,
   PHONE_TITLE_BOX,
@@ -405,11 +408,20 @@ test('the assist controls are present, disabled, and say when they arrive', asyn
   await page.goto(`/videos/${videoId}`);
 
   const pills = page.getByTestId('assist-pill');
-  await expect(pills).toHaveCount(3);
+  // Four: three on Packaging, and the Thumbnails section's "Critique at tile
+  // size". Every section stays mounted, so they are all in the document.
+  await expect(pills).toHaveCount(4);
 
-  for (const verb of ['Generate 20', 'Suggest concepts', 'Draft a third']) {
+  for (const verb of [
+    'Generate 20',
+    'Suggest concepts',
+    'Draft a third',
+    'Critique at tile size',
+  ]) {
     const pill = page.locator(`[data-assist="${verb}"]`);
-    await expect(pill).toBeVisible();
+    // Attached rather than visible: the fourth belongs to the Thumbnails
+    // section, which is mounted and hidden until its tab is opened.
+    await expect(pill).toBeAttached();
     await expect(pill).toBeDisabled();
     await expect(pill).toHaveAttribute('title', /Arrives in M8\.$/);
     // The milestone is drawn on the control as well as hidden in its tooltip:
@@ -417,6 +429,15 @@ test('the assist controls are present, disabled, and say when they arrive', asyn
     // using a keyboard.
     await expect(pill).toContainText('M8');
   }
+
+  // The three on the section this URL opened at are on screen…
+  for (const verb of ['Generate 20', 'Suggest concepts', 'Draft a third']) {
+    await expect(page.locator(`[data-assist="${verb}"]`)).toBeVisible();
+  }
+
+  // …and the fourth is, on the section it belongs to.
+  await page.goto(`/videos/${videoId}?section=thumbnails`);
+  await expect(page.locator('[data-assist="Critique at tile size"]')).toBeVisible();
 });
 
 /* -------------------------------------------------------------------------- */
@@ -795,15 +816,23 @@ test('a sketch that will not load says so, instead of claiming there is none', a
 
   // All three of the user's own slots say it, and none of them says the other
   // thing. (The two sample neighbours in the phone rendering keep their own
-  // empty frames: they are invented tiles, and there is no sketch to fail.)
+  // frames: they are invented tiles, so there is no sketch of ours to fail and
+  // none of ours missing either — `sample`, and in their own words. They used
+  // to report `empty` and say "No concept sketch yet", which read as though a
+  // stranger's tile were waiting on an upload from us.)
   await expect(
     page.locator('[data-testid="preview-thumb-empty"][data-state="broken"]'),
   ).toHaveCount(3);
   await expect(
     page.locator(
-      '[data-sample="true"] [data-testid="preview-thumb-empty"][data-state="empty"]',
+      '[data-sample="true"] [data-testid="preview-thumb-empty"][data-state="sample"]',
     ),
   ).toHaveCount(2);
+  await expect(
+    page
+      .locator('[data-sample="true"] [data-testid="preview-thumb-empty"]')
+      .first(),
+  ).toHaveText("A neighbour's thumbnail");
 });
 
 /**
@@ -847,4 +876,295 @@ test('a clamp never cuts an emoji in half, and counts it once', async ({ page })
   const cut = Number(await feed.getAttribute('data-cut'));
   // 16 emoji plus the space in front of them. As UTF-16 code units that was 33.
   expect(cut).toBe(17);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The comparison row: three variants, judged against each other               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * M4 — the preview's comparison mode (`components/preview/comparison.tsx`),
+ * drawn on the Thumbnails tab by `components/thumbnails/feed-strip.tsx`.
+ *
+ * These cases live in this file and not beside the thumbnails ones on purpose:
+ * the row is the same feed card as the packaging preview's, out of the same
+ * `metrics.ts` and the same `parts.tsx`, and the guarantees worth asserting are
+ * the preview's guarantees — the card is the width the title was measured in,
+ * the clamp does not cut through a character, an empty frame and a broken one
+ * are never the same frame. Asserted anywhere else they would drift away from
+ * the cases that prove those things about the single-video rendering.
+ */
+
+const ROLES = ['wild_card', 'moderate', 'safe'] as const;
+
+function comparisonTile(page: Page, role: string) {
+  return page.locator(
+    `[data-testid="preview-comparison-tile"][data-role="${role}"]`,
+  );
+}
+
+async function openThumbnails(page: Page, videoId: string): Promise<void> {
+  await page.goto(`/videos/${videoId}?section=thumbnails`);
+  await expect(page.getByTestId('thumbnails-section')).toBeVisible();
+  await expect(page.getByTestId('preview-comparison')).toBeVisible();
+}
+
+/**
+ * The whole claim of the row: these cards differ by exactly one thing.
+ *
+ * A comparison in which the tiles were different widths, or carried different
+ * titles, or one of them had a metadata line the others did not, would be
+ * asking the user to judge a picture while quietly varying something else. The
+ * cards are `FEED.cardWidth` because that is what the decision is about — which
+ * of these wins at feed size — and every dimension in the row comes from
+ * `metrics.ts`, so this measures the drawing against the numbers rather than
+ * against a screenshot.
+ */
+test('the comparison draws one card per variant, alike in everything but the picture', async ({
+  page,
+}) => {
+  const videoId = await capture(SHORT_TITLE);
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await openThumbnails(page, videoId);
+
+  const tiles = page.getByTestId('preview-comparison-tile');
+  await expect(tiles).toHaveCount(4);
+  for (const role of ROLES) {
+    await expect(comparisonTile(page, role)).toHaveCount(1);
+  }
+  // And one that is nobody's, for scale.
+  await expect(comparisonTile(page, 'sample')).toHaveCount(1);
+
+  /* -- the same size ------------------------------------------------------ */
+
+  const rects = await tiles.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        width: rect.width,
+        left: rect.left,
+        right: rect.right,
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+      };
+    }),
+  );
+  expect(rects.map((rect) => rect.width)).toEqual([
+    FEED.cardWidth,
+    FEED.cardWidth,
+    FEED.cardWidth,
+    FEED.cardWidth,
+  ]);
+  // Nothing hangs out of any of them — the same closure the single card keeps.
+  for (const rect of rects) {
+    expect(rect.scrollWidth).toBe(rect.clientWidth);
+  }
+
+  /* -- at the gap the metric names, in a row of the width it computes ------ */
+
+  for (let index = 1; index < rects.length; index += 1) {
+    expect(Math.round(rects[index].left - rects[index - 1].right)).toBe(
+      COMPARISON.cardGap,
+    );
+  }
+  expect(Math.round(rects[3].right - rects[0].left)).toBe(comparisonRowWidth(4));
+
+  /* -- the same title, in the box it was measured in ---------------------- */
+
+  const titles = page.getByTestId('preview-comparison-title');
+  await expect(titles).toHaveCount(ROLES.length);
+  const drawn = await titles.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      text: node.textContent,
+      width: node.getBoundingClientRect().width,
+    })),
+  );
+  for (const title of drawn) {
+    expect(title.text).toBe(SHORT_TITLE);
+    expect(title.width).toBe(FEED_TITLE_BOX.width);
+  }
+
+  /* -- and the same metadata ---------------------------------------------- */
+
+  for (const role of ROLES) {
+    await expect(comparisonTile(page, role)).toContainText(CHANNEL.name);
+    await expect(comparisonTile(page, role)).toContainText('Not published yet');
+  }
+  // The neighbour is the one card that is *not* the same: somebody else's
+  // channel, and a view count, because that is what it is there to be.
+  const neighbour = comparisonTile(page, 'sample');
+  await expect(neighbour).not.toContainText('Not published yet');
+  await expect(neighbour).toContainText('views');
+
+  /* -- it scrolls rather than shrinking ----------------------------------- */
+
+  const frame = page.getByTestId('preview-comparison').locator('[role="group"]');
+  // A scroll container nothing can focus cannot be scrolled from a keyboard.
+  await expect(frame).toHaveAttribute('tabindex', '0');
+  const scroller = await frame.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    transform: getComputedStyle(node.firstElementChild as HTMLElement).transform,
+  }));
+  expect(scroller.scrollWidth).toBeGreaterThanOrEqual(
+    comparisonRowWidth(4) + 2 * FRAME_PADDING,
+  );
+  // Not scaled down to fit: type drawn at 60% answers the one question this
+  // row asks — does this read at tile size — wrongly.
+  expect(scroller.transform === 'none' || scroller.transform === 'matrix(1, 0, 0, 1, 0, 0)').toBe(true);
+});
+
+/**
+ * An empty slot and a picture that will not load are different problems.
+ *
+ * The first is an instruction to upload something; the second is an instruction
+ * to check what is already there. One sentence for both would be a lie to
+ * whichever half of the users was reading it, and a grey rectangle with a
+ * duration chip on it and no words at all — which is what an `<img>` with no
+ * `onError` leaves behind — is worse than either.
+ */
+test('an empty variant and one that will not load are not the same frame', async ({
+  page,
+}) => {
+  const videoId = await capture(SHORT_TITLE);
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+
+  /* -- nothing uploaded --------------------------------------------------- */
+
+  await openThumbnails(page, videoId);
+  const frames = page.getByTestId('preview-comparison-thumb');
+  await expect(frames).toHaveCount(4);
+
+  for (const [role, words] of [
+    ['wild_card', 'No wild card image yet'],
+    ['moderate', 'No moderate image yet'],
+    ['safe', 'No safe image yet'],
+  ] as const) {
+    const frame = comparisonTile(page, role).getByTestId(
+      'preview-comparison-thumb',
+    );
+    await expect(frame).toHaveAttribute('data-state', 'empty');
+    await expect(frame).toHaveText(words);
+  }
+
+  // The neighbour's frame is neither: it was never going to hold a picture of
+  // ours, and it says so in its own words.
+  const neighbour = comparisonTile(page, 'sample').getByTestId(
+    'preview-comparison-thumb',
+  );
+  await expect(neighbour).toHaveAttribute('data-state', 'sample');
+  await expect(neighbour).toHaveText("A neighbour's thumbnail");
+
+  /* -- three objects on the row, and none of them reachable --------------- */
+
+  await asUser(async () => {
+    await db.query(
+      `update public.videos
+          set thumb_wild_card_path = $2,
+              thumb_moderate_path = $3,
+              thumb_safe_path = $4
+        where id = $1`,
+      [
+        videoId,
+        `${userId}/${videoId}/wild_card.png`,
+        `${userId}/${videoId}/moderate.png`,
+        `${userId}/${videoId}/safe.png`,
+      ],
+    );
+  });
+
+  // Whether the URL signs and the fetch fails, or signing fails and there is no
+  // URL at all, the answer on screen has to be the same one — and it has to be
+  // a different one from "nothing here yet".
+  await page.route('**/storage/v1/object/**', (route) => route.abort());
+  await openThumbnails(page, videoId);
+
+  for (const [role, words] of [
+    ['wild_card', 'The wild card image could not be loaded'],
+    ['moderate', 'The moderate image could not be loaded'],
+    ['safe', 'The safe image could not be loaded'],
+  ] as const) {
+    const frame = comparisonTile(page, role).getByTestId(
+      'preview-comparison-thumb',
+    );
+    await expect(frame).toHaveAttribute('data-state', 'broken');
+    await expect(frame).toHaveText(words);
+  }
+
+  // Counting the user's own empty frames never picks up the invented one.
+  await expect(
+    page.locator('[data-testid="preview-comparison-thumb"][data-state="broken"]'),
+  ).toHaveCount(3);
+  await expect(
+    page.locator('[data-testid="preview-comparison-thumb"][data-state="empty"]'),
+  ).toHaveCount(0);
+  await expect(
+    comparisonTile(page, 'sample').getByTestId('preview-comparison-thumb'),
+  ).toHaveAttribute('data-state', 'sample');
+});
+
+/**
+ * The comparison inherits the single card's measurement, character for
+ * character.
+ *
+ * M3's reviewers found three things in this measurement — a 12px box that was
+ * not the box being drawn, a binary search that could land between the halves
+ * of a surrogate pair, and a count in UTF-16 code units — and the comparison
+ * row is only trustworthy if it did not quietly reintroduce any of them by
+ * measuring separately. It does not measure separately: one `useClamps` pass
+ * for the row, the same `FEED_TITLE_BOX` as the packaging preview, and the same
+ * cut, on the same title, on the other tab of the same page.
+ */
+test('the comparison clamps the title exactly as the feed card does', async ({
+  page,
+}) => {
+  const tail = ' 😀🎬🎥🔥😀🎬🎥🔥😀🎬🎥🔥😀🎬🎥🔥';
+  const videoId = await capture(
+    `Studio build in a cupboard for two hundred quid and it really did work out${tail}`,
+  );
+  await signIn(page);
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await openThumbnails(page, videoId);
+
+  const titles = page.getByTestId('preview-comparison-title');
+  await expect(titles).toHaveCount(ROLES.length);
+
+  const measured = await titles.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      text: node.textContent ?? '',
+      cut: node.getAttribute('data-cut'),
+      truncated: node.getAttribute('data-truncated'),
+      width: node.getBoundingClientRect().width,
+    })),
+  );
+
+  for (const title of measured) {
+    expect(title.truncated).toBe('true');
+    // 16 emoji plus the space in front of them. As UTF-16 code units, 33.
+    expect(Number(title.cut)).toBe(17);
+    // U+FFFD is what a browser paints for half a surrogate pair.
+    expect(title.text).not.toContain('�');
+    expect(title.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(title.text).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    // The drawn card and the measured box are the same width.
+    expect(title.width).toBe(FEED_TITLE_BOX.width);
+  }
+
+  // One measurement for the row: every card drew the identical string.
+  expect(new Set(measured.map((title) => title.text)).size).toBe(1);
+
+  // And it is the same string the packaging preview's own feed card draws,
+  // because it is the same box measured by the same code.
+  //
+  // The tab has to be switched first: the right rail renders only the *active*
+  // section's content (`components/video-sections/video-sections.tsx`), so on
+  // the Thumbnails tab the packaging preview is not in the document at all.
+  // The panels themselves all stay mounted, so the comparison row measured
+  // above is still there and still holding the same clamp.
+  await page.getByTestId('section-tab-packaging').click();
+  const feed = page.getByTestId('preview-title-feed');
+  await expect(feed).toBeVisible();
+  expect(await feed.textContent()).toBe(measured[0].text);
+  expect(await feed.getAttribute('data-cut')).toBe(measured[0].cut);
 });

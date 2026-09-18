@@ -255,7 +255,15 @@ async function signIn(page: Page): Promise<void> {
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 }
 
-const sketchInput = (page: Page): Locator => page.locator('input[type="file"]');
+/**
+ * The *concept sketch's* picker.
+ *
+ * By name rather than by `input[type=file]`: M4 put three more pickers on this
+ * page (the thumbnail variants), and every section stays mounted, so the bare
+ * selector matches four elements and fails Playwright's strict mode. Which is
+ * the right failure — it was ambiguous, and this spec is about one of them.
+ */
+const sketchInput = (page: Page): Locator => page.getByTestId('concept-sketch-file');
 const sketchImage = (page: Page): Locator => page.getByTestId('concept-sketch-image');
 const sketchFrame = (page: Page): Locator => page.getByTestId('concept-sketch-frame');
 const sketchStatus = (page: Page): Locator => page.getByTestId('sketch-status');

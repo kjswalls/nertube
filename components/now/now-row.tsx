@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { MetricsPair } from "@/components/now/metrics-pair";
+import { MetricsPair } from "@/components/post-publish/metrics-pair";
 import type { NowIntent } from "@/components/now/intent";
 import { formatAge } from "@/components/video-detail/age";
+import { formatCtr } from "@/lib/metrics";
 import { formatPublishDate, type NowRow as Row } from "@/lib/next-action";
 
 /**
@@ -249,11 +250,22 @@ function RowControl({
     case "metrics_pair":
       return (
         <MetricsPair
-          impressions={payload.impressions}
-          ctr={payload.ctr}
+          /*
+            The same component the video page's Publish section renders — one
+            component for the pair, in one place, per BRIEF.md. The note about
+            new viewers is left off here: a row is a line, not a page, and the
+            action leaves that column alone when the key is absent.
+          */
+          values={{
+            impressions: payload.impressions,
+            ctr: payload.ctr,
+            views: null,
+            newViewersNote: null,
+          }}
+          density="row"
           busy={busy}
-          onSubmit={({ impressions, ctr }) =>
-            onIntent({ kind: "metrics", impressions, ctr })
+          onSubmit={({ impressions, ctr, views }) =>
+            onIntent({ kind: "metrics", impressions, ctr, views })
           }
           primaryRef={(element) => {
             // The `x` key's target for this row; `data-now-primary` is set on
@@ -332,24 +344,22 @@ function RowControl({
             Keep it
           </button>
           {/*
-            The swap itself needs a role that has an asset, a reason, and an
-            append-only log row — all of which arrive with the thumbnail slots
-            in M4. Until then this is a real affordance that refuses to pretend:
-            M1's review settled that a control naming the milestone beats a dead
-            link, and beats leaving the decision with only one of its two
-            answers on screen.
+            The other answer. Swapping needs a role that has an asset, a reason
+            and an append-only log row, so it happens where the assets are: the
+            video's Thumbnails section, which M4 built. This is a link rather
+            than a dialog on purpose — the decision the prompt is asking about
+            is *which of the three wins in a feed*, and that is a question you
+            answer by looking at them.
           */}
-          <button
-            type="button"
-            disabled
-            data-testid="now-swap-unbuilt"
-            title="Swapping the thumbnail arrives in M4, with the three role slots and the swap log."
-            className="cursor-not-allowed rounded-button border border-border px-2 py-1 text-[12px] text-muted opacity-55"
+          <Link
+            href={`/videos/${row.videoId}?section=thumbnails`}
+            data-testid="now-swap-open"
+            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
           >
             Swap thumbnail…
-          </button>
+          </Link>
           <span className="font-mono text-[11px] text-muted">
-            expected {payload.expectation}%
+            expected {formatCtr(payload.expectation)}%
           </span>
         </div>
       );

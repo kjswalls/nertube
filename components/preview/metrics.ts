@@ -459,3 +459,79 @@ export const CHIP = {
   /** Chip text is white on every YouTube theme, light or dark. */
   color: "#ffffff",
 } as const;
+
+/* -------------------------------------------------------------------------- */
+/* The frame the preview draws inside                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The padding between a frame's border and the YouTube surface inside it.
+ *
+ * Ours, not theirs, and it is load-bearing arithmetic rather than taste. The
+ * packaging preview lives in a 452px right rail. The rail's own rule and gutter
+ * take 33 and the preview section draws no box of its own, so a frame gets
+ * 419 — 417 inside its 1px border.
+ *
+ * The widest rendering that has to fit there *whole* is the phone tile, and it
+ * is 390px because that is what a phone is: 390 + 2 × 12 = 414, with three to
+ * spare. At 16 it was 422 and clipped the duration chip off the right-hand
+ * edge, which — in a component where the chip exists to show what covers the
+ * thumbnail's corner — was a funny way to fail.
+ *
+ * It lived in `youtube-preview.tsx` while the preview was the only surface that
+ * drew a frame. The comparison row draws one too, and a second literal `12`
+ * there would be the drift this file exists to prevent.
+ */
+export const FRAME_PADDING = 12;
+
+/* -------------------------------------------------------------------------- */
+/* The comparison row                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The comparison row: one feed card per thumbnail variant, side by side, with
+ * somebody else's card at the end of it.
+ *
+ * ## Why these are separate numbers rather than reused ones
+ *
+ * The *card* is not a new thing — a tile in the comparison is a `FEED` card,
+ * drawn from `FEED` and `FEED_TITLE_BOX`, because the question being asked is
+ * "which of these wins in the feed" and a card of any other size answers a
+ * different question. What is new is only the row those cards sit in, and our
+ * own label above each one, and that is all that is written down here.
+ *
+ * The label is **ours, not YouTube's**: they never write "wild card" over a
+ * tile. It is drawn outside the card, in their secondary grey and smaller than
+ * anything in their layout, so it reads as an annotation on the mock rather
+ * than as part of the interface being mocked.
+ */
+export const COMPARISON = {
+  /**
+   * Between one card and the next.
+   *
+   * YouTube's own rich grid gutters its columns at 16px, which is also
+   * `PHONE.tileGap` — the same gap, the other way round. It is repeated rather
+   * than aliased because a correction to the desktop grid's gutter should not
+   * silently move the phone feed's vertical rhythm.
+   */
+  cardGap: 16,
+  /** The label above each card: which slot this is, and whether it is live. */
+  labelFontSize: 11,
+  labelLineHeight: 16,
+  /** Between that label and the top of the thumbnail. */
+  labelGap: 6,
+  /** Between the slot's name and the "live" marker beside it. */
+  labelPartsGap: 6,
+} as const;
+
+/**
+ * How wide a comparison row of `cards` feed cards is, gaps included.
+ *
+ * Four 360px cards and three 16px gaps are 1,488px and no column in this
+ * application is, so the row scrolls inside its frame — it is never scaled,
+ * because type drawn at 60% answers "does this read at tile size" wrongly, and
+ * that is the only question the row is asked. `e2e/preview.spec.ts` measures
+ * the drawn row against this, so the two cannot drift.
+ */
+export const comparisonRowWidth = (cards: number): number =>
+  cards <= 0 ? 0 : cards * FEED.cardWidth + (cards - 1) * COMPARISON.cardGap;

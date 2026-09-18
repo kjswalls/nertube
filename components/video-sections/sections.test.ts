@@ -113,17 +113,60 @@ describe("sectionReadiness", () => {
     expect(inert.script.kind).not.toBe("locked");
   });
 
-  it("keeps Thumbnails and Publish locked while they are not built", () => {
-    const late = sectionReadiness({
-      ...FRESH,
-      stageKind: "published",
-      published: true,
+  it("walks Publish through the two steps of the post-publish loop", () => {
+    // Not live: a genuine lock. There is nothing to record about a video that
+    // has not gone out, and a tab claiming otherwise would be asking for
+    // numbers that do not exist.
+    expect(sectionReadiness(FRESH).publish.kind).toBe("locked");
+
+    const live = { ...FRESH, stageKind: "published", published: true } as const;
+
+    // Live, nothing logged: 0 of 2.
+    expect(sectionReadiness(live).publish).toMatchObject({
+      kind: "ratio",
+      done: 0,
+      total: 2,
     });
-    expect(late.thumbnails.kind).toBe("locked");
-    expect(late.publish.kind).toBe("locked");
-    // And the lock says which milestone, not just "no".
-    expect(late.thumbnails.why).toContain("M4");
-    expect(late.publish.why).toContain("M4");
+
+    // Logged, nothing decided about the thumbnail: 1 of 2. BRIEF.md principle
+    // 8 is two steps, and a number nobody acted on is the state the loop
+    // exists to get out of.
+    expect(
+      sectionReadiness({ ...live, metricsLogged: true }).publish,
+    ).toMatchObject({ kind: "ratio", done: 1, total: 2 });
+
+    // Decided — by "keep it" or by a swap; both are answers.
+    expect(
+      sectionReadiness({ ...live, metricsLogged: true, swapDecided: true })
+        .publish.kind,
+    ).toBe("done");
+  });
+
+  it("counts the thumbnail variants, and ticks only once one is live", () => {
+    // Before Editing there is nothing to decide: the files are made near
+    // publish, so the tab is locked and says so without claiming a ratio.
+    expect(sectionReadiness(FRESH).thumbnails.kind).toBe("locked");
+
+    const editing = { ...FRESH, stageKind: "editing" } as const;
+    expect(sectionReadiness(editing).thumbnails).toMatchObject({
+      kind: "ratio",
+      done: 0,
+      total: 3,
+    });
+    expect(
+      sectionReadiness({ ...editing, variantsReady: 2 }).thumbnails,
+    ).toMatchObject({ kind: "ratio", done: 2, total: 3 });
+
+    // Three files and nothing live is not finished: nobody can tell which one
+    // is on YouTube.
+    const allThree = sectionReadiness({ ...editing, variantsReady: 3 }).thumbnails;
+    expect(allThree.kind).toBe("ratio");
+    expect(allThree.why).toContain("none of them is marked live");
+
+    expect(
+      sectionReadiness({ ...editing, variantsReady: 3, thumbnailShipped: true })
+        .thumbnails.kind,
+    ).toBe("done");
   });
 
   it("ticks Schedule once a target date exists", () => {

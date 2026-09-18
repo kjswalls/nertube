@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   conceptSketchPath,
   parseConceptSketchPath,
-  removeSketches,
+  removeObjects,
 } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -104,7 +104,7 @@ export async function recordConceptSketch(
   // over — whereas updating first and failing to delete leaves an invisible
   // orphan that nothing will ever clean up.
   if (previous && previous !== path) {
-    await removeSketches(supabase, [previous]);
+    await removeObjects(supabase, [previous]);
   }
 
   const { data: written, error: updateError } = await supabase

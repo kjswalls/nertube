@@ -106,8 +106,27 @@ export interface SectionFacts {
   readonly scriptFilled: boolean;
   /** `videos.target_publish_date`. */
   readonly targetDateSet: boolean;
+  /**
+   * How many of the three thumbnail slots hold an image, and whether one of
+   * them is live (`videos.shipped_role`).
+   *
+   * Optional so that a caller which has not read those columns — a test
+   * fixture, a future surface — reads as zero rather than having to say so.
+   */
+  readonly variantsReady?: number;
+  readonly thumbnailShipped?: boolean;
   /** `videos.published_at`. */
   readonly published: boolean;
+  /**
+   * `videos.metrics_logged_at`, and whether the thumbnail question that follows
+   * it has been answered — by "keep it" (`swap_dismissed_at`) or by a swap
+   * logged since.
+   *
+   * Optional for the same reason the thumbnail facts are: a caller that has not
+   * read those columns reads as "not yet" rather than having to say so.
+   */
+  readonly metricsLogged?: boolean;
+  readonly swapDecided?: boolean;
 }
 
 /** Has this video reached the stage a section belongs to? */
@@ -159,17 +178,72 @@ export function sectionReadiness(
       ? { kind: "done", why: "The script has something in it." }
       : { kind: "quiet", why: "No script yet." };
 
+  /*
+    Thumbnails: how many of the three slots are filled, and whether one is live.
+
+    The tick is reserved for "all three exist *and* one of them is shipped",
+    because those are two different pieces of BRIEF.md principle 7 and having
+    the assets is only half of it — three images with nothing marked live means
+    nobody knows which one is on YouTube. Three filled slots with nothing
+    shipped therefore reads 3/3 without a tick, and the tooltip says why.
+  */
+  const variantsReady = facts.variantsReady ?? 0;
   const thumbnails: SectionReadiness = !reached(facts.stageKind, "editing")
-    ? { kind: "locked", why: "Not at Editing yet, and thumbnail roles arrive in M4." }
-    : { kind: "locked", why: "Thumbnail roles and the swap log arrive in M4." };
+    ? {
+        kind: "locked",
+        why: "Not at Editing yet — the three image files are made near publish, not at the gate.",
+      }
+    : variantsReady === 3 && facts.thumbnailShipped === true
+      ? { kind: "done", why: "All three variants ready, and one of them is live." }
+      : {
+          kind: "ratio",
+          done: variantsReady,
+          total: 3,
+          why:
+            variantsReady === 3
+              ? "All three variants ready — none of them is marked live yet."
+              : `${variantsReady} of the three thumbnail variants have an image.`,
+        };
 
   const schedule: SectionReadiness = facts.targetDateSet
     ? { kind: "done", why: "A target publish date is set." }
     : { kind: "quiet", why: "No target publish date yet." };
 
+  /*
+    Publish: has this video's first twenty-four hours been written down, and has
+    the decision that follows been made?
+
+    The lock is genuine here and not a "not built": before a video is live there
+    is nothing to record, and a tab that claimed otherwise would be asking for
+    numbers that do not exist. Once it is live the tab counts the two steps of
+    BRIEF.md principle 8 — *check first-24h performance, swap thumbnail if
+    needed* — because a logged number nobody has decided anything about is
+    exactly the state the post-publish loop exists to get out of.
+
+    "Decided" is `swap_dismissed_at` **or** a swap logged since the numbers
+    were: keeping the thumbnail and changing it are both answers to the same
+    question.
+  */
   const publish: SectionReadiness = !facts.published
-    ? { kind: "locked", why: "Not published yet, and the post-publish block arrives in M4." }
-    : { kind: "locked", why: "The 24-hour metrics and the swap prompt arrive in M4." };
+    ? {
+        kind: "locked",
+        why: "Not live yet — the first twenty-four hours start when it is.",
+      }
+    : !facts.metricsLogged
+      ? {
+          kind: "ratio",
+          done: 0,
+          total: 2,
+          why: "The first twenty-four hours have not been written down yet.",
+        }
+      : facts.swapDecided
+        ? { kind: "done", why: "The first 24 hours are logged and the thumbnail decision is made." }
+        : {
+            kind: "ratio",
+            done: 1,
+            total: 2,
+            why: "Logged, but nothing has been decided about the thumbnail yet.",
+          };
 
   return { packaging, script, thumbnails, schedule, publish };
 }

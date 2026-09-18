@@ -5,9 +5,13 @@ import {
   CONCEPT_SKETCH_ACCEPT,
   conceptSketchPath,
   describeSketchRejection,
+  isThumbnailRole,
   MAX_SKETCH_BYTES,
   parseConceptSketchPath,
+  parseThumbnailVariantPath,
   sketchExtensionFor,
+  thumbnailVariantPath,
+  THUMBNAIL_ROLES,
 } from "./storage";
 
 /**
@@ -113,5 +117,69 @@ describe("cacheBusted", () => {
   it("is null in, null out", () => {
     expect(cacheBusted(null, "2026-01-01T00:00:00Z")).toBeNull();
     expect(cacheBusted(undefined, null)).toBeNull();
+  });
+});
+
+describe("the thumbnail variant paths", () => {
+  it("is {user}/{video}/{role}.{ext}, one object per role", () => {
+    expect(thumbnailVariantPath(USER, VIDEO, "wild_card", "png")).toBe(
+      `${USER}/${VIDEO}/wild_card.png`,
+    );
+    expect(thumbnailVariantPath(USER, VIDEO, "safe", "webp")).toBe(
+      `${USER}/${VIDEO}/safe.webp`,
+    );
+
+    // Four names under one video, and only ever four: the concept sketch and
+    // the three roles. That is what makes a re-upload a replacement.
+    const names = new Set([
+      conceptSketchPath(USER, VIDEO, "png"),
+      ...THUMBNAIL_ROLES.map((role) => thumbnailVariantPath(USER, VIDEO, role, "png")),
+    ]);
+    expect(names.size).toBe(4);
+  });
+
+  it("round-trips through the parser", () => {
+    for (const role of THUMBNAIL_ROLES) {
+      const path = thumbnailVariantPath(USER, VIDEO, role, "jpg");
+      expect(parseThumbnailVariantPath(path)).toEqual({
+        userId: USER,
+        videoId: VIDEO,
+        role,
+        extension: "jpg",
+      });
+    }
+  });
+
+  it("refuses anything that is not one of ours", () => {
+    const bad = [
+      // The concept sketch is not a variant, and vice versa: the server action
+      // that records one must not be usable to write the other's column.
+      conceptSketchPath(USER, VIDEO, "png"),
+      `${USER}/${VIDEO}/wildcard.png`,
+      `${USER}/${VIDEO}/wild_card.pdf`,
+      `${USER}/${VIDEO}/wild_card`,
+      `${USER}/${VIDEO}/../wild_card.png`,
+      `${USER}/${VIDEO}/nested/wild_card.png`,
+      `not-a-uuid/${VIDEO}/safe.png`,
+    ];
+    for (const path of bad) {
+      expect(parseThumbnailVariantPath(path), path).toBeNull();
+    }
+  });
+
+  it("knows a role when it sees one", () => {
+    expect(isThumbnailRole("moderate")).toBe(true);
+    expect(isThumbnailRole("concept")).toBe(false);
+    expect(isThumbnailRole(null)).toBe(false);
+  });
+});
+
+describe("describeSketchRejection's subject", () => {
+  it("names what the file was going to be", () => {
+    const pdf = { type: "application/pdf", size: 10, name: "notes.pdf" };
+    expect(describeSketchRejection(pdf)).toMatch(/^A concept sketch has to be an image/);
+    expect(describeSketchRejection(pdf, "A wild card thumbnail")).toMatch(
+      /^A wild card thumbnail has to be an image/,
+    );
   });
 });

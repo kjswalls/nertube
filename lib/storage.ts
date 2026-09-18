@@ -83,16 +83,28 @@ export const MAX_SKETCH_LABEL = `${MAX_SKETCH_BYTES / (1024 * 1024)} MB`;
  * of this. `0001_init.sql` does not set one; adding it is a schema change and
  * schema is not M1's to touch.)
  */
-export function describeSketchRejection(file: {
-  type: string;
-  size: number;
-  name: string;
-}): string | null {
+export function describeSketchRejection(
+  file: {
+    type: string;
+    size: number;
+    name: string;
+  },
+  /**
+   * What the file was going to be, for the first sentence.
+   *
+   * The same rules cover the packaging sketch and the three thumbnail variants
+   * — same bucket, same extensions, same ceiling — and only the noun differs.
+   * A thumbnail slot that said "a concept sketch has to be an image" would be
+   * naming the wrong half of BRIEF.md principle 2 at the person, on the one
+   * screen where concept and asset must not be blurred.
+   */
+  subject: string = "A concept sketch",
+): string | null {
   if (!(file.type in CONCEPT_SKETCH_TYPES)) {
     const what =
       file.type === "" ? "that file" : `a ${file.type.replace(/^.*\//, "")} file`;
     return (
-      `A concept sketch has to be an image — ${what} is not one. ` +
+      `${subject} has to be an image — ${what} is not one. ` +
       `PNG, JPEG, WebP, GIF or AVIF.`
     );
   }
@@ -193,7 +205,7 @@ export function cacheBusted(
  * one decision, not three that drift, and the cost of ever moving off Supabase
  * Storage stays the width of this module.
  */
-export async function uploadSketch(
+export async function uploadImage(
   supabase: SupabaseClient<Database>,
   path: string,
   file: File,
@@ -219,7 +231,7 @@ export async function uploadSketch(
  * and the leftover is invisible. Reporting it would turn a successful upload
  * into an error message about housekeeping.
  */
-export async function removeSketches(
+export async function removeObjects(
   supabase: SupabaseClient<Database>,
   paths: readonly string[],
 ): Promise<void> {
@@ -267,4 +279,69 @@ export async function signedUrlsFor(
   }
 
   return urls;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The three thumbnail variants                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The three roles a finished thumbnail can hold, in the order they are drawn.
+ *
+ * BRIEF.md principle 7: *a wild card (risky), a moderate, and a safe fallback.
+ * All ready at launch so you can swap fast if the video underperforms in the
+ * first hours.* They are three **slots**, not a list — one image each, and the
+ * schema says so with three columns (`videos.thumb_*_path`) rather than a
+ * child table, so "which one is the safe one" is never a question about row
+ * order.
+ *
+ * The strings are the ones the database already uses: `videos.shipped_role`'s
+ * CHECK, `thumbnail_swaps.from_role` / `to_role`, and the storage path segment
+ * in this file all spell them this way, so nothing here translates.
+ */
+export const THUMBNAIL_ROLES = ["wild_card", "moderate", "safe"] as const;
+
+export type ThumbnailRole = (typeof THUMBNAIL_ROLES)[number];
+
+export function isThumbnailRole(value: unknown): value is ThumbnailRole {
+  return (
+    typeof value === "string" &&
+    (THUMBNAIL_ROLES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * The stable object name for a variant: `{user_id}/{video_id}/{role}.{ext}`.
+ *
+ * The same convention, the same reasons and the same `upsert: true` as
+ * `conceptSketchPath` — the migration's own comment names all four segments in
+ * one breath (`{concept|wild_card|moderate|safe}`), because they are one
+ * decision. A re-upload of the same format replaces the object in place; a
+ * *different* format is a different object name, which is why
+ * `recordThumbnailVariant` deletes the previous path when it differs.
+ *
+ * Four files can therefore exist under one video, never five, and never a
+ * folder of dated PNGs nobody can tell apart.
+ */
+export function thumbnailVariantPath(
+  userId: string,
+  videoId: string,
+  role: ThumbnailRole,
+  extension: string,
+): string {
+  return `${userId}/${videoId}/${role}.${extension}`;
+}
+
+/** The pieces of a variant path, or `null` if it is not one. */
+export function parseThumbnailVariantPath(
+  path: string,
+): { userId: string; videoId: string; role: ThumbnailRole; extension: string } | null {
+  const match =
+    /^([0-9a-f-]{36})\/([0-9a-f-]{36})\/(wild_card|moderate|safe)\.([a-z0-9]+)$/.exec(
+      path,
+    );
+  if (!match) return null;
+  const [, userId, videoId, role, extension] = match;
+  if (!ALLOWED_EXTENSIONS.has(extension)) return null;
+  return { userId, videoId, role: role as ThumbnailRole, extension };
 }
