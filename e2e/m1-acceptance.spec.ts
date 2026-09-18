@@ -101,7 +101,7 @@ test.afterAll(async () => {
  * PLAN.md's M1 acceptance starts from: *log in, create two channels*.
  *
  * It removes **every** channel this suite has left behind, not only this file's
- * two, and that is the point. The header binds `1`..`9` to the first nine
+ * two, and that is the point. The sidebar binds `1`..`9` to the first nine
  * channels in `created_at` order, and the walk below retargets a capture with
  * `Alt`+the digit its second channel is drawn with. Every spec file in `e2e/`
  * owns a channel and recreates it rather than dropping it, so on a *second*
@@ -179,7 +179,7 @@ async function stageId(channelSlug: string, kind: string): Promise<string> {
   return result.rows[0].id;
 }
 
-/** 1-based position of a channel in the header's order (`created_at` asc). */
+/** 1-based position of a channel in the sidebar's order (`created_at` asc). */
 async function channelPosition(slug: string): Promise<number> {
   const result = await db.query<{ slug: string }>(
     'select slug from public.channels order by created_at asc',
@@ -234,7 +234,7 @@ const toastSaying = (page: Page, text: string | RegExp): Locator =>
  * Open the capture modal with the key, not the button.
  *
  * The binding is attached by an effect, so a press before hydration does
- * nothing; the header's Capture button carries `data-shortcut-ready` once the
+ * nothing; the sidebar's Capture button carries `data-shortcut-ready` once the
  * registry has it, which is the app saying "the key works now".
  */
 async function pressCapture(page: Page): Promise<void> {
@@ -285,6 +285,26 @@ async function dragCardTo(
   await dropzone.dispatchEvent('dragover', { dataTransfer });
   await dropzone.dispatchEvent('drop', { dataTransfer });
   await dataTransfer.dispose();
+}
+
+/**
+ * Wait until no card on the board is mid-move.
+ *
+ * The board writes the optimistic position *before* the server answers, so a
+ * card arriving in its new column proves the click landed and nothing more.
+ * Navigating on that evidence aborts the in-flight server action — which is a
+ * real thing a user can do, but it is not what these steps are about, and it
+ * made this walk fail on a cold `next dev` where the first compile of a route
+ * is seconds rather than milliseconds.
+ *
+ * `aria-busy` is the card's own report that the move is still on the wire, so
+ * this is an extra assertion rather than a sleep: the board has to say it
+ * finished.
+ */
+async function movesSettled(page: Page): Promise<void> {
+  await expect(
+    page.locator('[data-testid="board-card"][aria-busy="true"]'),
+  ).toHaveCount(0);
 }
 
 async function createChannel(page: Page, name: string, slug: string): Promise<void> {
@@ -346,6 +366,7 @@ test('two channels, eight ideas, dragged, reloaded, and still there', async ({
   // after packaging.
   await dragCardTo(page, cardIn(page, IDEA, IDEAS_B[0]), PACKAGING);
   await expect(cardIn(page, PACKAGING, IDEAS_B[0])).toBeVisible();
+  await movesSettled(page);
 
   await openBoard(page, CHANNEL_A.slug);
   await dragCardTo(page, cardIn(page, IDEA, IDEAS_A[0]), PACKAGING);
@@ -355,6 +376,7 @@ test('two channels, eight ideas, dragged, reloaded, and still there', async ({
   await selectCard(second);
   await page.keyboard.press(']');
   await expect(cardIn(page, PACKAGING, IDEAS_A[1])).toBeVisible();
+  await movesSettled(page);
 
   // ---- Refresh. Both boards agree with themselves after a full reload…
   await openBoard(page, CHANNEL_A.slug);
@@ -679,14 +701,19 @@ test('the keyboard set is one set, and it only claims the keys that work', async
   await expect(hints).toContainText('select a card');
   await expect(hints).toContainText('move a stage');
 
-  // `1..9` switches channel from anywhere signed in.
+  // `1..9` switches channel from anywhere signed in. Each hop waits for the
+  // destination to have *arrived* — its own <h1> — and not merely for the URL
+  // to have changed: `router.push` writes the URL first, so a URL check alone
+  // lets the next key be pressed at a page that is still the old one.
   const digitB = await channelPosition(CHANNEL_B.slug);
   await page.keyboard.press(String(digitB));
   await page.waitForURL(`**/c/${CHANNEL_B.slug}/board`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(CHANNEL_B.name);
 
   const digitA = await channelPosition(CHANNEL_A.slug);
   await page.keyboard.press(String(digitA));
   await page.waitForURL(`**/c/${CHANNEL_A.slug}/board`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(CHANNEL_A.name);
   await expect(page.getByTestId('board')).toHaveAttribute('data-ready', 'true');
 
   // …but never while typing. A digit in the capture field is a digit, and the
@@ -732,7 +759,7 @@ test('the keyboard set is one set, and it only claims the keys that work', async
   expect(errors).toEqual([]);
   expect(page.url()).toContain(`/videos/${video.id}`);
 
-  // And `c` still works here, because it is bound by the header, not the board.
+  // And `c` still works here, because it is bound by the sidebar, not the board.
   await pressCapture(page);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);

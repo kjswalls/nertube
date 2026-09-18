@@ -29,7 +29,7 @@ export function NewChannelForm() {
           autoComplete="off"
           placeholder="Main channel"
           aria-describedby="name-hint"
-          className="rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-input border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
         <p id="name-hint" className="text-xs text-muted">
           Its board lives at <code>/c/&lt;name-as-a-slug&gt;/board</code>. The
@@ -42,7 +42,7 @@ export function NewChannelForm() {
       <p
         role="alert"
         aria-live="polite"
-        className="min-h-5 text-sm text-red-600 dark:text-red-400"
+        className="min-h-5 text-sm text-over-limit"
       >
         {state?.error}
       </p>
@@ -50,7 +50,7 @@ export function NewChannelForm() {
       <button
         type="submit"
         disabled={pending}
-        className="self-start rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-60"
+        className="self-start rounded-button bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
       >
         {pending ? "Creating…" : "Create channel"}
       </button>

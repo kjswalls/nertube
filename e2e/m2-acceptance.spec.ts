@@ -272,7 +272,10 @@ test('the gate opens when the three fields are filled, and closes again when the
   expect(filled.thumbnail_concept).toContain('big yellow 3');
   expect(filled.hooks.filter((hook) => hook.chosen)).toHaveLength(1);
 
-  // ---- The move the whole block exists to allow.
+  // ---- The move the whole block exists to allow. The stage select is in the
+  // Schedule section now, so getting to it is a tab away — and what was typed
+  // in Packaging is still there when this walk comes back to it.
+  await page.getByTestId('section-tab-schedule').click();
   await page.getByTestId('stage-select').selectOption({ label: SCRIPTING });
   await expect(page.getByTestId('stage-select-status')).toContainText(
     `Moved to ${SCRIPTING}.`,
@@ -284,6 +287,10 @@ test('the gate opens when the three fields are filled, and closes again when the
   // this is the case PLAN.md's review log calls out — a later-cleared field
   // has to resurface rather than being locked in behind the move.
   await page.reload();
+  // The reload lands back on Schedule, because the tab click put `?section=`
+  // in the address bar and that is what a reload reloads — the section routing
+  // being linkable, demonstrated by accident. Back to the gate to clear it.
+  await page.getByTestId('section-tab-packaging').click();
   await page.getByTestId('working-title').fill('');
   await page.getByTestId('working-title').blur();
   await saved(page);
@@ -294,6 +301,7 @@ test('the gate opens when the three fields are filled, and closes again when the
 
   // And the database says the same thing: the next move is refused for the
   // field the page is naming.
+  await page.getByTestId('section-tab-schedule').click();
   const refusal = await page
     .getByTestId('stage-select')
     .selectOption({ label: 'Filming' })
@@ -443,13 +451,16 @@ test('the packaging block and the flow fields are one page saving through one ac
   const video = await videoTitled(title);
   await page.goto(`/videos/${video.id}`);
 
-  // The gate is first on the page and the flow fields follow it: BRIEF.md's
-  // principle 1 is an order of operations, and the page is that order.
-  const blockBox = await page.getByTestId('packaging-block').boundingBox();
-  const flowBox = await page.getByTestId('flow-fields').boundingBox();
-  expect(blockBox).not.toBeNull();
-  expect(flowBox).not.toBeNull();
-  expect(blockBox!.y).toBeLessThan(flowBox!.y);
+  // The gate is first: BRIEF.md's principle 1 is an order of operations, and
+  // the page is that order. M3 made the page sections, so "first" is now the
+  // first tab and the section a bare URL opens at — the flow fields are the
+  // fourth tab along, and are not on screen until they are asked for.
+  await expect(page.getByTestId('section-panel-packaging')).toBeVisible();
+  await expect(page.getByTestId('packaging-block')).toBeVisible();
+  await expect(page.getByTestId('flow-fields')).toBeHidden();
+  const tabs = page.locator('[data-testid^="section-tab-"]');
+  await expect(tabs.first()).toHaveAttribute('data-testid', 'section-tab-packaging');
+  await expect(tabs.first()).toHaveAttribute('aria-current', 'page');
 
   // There is exactly one working-title input on the page. M1's stub bound a
   // second one to the same column; two inputs over one column is a race.
@@ -460,6 +471,7 @@ test('the packaging block and the flow fields are one page saving through one ac
   await page.getByTestId('working-title').blur();
   await saved(page);
 
+  await page.getByTestId('section-tab-schedule').click();
   await page.getByTestId('waiting-on').fill('the thumbnail photographer');
   await page.getByTestId('waiting-on').blur();
   await expect(page.getByTestId('waiting-on-status')).toHaveText('Saved');

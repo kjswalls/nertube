@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 
-import { AppHeader } from "@/components/app-header";
+import { AppShell } from "@/components/app-shell";
 import { Board } from "@/components/board/board";
+import { checklistRatios } from "@/components/checklist/ratios";
 import {
   PUBLISHED_CARD_TTL_DAYS,
   type BoardCard,
@@ -163,10 +164,31 @@ export default async function BoardPage({
             video.updated_at,
           )
         : null,
+      // Filled in below, once the whole set of cards is known: the ratio read
+      // is grouped by stage, so it cannot be done a card at a time.
+      checklist: null,
       packagingSkipped: video.packaging_skipped_at !== null,
       waitingOn: video.waiting_on,
       recencyMs: Date.parse(video.updated_at ?? video.created_at),
     });
+  }
+
+  /*
+    The `done/total` on each card, for the stage each card is actually in.
+
+    After the loop rather than inside it: the read is grouped by stage so that
+    one query covers a whole column, and a card that the 30-day rule dropped
+    above should not be counted at all. A video the read could not stand behind
+    is left null and the card renders no ratio — see
+    `components/checklist/ratios.ts`.
+  */
+  const ratios = await checklistRatios(
+    supabase,
+    cards.map((card) => ({ videoId: card.id, stageId: card.stageId })),
+  );
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    cards[index] = { ...card, checklist: ratios.get(card.id) ?? null };
   }
 
   // The Filming batch badge counts across ALL channels: one creator, one
@@ -193,25 +215,23 @@ export default async function BoardPage({
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <AppHeader currentSlug={slug} />
-
-      <main className="flex flex-1 flex-col gap-4 px-4 py-6">
+    <AppShell currentSlug={slug} section="board">
+      <div className="flex flex-1 flex-col gap-4">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-lg font-semibold tracking-tight">
+          <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
             {channel.name}
           </h1>
-          {/* The keys themselves are listed once, in the header, from the
+          {/* The keys themselves are listed once, in the sidebar, from the
               live shortcut registry — repeating them here is how the two get
               to disagree. */}
-          <p className="text-xs text-muted">
+          <p className="text-[12px] text-muted">
             Drag a card between columns, or use the move buttons on a card. The
-            keys in the header do the same thing.
+            keys in the sidebar do the same thing.
           </p>
         </div>
 
         {stages.length === 0 ? (
-          <p className="text-sm text-muted">
+          <p className="text-[13px] text-muted">
             This channel has no enabled stages. Turn one back on in settings.
           </p>
         ) : (
@@ -223,10 +243,11 @@ export default async function BoardPage({
             wipThreshold={channel.wip_threshold}
             staleDays={channel.stale_days}
             filmingInOtherChannels={filmingInOtherChannels}
+            now={now}
           />
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 

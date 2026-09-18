@@ -9,7 +9,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  * ## Why this is a registry and not a hook that adds a listener
  *
  * M1 landed from three directions at once, and two of them ended up calling
- * this file: the header (`c`, `1..9`) and the board (`j`/`k`, `[`/`]`,
+ * this file: the sidebar (`c`, `1..9`) and the board (`j`/`k`, `[`/`]`,
  * `Enter`). A hook that attached its own `keydown` listener per call site gave
  * one listener per mounted component, no way to see the whole set, and no way
  * for a modal to take the keyboard away from the page underneath it — three
@@ -178,7 +178,7 @@ function publish(): void {
 
   const seen = new Set<string>();
   const hints: Shortcut[] = [];
-  // Oldest first, so the legend reads c · 1–9 · j/k · [ ] · Enter: the header
+  // Oldest first, so the legend reads c · 1–9 · j/k · [ ] · Enter: the sidebar
   // registers before the page underneath it does.
   for (const entry of [...activeRegistrations()].reverse()) {
     for (const shortcut of entry.shortcuts) {

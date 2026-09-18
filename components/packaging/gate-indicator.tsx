@@ -41,8 +41,8 @@ export function GateIndicator({
 }) {
   const tone = status.ready
     ? status.skipped
-      ? "border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-      : "border-emerald-600/60 bg-emerald-600/10 text-emerald-800 dark:text-emerald-300"
+      ? "border-attention/60 bg-attention/10 text-attention"
+      : "border-ready/60 bg-ready/10 text-ready"
     : "border-border bg-surface text-foreground";
 
   /*
@@ -60,7 +60,7 @@ export function GateIndicator({
     <div
       data-testid="gate-indicator"
       data-gate={status.ready ? (status.skipped ? "skipped" : "ready") : status.missing}
-      className={["rounded-md border px-3 py-2 text-sm", tone].join(" ")}
+      className={["rounded-input border px-3 py-2 text-sm", tone].join(" ")}
     >
       <span role="status">
         <span className="font-medium">{describeGate(status)}</span>

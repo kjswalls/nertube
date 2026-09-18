@@ -33,11 +33,22 @@ export default async function LoginPage({
     redirect(target);
   }
 
+  /*
+    The one page with no sidebar — there is nothing to navigate to yet — but
+    the same two themes, the same three faces and the same metrics as
+    everything behind it: the name in Newsreader because it is the product's
+    own name, the form in Instrument Sans, the 40px reading gutter, and the
+    theme decided before the first paint by the same script every other page
+    runs. Signing in should look like stepping into the workspace, not like
+    arriving at a different product.
+  */
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-16">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-gutter-reading py-16">
       <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">NerTube</h1>
-        <p className="text-sm text-muted">Sign in to your pipeline.</p>
+        <h1 className="font-display text-[26px] leading-tight font-semibold tracking-tight">
+          NerTube
+        </h1>
+        <p className="text-[13px] text-muted">Sign in to your pipeline.</p>
       </div>
 
       <LoginForm next={target} />

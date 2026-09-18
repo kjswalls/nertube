@@ -73,7 +73,7 @@ export function WorkingTitle({
           }
         }}
         // 16px so iOS does not zoom the page when the field is focused.
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
       />
 
       <p
@@ -82,7 +82,7 @@ export function WorkingTitle({
         data-over={over ? "true" : "false"}
         className={[
           "text-xs",
-          over ? "text-amber-700 dark:text-amber-400" : "text-muted",
+          over ? "text-attention" : "text-muted",
         ].join(" ")}
       >
         {length}/{TITLE_WARN_LENGTH} characters

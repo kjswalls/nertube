@@ -12,8 +12,8 @@ import { CaptureModal } from "./capture-modal";
  * What makes `c` work anywhere: the global binding, the modal it opens, and the
  * toast that says where the idea went.
  *
- * It is mounted by the app header, so every signed-in page has it without each
- * page remembering to — and the header is already the component that knows the
+ * It is mounted by the app sidebar, so every signed-in page has it without each
+ * page remembering to — and the sidebar is already the component that knows the
  * channel list and which channel the route is about, which is exactly what
  * capture needs (PLAN.md: "Channel = route channel if any, else last-used").
  *
@@ -77,7 +77,7 @@ export function CaptureHost({
   }
 
   // A channel-less account cannot capture anything: there is no Idea stage to
-  // capture into. `/c/new` is the only thing to do, and the header links it.
+  // capture into. `/c/new` is the only thing to do, and the sidebar links it.
   if (channels.length === 0) return null;
 
   return (
@@ -90,9 +90,10 @@ export function CaptureHost({
         type="button"
         aria-keyshortcuts="c"
         onClick={openCapture}
-        className="rounded-full border border-border px-3 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+        className="flex w-full items-center justify-between gap-2 rounded-button border border-border bg-surface px-2 py-1.5 text-[13px] text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
       >
-        Capture <kbd className="font-sans text-xs text-muted">c</kbd>
+        Capture
+        <kbd className="font-mono text-[10px] text-muted">c</kbd>
       </button>
 
       {open ? (

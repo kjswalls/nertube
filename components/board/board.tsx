@@ -6,7 +6,9 @@ import type { DragEvent } from "react";
 
 import { moveVideo, type GateField } from "@/app/actions/moves";
 import { useToast, type ToastLink } from "@/components/toast";
+import { WeeklyStrip, type StripColumn } from "@/components/board/weekly-strip";
 import { compareKinds, isWipKind } from "@/lib/defaults";
+import { stageStats } from "@/lib/stage-stats";
 import { GATE_ANCHOR, SKIP_ANCHOR } from "@/lib/packaging";
 import { useShortcuts } from "@/lib/shortcuts";
 
@@ -66,6 +68,7 @@ export function Board({
   wipThreshold,
   staleDays,
   filmingInOtherChannels,
+  now,
 }: {
   channelName: string;
   channelSlug: string;
@@ -74,6 +77,16 @@ export function Board({
   cards: readonly BoardCard[];
   wipThreshold: number;
   staleDays: number;
+  /**
+   * The request's clock, read once on the server.
+   *
+   * The weekly strip's ages are recomputed here rather than taken from each
+   * card's `daysInStage`, because the median of nine floored day counts is not
+   * the floored median of nine ages — and because the strip has to follow a
+   * drag, which changes `stageEnteredAt` on a card without a new server render.
+   * Passing the number down is what keeps the two sides of hydration agreeing.
+   */
+  now: number;
   /**
    * Filming-stage cards in this user's *other* channels. Added to this
    * channel's live Filming count so the batch-day badge stays correct while
@@ -223,9 +236,31 @@ export function Board({
         overflow = total - IDEA_COLUMN_LIMIT;
       }
 
-      return { stage, total, visible, overflow };
+      return { stage, total, all, visible, overflow };
     });
   }, [merged, stages]);
+
+  /**
+   * The weekly strip's three numbers per column.
+   *
+   * Derived from `columns` — which is derived from `merged` — so a drag moves a
+   * card and the strip follows it in the same render. `total` is the honest
+   * count, including the Idea cards the column itself does not draw.
+   */
+  const stripColumns = useMemo<StripColumn[]>(
+    () =>
+      columns.map(({ stage, total, all }) => ({
+        stageId: stage.id,
+        name: stage.name,
+        stats: stageStats(
+          all.map((card) => card.stageEnteredAt),
+          now,
+        ),
+        overWip:
+          stage.kind !== null && isWipKind(stage.kind) && total > wipThreshold,
+      })),
+    [columns, now, wipThreshold],
+  );
 
   /** Selection order: column by column, top to bottom, rendered cards only. */
   const selectable = useMemo(
@@ -638,11 +673,13 @@ export function Board({
 
   return (
     <>
+      <WeeklyStrip columns={stripColumns} staleDays={staleDays} />
+
       <div
         ref={boardRef}
         data-testid="board"
         data-ready="false"
-        className="flex flex-1 items-stretch gap-3 overflow-x-auto pb-4"
+        className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-4"
       >
         {columns.map(({ stage, total, visible, overflow }) => {
           const wipWarning =
@@ -701,7 +738,7 @@ export function Board({
                 overflow > 0 ? (
                   <p
                     data-testid="idea-overflow"
-                    className="px-1 py-2 text-xs text-muted"
+                    className="px-1 py-2 text-[11px] text-muted"
                     title="The idea bank lives on /c/[slug]/ideas, which is M5. Until then the count is the whole of it."
                   >
                     +{overflow} more in Ideas

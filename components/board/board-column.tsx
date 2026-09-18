@@ -71,29 +71,32 @@ export function BoardColumn({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={[
-        "flex w-72 shrink-0 flex-col self-stretch rounded-lg border bg-surface transition",
-        wipWarning
-          ? "border-red-500/60 dark:border-red-500/50"
-          : "border-border",
-        isDropTarget ? "ring-2 ring-foreground/50" : "",
+        // 216px and 1px, from the metrics in `globals.css`. A column that is
+        // not in trouble gets no colour at all: an empty Idea column and a
+        // quiet Filming column look like the furniture they are, which is what
+        // makes the one column that *is* over its limit findable at a glance.
+        "flex w-column shrink-0 flex-col self-stretch rounded-card border bg-surface transition",
+        wipWarning ? "border-over-limit/60" : "border-border",
+        isDropTarget ? "ring-2 ring-accent" : "",
       ].join(" ")}
     >
       <header
         className={[
           "flex flex-col gap-1 border-b px-3 py-2",
-          wipWarning ? "border-red-500/40" : "border-border",
+          wipWarning ? "border-over-limit/40" : "border-border",
         ].join(" ")}
       >
         <div className="flex items-baseline justify-between gap-2">
-          <h2 className="truncate text-sm font-medium" title={name}>
+          <h2 className="truncate text-[13px] font-medium" title={name}>
             {name}
           </h2>
           <span
             data-testid="column-count"
             className={[
-              "shrink-0 rounded-full px-2 py-0.5 text-xs tabular-nums",
+              // The count is something the tool measured, so it is mono.
+              "shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px]",
               wipWarning
-                ? "bg-red-100 font-semibold text-red-800 dark:bg-red-950 dark:text-red-200"
+                ? "bg-over-limit/15 font-semibold text-over-limit"
                 : "bg-background text-muted",
             ].join(" ")}
           >
@@ -107,7 +110,7 @@ export function BoardColumn({
         {wipWarning ? (
           <p
             data-testid="wip-warning"
-            className="text-[11px] leading-4 font-medium text-red-700 dark:text-red-300"
+            className="text-[11px] leading-4 font-medium text-over-limit"
           >
             Over WIP: {count} in progress, threshold {wipThreshold}. Finish
             something before starting more.
@@ -117,7 +120,7 @@ export function BoardColumn({
         {filmingBadge ? (
           <p
             data-testid="filming-badge"
-            className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] leading-4 font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+            className="rounded-button bg-attention/15 px-1.5 py-0.5 text-[11px] leading-4 font-medium text-attention"
           >
             {filmingBadge}
           </p>
@@ -133,7 +136,7 @@ export function BoardColumn({
         className="flex min-h-40 flex-1 flex-col gap-2 overflow-y-auto p-2"
       >
         {count === 0 ? (
-          <p className="px-1 py-2 text-xs text-muted">Nothing here yet.</p>
+          <p className="px-1 py-2 text-[11px] text-muted">Nothing here yet.</p>
         ) : (
           <ul className="flex flex-col gap-2">{children}</ul>
         )}

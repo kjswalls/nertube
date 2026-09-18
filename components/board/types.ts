@@ -1,3 +1,4 @@
+import type { ChecklistProgress } from "@/lib/checklist";
 import type { StageKind } from "@/lib/defaults";
 
 /**
@@ -54,6 +55,16 @@ export interface BoardCard {
    * kanban card — see `VideoCard`.
    */
   readonly thumbnailConceptUrl: string | null;
+  /**
+   * `done/total` for the **current** stage's checklist, or null when the board
+   * could not stand behind a number (see `components/checklist/ratios.ts`).
+   *
+   * A total of zero is a real answer and not a missing one: it is a stage with
+   * no checklist on this video, and the card renders nothing for it — M1
+   * removed a "0/0" from this very slot because it reads as "nothing to do"
+   * rather than "no list".
+   */
+  readonly checklist: ChecklistProgress | null;
   /** `packaging_skipped_at is not null` — the permanent amber badge. */
   readonly packagingSkipped: boolean;
   /** `videos.waiting_on`, shown as a chip. */

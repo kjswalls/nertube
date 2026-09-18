@@ -138,7 +138,7 @@ export function CaptureModal({
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="w-full max-w-lg rounded-xl border border-border bg-surface p-4 shadow-xl sm:p-5"
+        className="w-full max-w-lg rounded-card border border-border bg-surface p-4 shadow-xl sm:p-5"
       >
         <div className="mb-3 flex items-baseline justify-between gap-3">
           <h2 id={headingId} className="text-base font-semibold tracking-tight">
@@ -147,7 +147,7 @@ export function CaptureModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+            className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
           >
             Escape to close
           </button>

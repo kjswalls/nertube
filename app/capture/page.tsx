@@ -49,10 +49,12 @@ export default async function CapturePage({
   return (
     <main className="mx-auto flex w-full max-w-lg flex-col gap-5 px-4 py-6">
       <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">Capture an idea</h1>
+        <h1 className="font-display text-[20px] leading-tight font-semibold tracking-tight">
+          Capture an idea
+        </h1>
         <Link
           href={`/c/${(routeChannel ?? channels[0]).slug}/board`}
-          className="rounded-md px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
         >
           Board
         </Link>

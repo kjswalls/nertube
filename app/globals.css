@@ -1,37 +1,203 @@
 @import "tailwindcss";
 
-/* Base palette. Light by default, dark when the OS asks for it. */
+/* ==========================================================================
+   Moss & Sand — the one palette, in two themes.
+
+   Every colour in the application comes from this block. Nothing below it and
+   nothing in a component reaches for a Tailwind palette class (`red-500`,
+   `amber-100`) any more: those are two unrelated hues in two themes, and they
+   know nothing about the rule in `docs/BRIEF.md` that colour has to mean
+   something.
+
+   ## The three-block pattern, and why it is three
+
+   1. `:root` holds the **light** values. That is the fallback: a browser with
+      no `prefers-color-scheme`, a print stylesheet, and the first paint of a
+      page whose stored preference is "light".
+   2. `@media (prefers-color-scheme: dark)` re-declares them, guarded by
+      `:root:not([data-theme="light"])`. The guard is what lets a manual
+      override *win* over the system: with a bare media query, a user on a dark
+      OS who asks for light would get light from the attribute rule and dark
+      from the media query — and the media query, being later and no less
+      specific, would take it straight back.
+   3. `:root[data-theme="dark"]` re-declares them once more, for the user on a
+      light OS who asks for dark. Last, so it beats (1); more specific than the
+      bare `:root` inside the media query, so it also beats a light system.
+
+   `data-theme` is written before the first paint by the inline script in
+   `app/layout.tsx`, and is **absent** for "follow the system" — which is what
+   leaves the media query in charge when nothing has been chosen.
+
+   ## What each colour means
+
+   - `accent` is the one interactive hue: the current channel, a focus ring, a
+     link meant to be pressed. It is not decoration.
+   - `ready` says a gate is open. `attention` says something wants a look —
+     stale, skipped, waiting. `over-limit` says a rule is being broken right
+     now, and it is the only red in the product.
+   - Everything else — sidebar, ground, surface, hairline, text, muted — is
+     structure, and structure is grey-green. A column with nothing wrong with
+     it gets no colour at all.
+   ========================================================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --surface: #f9fafb;
+  color-scheme: light;
+
+  /* Structure */
+  --sidebar: #eff2ee;
+  --ground: #f8f9f6;
+  --surface: #ffffff;
+  --hairline: #e0e5df;
+  --text: #151a17;
+  --muted: #5d6a63;
+
+  /* Meaning */
+  --accent: #8a6520;
+  --ready: #35624a;
+  --attention: #7c5a15;
+  --over-limit: #a33e2b;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --muted: #9ca3af;
-    --border: #262626;
-    --surface: #141414;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --sidebar: #0c100e;
+    --ground: #0f1311;
+    --surface: #161c19;
+    --hairline: #222a26;
+    --text: #e9ede9;
+    --muted: #8d9a92;
+
+    --accent: #d3a25e;
+    --ready: #7fa88a;
+    --attention: #e0b878;
+    --over-limit: #ce6b57;
   }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-border: var(--border);
-  --color-surface: var(--surface);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --sidebar: #0c100e;
+  --ground: #0f1311;
+  --surface: #161c19;
+  --hairline: #222a26;
+  --text: #e9ede9;
+  --muted: #8d9a92;
+
+  --accent: #d3a25e;
+  --ready: #7fa88a;
+  --attention: #e0b878;
+  --over-limit: #ce6b57;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
+/* ==========================================================================
+   The Tailwind theme.
+
+   Two blocks, and the difference matters.
+
+   `@theme inline` is for anything whose value is a *reference* — the colours
+   above, which flip with `data-theme`, and the three font faces, which
+   `next/font` sets on <html>. `inline` makes the generated utility carry
+   `var(--ground)` rather than a copy of today's hex, which is the entire
+   mechanism by which one attribute flip repaints the application.
+
+   The plain `@theme` block is for the metrics, which are the same in both
+   themes. Tailwind emits those as custom properties itself, so they are
+   readable as `var(--radius-card)` from anywhere as well as being utilities —
+   and writing them in a `:root` block *and* in `@theme` would be a cycle.
+   ========================================================================== */
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-background: var(--ground);
+  --color-surface: var(--surface);
+  --color-border: var(--hairline);
+  --color-foreground: var(--text);
+  --color-muted: var(--muted);
+
+  --color-accent: var(--accent);
+  --color-ready: var(--ready);
+  --color-attention: var(--attention);
+  --color-over-limit: var(--over-limit);
+
+  /* Type roles.
+
+     - `display` (Newsreader) is what the *user* wrote: page titles, video
+       titles, hooks. A reading face, only ever on their words.
+     - `sans` (Instrument Sans) is the tool talking: labels, buttons, help
+       text, 11–14px.
+     - `mono` (JetBrains Mono) is what the tool *measured*: counts, ages,
+       shortcut keys.
+
+     `--font-face-*` are the three variables `next/font` puts on <html>, which
+     is `:root`, so they resolve here. The fallbacks after them are what a
+     browser paints with while the woff2 is in flight (`display: swap`) and
+     what it keeps if the font never arrives. */
+  --font-display: var(--font-face-display), ui-serif, Georgia, "Times New Roman",
+    serif;
+  --font-sans: var(--font-face-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-face-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+}
+
+@theme {
+  /* Radii: card / input / button, and nothing in between. */
+  --radius-card: 8px;
+  --radius-input: 7px;
+  --radius-button: 6px;
+
+  /* Chrome and page gutters. 32px where work happens (board, video), 40px
+     where prose is read. The rail is a range: it is `--spacing-rail-min` wide
+     and may grow to `--spacing-rail-max`. */
+  --spacing-sidebar: 224px;
+  --spacing-gutter: 32px;
+  --spacing-gutter-reading: 40px;
+  --spacing-rail-min: 276px;
+  --spacing-rail-max: 452px;
+
+  /* The board. A 216px column with a 16px gap is what makes nine columns fit
+     the screen this product is used on; 12/13 card padding is what keeps a
+     card three lines tall. */
+  --spacing-column: 216px;
+  --spacing-card-y: 12px;
+  --spacing-card-x: 13px;
+}
+
+@layer base {
+  body {
+    background: var(--ground);
+    color: var(--text);
+  }
+
+  /* A count that ticks from 9 to 10 must not shift the header under it. The
+     mono face is only ever used on measured numbers, so this belongs to the
+     face rather than to every call site remembering `tabular-nums`. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The theme toggle's label, selected in CSS rather than in React.
+
+     `ThemeToggle` renders all three words; this reveals the one that matches
+     what the boot script wrote on <html>, which it did before the first paint.
+     Doing it here instead of with state is what makes the control correct in
+     the server's own HTML — see the comment on the component.
+
+     `display: none` also removes the other two from the accessibility tree, so
+     the button is named "Theme Dark" and not "Theme System Light Dark". The
+     first selector is the no-JavaScript case: nothing has been applied, and
+     "system" is the truth then. */
+  [data-theme-value] {
+    display: none;
+  }
+
+  :root:not([data-theme-choice]) [data-theme-value="system"],
+  :root[data-theme-choice="system"] [data-theme-value="system"],
+  :root[data-theme-choice="light"] [data-theme-value="light"],
+  :root[data-theme-choice="dark"] [data-theme-value="dark"] {
+    display: inline;
+  }
 }

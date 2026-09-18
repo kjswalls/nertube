@@ -162,9 +162,9 @@ export function SkipPackaging({
     return (
       <section
         data-testid="packaging-skipped"
-        className="flex scroll-mt-4 flex-col gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-sm"
+        className="flex scroll-mt-4 flex-col gap-2 rounded-input border border-attention/60 bg-attention/10 px-3 py-2 text-sm"
       >
-        <p className="font-medium text-amber-800 dark:text-amber-300">
+        <p className="font-medium text-attention">
           Packaging skipped
         </p>
         <p data-testid="skip-reason" className="text-sm">
@@ -189,7 +189,7 @@ export function SkipPackaging({
             ref={unskipRef}
             data-testid="packaging-unskip"
             onClick={onUnskip}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+            className="rounded-button border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
           >
             Un-skip — put the gate back
           </button>
@@ -230,7 +230,7 @@ export function SkipPackaging({
           // Padding, not just a line of text: at 12px this was a 240×16 target,
           // under WCAG 2.5.8's 24×24 floor, and it is the only thing in its
           // paragraph so the inline exception does not apply.
-          className="inline-block min-h-6 py-1 text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="inline-block min-h-6 py-1 text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
         >
           Skip the packaging gate for this video…
         </button>
@@ -240,7 +240,7 @@ export function SkipPackaging({
         <section
           id={formId}
           data-testid="packaging-skip-form"
-          className="flex flex-col gap-2 rounded-md border border-border bg-surface px-3 py-2"
+          className="flex flex-col gap-2 rounded-input border border-border bg-surface px-3 py-2"
         >
           <p className="text-xs text-muted">
             Skipping lets this video move past Packaging with the three fields
@@ -264,14 +264,14 @@ export function SkipPackaging({
               setReason(event.target.value);
               if (notice) setNotice(null);
             }}
-            className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+            className="w-full resize-y rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
 
           <p
             id={noticeId}
             role="status"
             data-testid="skip-notice"
-            className="min-h-4 text-xs text-amber-700 dark:text-amber-400"
+            className="min-h-4 text-xs text-attention"
           >
             {notice ?? ""}
           </p>
@@ -295,7 +295,7 @@ export function SkipPackaging({
                 setNotice(null);
                 onSkip(typed);
               }}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+              className="rounded-input border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
             >
               Skip packaging
             </button>
@@ -310,7 +310,7 @@ export function SkipPackaging({
                 // The control that replaces this one, rather than `<body>`.
                 focusAnchor(openRef.current);
               }}
-              className="rounded-md px-3 py-1.5 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+              className="rounded-button px-3 py-1.5 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               Cancel
             </button>

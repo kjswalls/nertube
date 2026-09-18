@@ -10,10 +10,9 @@ import type { BoardCard } from "./types";
  *
  * PLAN.md's card face is: *title, channel chip, target date, concept sketch
  * thumb, `done/total` for the current stage, days in stage (amber when >
- * `stale_days`), "TTH skipped" badge, `waiting_on` chip*. All of it is here
- * except the checklist ratio, which arrives with the checklists in M3 and
- * renders nothing at all until then — a "0/0" on every card would read as
- * "nothing to do".
+ * `stale_days`), "TTH skipped" badge, `waiting_on` chip*. All of it is here.
+ * The ratio is the one part that can render *nothing*: a stage with no
+ * checklist has no ratio to show, and "0/0" would read as "nothing to do".
  *
  * ## Why this is an `<article>` in an `<li>` with real buttons
  *
@@ -99,10 +98,13 @@ export function VideoCard({
       aria-busy={pending || undefined}
       aria-label={`${title} — ${channelName}`}
       className={[
-        "group flex flex-col gap-2 rounded-md border bg-background p-2 text-left outline-none transition",
+        // 12px/13px padding and the 8px card radius, from the metrics block.
+        // Selection is the accent — it is an interaction, not a warning — and
+        // a card with nothing wrong with it carries no colour whatsoever.
+        "group flex flex-col gap-2 rounded-card border bg-background py-card-y px-card-x text-left outline-none transition",
         selected
-          ? "border-foreground ring-2 ring-foreground"
-          : "border-border hover:border-foreground/40",
+          ? "border-accent ring-1 ring-accent"
+          : "border-border hover:border-accent/40",
         dragging ? "opacity-40" : "",
         pending ? "animate-pulse" : "",
       ].join(" ")}
@@ -134,11 +136,11 @@ export function VideoCard({
               : "No concept sketch"
           }
           className={[
-            "mt-0.5 h-8 w-14 shrink-0 overflow-hidden rounded border",
+            "mt-0.5 h-8 w-14 shrink-0 overflow-hidden rounded-button border",
             showSketch
               ? "border-border"
               : card.thumbnailConceptPath
-                ? "border-dashed border-foreground/40 bg-surface"
+                ? "border-dashed border-muted/60 bg-surface"
                 : "border-dashed border-border bg-surface/50",
           ].join(" ")}
         >
@@ -167,11 +169,12 @@ export function VideoCard({
           ) : null}
         </div>
 
-        <h3 className="min-w-0 flex-1 text-sm leading-snug font-medium">
+        {/* The title is the user's own words, so it is the reading face. */}
+        <h3 className="min-w-0 flex-1 font-display text-[14px] leading-snug font-medium">
           <Link
             href={`/videos/${card.id}`}
             draggable={false}
-            className="line-clamp-3 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-foreground/40"
+            className="line-clamp-3 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
           >
             {title}
           </Link>
@@ -199,9 +202,9 @@ export function VideoCard({
           data-testid="days-in-stage"
           data-stale={stale ? "true" : "false"}
           className={[
-            "rounded-full px-1.5 py-0.5 tabular-nums",
+            "rounded-full px-1.5 py-0.5 font-mono",
             stale
-              ? "bg-amber-100 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+              ? "bg-attention/15 font-medium text-attention"
               : "text-muted",
           ].join(" ")}
           title={
@@ -214,7 +217,7 @@ export function VideoCard({
         </span>
 
         {card.packagingSkipped ? (
-          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <span className="rounded-full bg-attention/15 px-1.5 py-0.5 font-medium text-attention">
             TTH skipped
           </span>
         ) : null}
@@ -227,12 +230,31 @@ export function VideoCard({
         ) : null}
 
         {/*
-          The checklist ratio (`done/total` for the current stage) belongs here
-          and arrives with the checklists in M3. Nothing is rendered for it
-          until then: `checklist_items` are snapshot-copied on stage entry, so
-          a card would show "0/0" today, which reads as "nothing to do" rather
-          than as "not built yet".
+          The checklist ratio for the stage this card is in.
+
+          Rendered only when there is a list to count. A stage with no items —
+          Idea and Scheduled are seeded with none — gets nothing at all, and so
+          does a video whose ratio the board could not stand behind: "0/0" reads
+          as *nothing to do*, which is the opposite of what an empty list means,
+          and M1 deliberately removed that string from this slot.
+
+          It is a measurement, so it is in the mono face with the age beside it,
+          and it takes no colour: a checklist that is not finished is not a
+          problem, it is a checklist.
         */}
+        {card.checklist && card.checklist.total > 0 ? (
+          <span
+            data-slot="checklist"
+            data-testid="card-checklist"
+            data-done={card.checklist.done}
+            data-total={card.checklist.total}
+            className="rounded-full px-1.5 py-0.5 font-mono text-muted"
+            title={`${card.checklist.done} of ${card.checklist.total} checklist items done in this stage`}
+          >
+            <span className="sr-only">Checklist: </span>
+            {card.checklist.done}/{card.checklist.total}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-1">
@@ -244,7 +266,7 @@ export function VideoCard({
             event.stopPropagation();
             onMoveBack();
           }}
-          className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-foreground/40 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
         >
           <span aria-hidden="true">←</span>
           <span className="sr-only">
@@ -262,7 +284,7 @@ export function VideoCard({
             event.stopPropagation();
             onMoveForward();
           }}
-          className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-foreground/40 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
         >
           <span aria-hidden="true">→</span>
           <span className="sr-only">

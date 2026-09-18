@@ -14,7 +14,7 @@ import { captureVideoAction, type CaptureState } from "@/app/actions/videos";
 
 import { readLastChannel, writeLastChannel } from "./last-channel";
 
-/** The channels a capture may be aimed at, in the header's order. */
+/** The channels a capture may be aimed at, in the sidebar's order. */
 export interface CaptureChannel {
   id: string;
   name: string;
@@ -119,7 +119,7 @@ export function CaptureForm({
    *
    * The `autoFocus` attribute alone is not enough inside the modal: React
    * restores the focus that was there *before* a commit as part of that commit,
-   * so opening the dialog from a focused control (the header's Capture button,
+   * so opening the dialog from a focused control (the sidebar's Capture button,
    * say) ends with focus back on that control and the dialog's first tab stop
    * picking it up. An effect runs after that restoration, so this wins. The
    * attribute stays for the server-rendered `/capture`, where the browser
@@ -207,7 +207,7 @@ export function CaptureForm({
    * undo. On the most-used path in the product that trade is not close, so
    * retargeting is: Alt+digit (read off `event.code`, because Alt+1 is `¡` on a
    * Mac keyboard), the numbered channel chips, which are clickable and are tab
-   * stops, and the header's own `1`..`9` outside any field.
+   * stops, and the sidebar's own `1`..`9` outside any field.
    */
   function onTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter" && event.shiftKey) {
@@ -242,7 +242,7 @@ export function CaptureForm({
   const current = channels.find((channel) => channel.id === channelId);
 
   const field =
-    "w-full rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40";
+    "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
   return (
     <form
@@ -335,7 +335,7 @@ export function CaptureForm({
                 key={channel.id}
                 className={[
                   "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-sm",
-                  "focus-within:ring-2 focus-within:ring-foreground/40",
+                  "focus-within:ring-2 focus-within:ring-accent",
                   checked
                     ? "border-foreground bg-foreground font-medium text-background"
                     : "border-border text-muted hover:text-foreground",
@@ -353,7 +353,7 @@ export function CaptureForm({
                   <span
                     aria-hidden="true"
                     className={[
-                      "rounded px-1 text-xs tabular-nums",
+                      "rounded-button px-1 text-xs tabular-nums",
                       checked ? "bg-background/20" : "bg-surface",
                     ].join(" ")}
                   >
@@ -377,7 +377,7 @@ export function CaptureForm({
           }}
           aria-expanded={more}
           aria-controls={moreId}
-          className="self-start rounded-md px-1 py-1 text-sm text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="self-start rounded-button px-1 py-1 text-sm text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
         >
           {more ? "Less" : "More"}
         </button>
@@ -427,7 +427,7 @@ export function CaptureForm({
       <p
         role="alert"
         aria-live="assertive"
-        className="min-h-5 text-sm text-red-600 dark:text-red-400"
+        className="min-h-5 text-sm text-over-limit"
       >
         {error}
       </p>
@@ -436,7 +436,7 @@ export function CaptureForm({
         <button
           type="submit"
           disabled={submitting}
-          className="min-h-11 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-60"
+          className="min-h-11 rounded-button bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
         >
           {submitting ? "Saving…" : "Capture"}
         </button>

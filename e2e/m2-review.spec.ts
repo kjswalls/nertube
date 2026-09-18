@@ -427,7 +427,10 @@ test('the page keeps saving after its own move and its own upload', async ({
   // every save afterwards into a conflict that never happened.
   const videoId = await capture('Same page writes');
   await signIn(page);
-  await page.goto(`/videos/${videoId}`);
+  // The notes, the stage select and the working title are now in two different
+  // sections, so this walk crosses between them — which also makes it the
+  // proof that the version token survives a section switch.
+  await page.goto(`/videos/${videoId}?section=schedule`);
 
   await page.getByTestId('notes').fill('Before the move');
   await page.getByTestId('notes').blur();
@@ -444,6 +447,7 @@ test('the page keeps saving after its own move and its own upload', async ({
   await page.getByTestId('notes').blur();
   await expect(page.getByTestId('notes-status')).toHaveText('Saved');
 
+  await page.getByTestId('section-tab-packaging').click();
   await page.getByTestId('working-title').fill('Still writable');
   await page.getByTestId('working-title').press('Enter');
   await expectSaved(page);
@@ -461,7 +465,7 @@ test('the page keeps saving after its own move and its own upload', async ({
 test('picking a target date saves it without waiting for a blur', async ({ page }) => {
   const videoId = await capture('Date on change');
   await signIn(page);
-  await page.goto(`/videos/${videoId}`);
+  await page.goto(`/videos/${videoId}?section=schedule`);
 
   const field = page.getByTestId('target-date');
   await field.focus();
@@ -499,6 +503,7 @@ test('moving to Published from the stage select stops the URL block calling it n
   await expectSaved(page);
   await expect(gate(page)).toHaveAttribute('data-gate', 'ready');
 
+  await page.getByTestId('section-tab-schedule').click();
   await page.getByTestId('youtube-url').fill('https://www.youtube.com/watch?v=abc');
   await page.getByTestId('youtube-url').blur();
   await expect(page.getByTestId('youtube-url-status')).toHaveText('Saved');

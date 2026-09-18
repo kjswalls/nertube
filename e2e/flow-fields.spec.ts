@@ -278,9 +278,17 @@ async function signIn(page: Page): Promise<void> {
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 }
 
-/** Open a video's detail page and wait for the flow block to be there. */
+/**
+ * Open a video's detail page at the flow block and wait for it to be there.
+ *
+ * M3 put the page into sections, and the flow fields are the Schedule one, so
+ * the URL names it. That is the section routing's own promise being used
+ * exactly as a user would paste it — not a workaround for it: `?section=` is
+ * parsed on the server, so this navigation lands with the block already
+ * rendered rather than switching to it after hydration.
+ */
 async function openVideo(page: Page, title: string): Promise<void> {
-  await page.goto(`/videos/${videos.get(title)}`);
+  await page.goto(`/videos/${videos.get(title)}?section=schedule`);
   await expect(page.getByTestId('flow-fields')).toBeVisible();
 }
 

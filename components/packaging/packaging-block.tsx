@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 import { updateVideo } from "@/app/actions/videos";
 import { SaveStatus, useSaveQueue } from "@/components/autosave";
+import { usePublishPackagingDraft } from "@/components/preview/live-packaging";
 import { useVideoVersion } from "@/components/video-version";
 import {
   GATE_ANCHOR,
@@ -307,15 +308,46 @@ function unchooseStaleCandidates(draft: Draft): Draft {
   return changed ? { ...draft, candidates } : draft;
 }
 
+/**
+ * The right-hand end of a field's row, where the thing that will one day write
+ * into that field sits. Renders nothing at all when the slot is empty, so a
+ * page that passes no assists gets no stray flex container.
+ */
+function AssistRow({ children }: { children?: ReactNode }) {
+  if (!children) return null;
+  return <div className="-mt-2 flex justify-end">{children}</div>;
+}
+
 export function PackagingBlock({
   videoId,
   initial,
   sketch,
+  titleWarning,
+  assist,
 }: {
   videoId: string;
   initial: PackagingInitial;
   /** The concept sketch uploader, rendered beside the written concept. */
   sketch?: ReactNode;
+  /**
+   * The feed-truncation warning, rendered under the candidate list it is about.
+   *
+   * A slot rather than an import, for the same reason `sketch` is one: this
+   * block owns the three fields and the gate, and knows nothing about YouTube's
+   * layout. It reads the live draft out of
+   * `components/preview/live-packaging.tsx`, which this block publishes to.
+   */
+  titleWarning?: ReactNode;
+  /**
+   * The inert M8 assist controls, one per field that will get one. Slots, so
+   * that the block does not import a component whose only job is to be
+   * disabled, and so that M8 can replace them without touching this file.
+   */
+  assist?: {
+    readonly candidates?: ReactNode;
+    readonly concept?: ReactNode;
+    readonly hooks?: ReactNode;
+  };
 }) {
   /**
    * The row as last confirmed by the server. `useState` and not a ref: the
@@ -509,6 +541,24 @@ export function PackagingBlock({
 
   const unsaved = diffOf(draft, viewOf(saved)) !== null;
 
+  /*
+    Publish the draft to the rest of the page.
+
+    The preview, the truncation warning and the Packaging tab's ratio are all
+    about these fields and none of them is inside this block. They read what is
+    being typed, not what was last saved — a preview of the saved title while a
+    new one is on screen would be a preview of the wrong thing. The one-way
+    publish keeps this block the only owner of the draft; see
+    `components/preview/live-packaging.tsx`.
+  */
+  usePublishPackagingDraft({
+    title: draft.title,
+    thumbnailConcept: conceptForColumn(draft.thumbnailConcept),
+    candidates: draft.candidates,
+    chosenHooks: status.chosenHooks,
+    skipped: saved.packagingSkippedAt !== null,
+  });
+
   /* ------------------------------------------------------------ handlers -- */
 
   const addCandidate = (text: string) =>
@@ -582,7 +632,7 @@ export function PackagingBlock({
       id={PACKAGING_ANCHOR}
       data-testid="packaging-block"
       aria-labelledby="packaging-heading"
-      className="flex scroll-mt-4 flex-col gap-4 rounded-lg border border-border p-4"
+      className="flex scroll-mt-4 flex-col gap-4 rounded-card border border-border p-4"
     >
       <div className="flex flex-col gap-1">
         <h2 id="packaging-heading" className="text-sm font-semibold">
@@ -641,6 +691,11 @@ export function PackagingBlock({
         }
       />
 
+      <AssistRow>{assist?.candidates}</AssistRow>
+
+      {/* What the feed would cut, under the list it is about. */}
+      {titleWarning}
+
       {/*
         Concept and reference, as one thing.
 
@@ -652,7 +707,7 @@ export function PackagingBlock({
       */}
       <div
         data-testid="thumbnail-pair"
-        className="grid items-start gap-4 rounded-md border border-border/60 bg-surface/40 p-3 md:grid-cols-2"
+        className="grid items-start gap-4 rounded-card border border-border/60 bg-surface/40 p-3 md:grid-cols-2"
       >
         <ThumbnailConcept
           anchorId={GATE_ANCHOR.thumbnail_concept}
@@ -663,6 +718,8 @@ export function PackagingBlock({
         />
         {sketch}
       </div>
+
+      <AssistRow>{assist?.concept}</AssistRow>
 
       <HooksEditor
         anchorId={GATE_ANCHOR.hook}
@@ -683,6 +740,8 @@ export function PackagingBlock({
           commit({ ...draft, hooks: draft.hooks.filter((hook) => hook.id !== id) })
         }
       />
+
+      <AssistRow>{assist?.hooks}</AssistRow>
 
       <SaveStatus state={saveState} testId="packaging-save-status" onRetry={send} />
 

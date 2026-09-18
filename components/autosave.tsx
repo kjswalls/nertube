@@ -399,7 +399,7 @@ export function SaveStatus<Payload>({
       data-state={state.kind}
       className={[
         "flex min-h-4 flex-wrap items-center gap-2 text-xs",
-        failed ? "text-amber-700 dark:text-amber-400" : "text-muted",
+        failed ? "text-attention" : "text-muted",
       ].join(" ")}
     >
       <span role={failed ? "alert" : "status"}>
@@ -421,7 +421,7 @@ export function SaveStatus<Payload>({
           type="button"
           data-testid={`${testId}-reload`}
           onClick={() => window.location.reload()}
-          className="rounded border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
         >
           Reload
         </button>
@@ -430,7 +430,7 @@ export function SaveStatus<Payload>({
           type="button"
           data-testid={`${testId}-retry`}
           onClick={() => onRetry(state.payload)}
-          className="rounded border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
         >
           Retry
         </button>

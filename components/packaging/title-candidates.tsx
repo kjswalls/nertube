@@ -151,12 +151,12 @@ export function TitleCandidates({
             setDraft(event.target.value);
             if (notice) setNotice(null);
           }}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
         <button
           type="submit"
           data-testid="candidate-add"
-          className="rounded-md border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
         >
           Add
         </button>
@@ -166,7 +166,7 @@ export function TitleCandidates({
         id={noticeId}
         role="status"
         data-testid="candidate-notice"
-        className="min-h-4 text-xs text-amber-700 dark:text-amber-400"
+        className="min-h-4 text-xs text-attention"
       >
         {notice ?? ""}
       </p>
@@ -175,7 +175,7 @@ export function TitleCandidates({
         <p
           role="alert"
           data-testid="candidate-issue"
-          className="text-xs text-amber-700 dark:text-amber-400"
+          className="text-xs text-attention"
         >
           {issue.message}
         </p>
@@ -193,8 +193,8 @@ export function TitleCandidates({
               data-testid="candidate-row"
               data-chosen={candidate.chosen ? "true" : "false"}
               className={[
-                "flex flex-col gap-1 rounded-md border px-2 py-2",
-                candidate.chosen ? "border-emerald-600/60 bg-emerald-600/5" : "border-border",
+                "flex flex-col gap-1 rounded-input border px-2 py-2",
+                candidate.chosen ? "border-ready/60 bg-ready/[0.07]" : "border-border",
               ].join(" ")}
             >
               <div className="flex items-center gap-2">
@@ -215,7 +215,7 @@ export function TitleCandidates({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-1 text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-foreground/40"
+                  className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1 py-1 text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
                 />
 
                 <button
@@ -240,9 +240,9 @@ export function TitleCandidates({
                   }
                   onClick={() => onToggleChosen(candidate.id)}
                   className={[
-                    "shrink-0 rounded border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-foreground/40",
+                    "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent",
                     candidate.chosen
-                      ? "border-emerald-600/60 bg-emerald-600/10"
+                      ? "border-ready/60 bg-ready/10"
                       : "border-border hover:bg-surface",
                   ].join(" ")}
                 >
@@ -261,7 +261,7 @@ export function TitleCandidates({
                       : "";
                     onRemove(candidate.id);
                   }}
-                  className="shrink-0 rounded border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+                  className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   Remove
                 </button>
@@ -288,14 +288,14 @@ export function TitleCandidates({
                 // 16px, like every other field on the page: iOS Safari zooms
                 // the whole page when a field under 16px takes focus, and this
                 // is the one you reach for on a phone to say why this title.
-                className="w-full rounded border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-foreground/40"
+                className="w-full rounded-input border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
               />
 
               {issue && issue.id === candidate.id ? (
                 <p
                   role="alert"
                   data-testid="candidate-issue"
-                  className="text-xs text-amber-700 dark:text-amber-400"
+                  className="text-xs text-attention"
                 >
                   {issue.message} Nothing else on this block is held up by it —
                   fix this row or remove it and it saves.

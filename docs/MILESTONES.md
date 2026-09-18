@@ -1185,3 +1185,627 @@ invisibly); thumbnail roles and the swap log are M4; the idea bank and the
 matrix M5; the calendar M6; settings M7. The Filming badge PLAN.md lists under
 M2 shipped with the board in M1 and is still text-only until M6 gives it a
 filming day to create.
+
+---
+
+## M3 — The design shell: two themes, one sidebar, the metrics
+
+### A deviation from PLAN.md, stated first
+
+`docs/PLAN.md` assigns M3 to *checklists, `/now`, weekly strip*. **This
+milestone is not that.** It is the design shell the signed-off "Moss & Sand"
+canvas describes — the palette, the type, the sidebar and the page metrics —
+and it builds none of the checklist work.
+
+The reason is ordering, not preference. Every screen M3–M9 adds (the `/now`
+sections, the checklist panel, the idea matrix, the calendar) is a screen drawn
+inside this frame. Building nine of them against M0's Tailwind-default greys and
+then restyling all nine is the same work done twice, and the second pass is the
+one that quietly changes behaviour. So the frame comes first and PLAN.md's M3
+content moves behind it; the checklist snapshot `move_video` already writes, and
+the script template it already fills, are untouched and unconsumed, exactly as
+they were.
+
+**Nothing in PLAN.md's M3 line was built here.** `/now` still does not exist,
+the checklist UI does not exist, the weekly strip does not exist, and the card's
+`done/total` still renders nothing at all rather than a "0/0". The sidebar draws
+`Now` as a **disabled control naming the milestone it arrives in**, which is the
+same rule M1's review settled on for the gate-refusal links: an affordance may
+describe what is coming, and may not pretend to be it.
+
+### What M3 delivers
+
+- **One palette, in two themes** (`app/globals.css`). Every colour in the
+  application is now a custom property declared in three blocks — light on
+  `:root`, dark under `@media (prefers-color-scheme: dark)` *guarded by*
+  `:root:not([data-theme="light"])`, and dark again under
+  `:root[data-theme="dark"]`. The guard is what makes a manual override beat the
+  system in both directions; without it a light choice on a dark OS is undone by
+  the media query, which is later and no less specific. There is not a single
+  `red-500` or `amber-100` left in `app/` or `components/`.
+- **Colour that means something.** `accent` is the one interactive hue (the
+  current channel, every focus ring, a selected card). `ready` is a gate that is
+  open, `attention` is stale / skipped / waiting, `over-limit` is a rule being
+  broken right now and is the only red in the product. Structure is grey-green
+  and takes no hue at all, so an empty Idea column and a quiet Filming column
+  look like the furniture they are.
+- **Three faces, self-hosted** (`app/layout.tsx`, `next/font/google`). Newsreader
+  for what the *user* wrote (page titles, video titles, hooks), Instrument Sans
+  for the tool's own chrome at 11–14px, JetBrains Mono for what the tool
+  *measured* — counts, ages, shortcut keys, with `tabular-nums` attached to the
+  face so a count ticking 9 → 10 cannot shift the header above it. No
+  `<link>` to fonts.googleapis.com and no request to Google from a reader's
+  browser.
+- **The metrics, declared once** and consumed as utilities: a 224px sidebar,
+  32px gutters on the board and the video page, 40px on reading views, 216px
+  columns with a 16px gap, 12/13 card padding, 8/7/6 radii. `border-2` appears
+  nowhere; `shadow-*` appears on the toast and the capture dialog and nowhere
+  else.
+- **The sidebar** (`components/app-sidebar.tsx`), replacing
+  `components/app-header.tsx`, which is deleted. Sections, then channels from
+  the database, then the account. `c` and `1`..`9` are still bound here, because
+  this is still the one component every signed-in route renders and the one that
+  already knows the channel list; `ShortcutHints` still lists the *live*
+  registrations rather than a hard-coded set.
+- **The shell** (`components/app-shell.tsx`). Every signed-in route was opening
+  with its own `min-h-dvh` wrapper, its own header call and its own `<main>`
+  padding — four copies of three lines, and four chances for the gutters to
+  drift. The shell owns the frame and the gutter; a page says
+  `gutter="reading"` or says nothing.
+- **A theme control that does not flash** (`lib/theme.ts`,
+  `components/theme-toggle.tsx`). Below.
+
+### The flash, and what was actually done about it
+
+The requirement is that a server-rendered page must not paint the wrong palette
+before correcting itself. Three things had to be true at once.
+
+**1. The colours.** A ~230-byte synchronous `<script>` in `<head>` reads
+`localStorage` and puts `data-theme` on `<html>` during parse, before the first
+paint. An effect is a paint too late, and the usual dodges — render nothing
+until mounted, cover it with a spinner — throw away the server render, which is
+the thing that made the page fast. `next/script` with
+`strategy="beforeInteractive"` was tried and **rejected on evidence**: it emits
+`(self.__next_s=self.__next_s||[]).push([…])`, a queue Next's own runtime drains
+after it loads, which is exactly the paint this is trying to get ahead of. The
+emitted HTML was read both ways before choosing.
+
+**2. "System" is the absence of a decision**, not a third palette:
+`data-theme` is *removed* for it, leaving the media query in charge. A separate
+`data-theme-choice` carries which of the three was chosen, which is the
+difference between "dark" and "system, and the system is dark".
+
+**3. The control's own label.** A toggle whose word comes from `useState` +
+`useEffect` flashes "System" for one paint even when the colours are already
+right. So `ThemeToggle` holds **no state**: it renders all three words and CSS
+reveals the one matching `data-theme-choice`, which the head script has already
+written. `display: none` also takes the other two out of the accessibility tree,
+so the button's accessible name is "Theme Dark" — one real, labelled control.
+Its click handler reads the current choice back off the document rather than
+from a copy of its own.
+
+`try`/`catch` around `localStorage` because it *throws* — not returns null — in
+a cross-origin iframe and under "block all cookies". A theme is not worth a
+blank page, and a throw lands on "system", which is where a first-time visitor
+is anyway.
+
+**How it is proved.** `e2e/shell.spec.ts` installs an init script that schedules
+one `requestAnimationFrame` — the callback that runs immediately *before the
+first paint* — and records both attributes and the **computed background
+colour** in it. Four cases (dark system, light system, dark asked for on a light
+OS, light asked for on a dark OS) all have the right ground in that first frame,
+plus the survive-a-reload case. The probe was negative-controlled: replacing
+`THEME_BOOT_SCRIPT` with a comment fails it (`Expected "dark", Received null`),
+so it is measuring something. `lib/theme.test.ts` then runs the script string
+itself in Node against a fake document — the boot script is the one piece of
+this repository that ships unparsed and untypechecked, so the unrecognised-value
+and storage-throws branches are pinned there rather than assumed.
+
+### Accessibility
+
+- The sidebar is a real `<nav aria-label="Main">` with two labelled lists.
+- **Current page is never colour alone.** Three signals: `aria-current`, a 3px
+  marker bar at the left edge (a shape, present or absent), and the row's weight
+  and surface. The accent on top of those is a fourth, not the signal — if
+  navigation spent the accent on "where am I", a stale column would be competing
+  with the furniture. `aria-current="page"` is used on a channel's own board and
+  `aria-current="true"` on a video *of* that channel, because the video is the
+  page and the board is not.
+- The channel link's accessible name is exactly the channel's name: the digit
+  chip and the marker bar are both `aria-hidden`, which is what keeps
+  `getByRole('link', { name, exact: true })` in `e2e/m1-acceptance.spec.ts`
+  honest.
+- Focus is one treatment everywhere — a 2px accent ring — rather than the
+  `ring-foreground/40` that had drifted across 38 call sites.
+
+### What the existing 67 specs needed
+
+**No selector moved.** The markup the suite keys on was preserved deliberately:
+the `Sign out` button, `button[aria-keyshortcuts="c"][data-shortcut-ready]`, the
+per-channel `aria-keyshortcuts`, the `/login` `NerTube` heading, the board's
+`data-testid`s and every column's `region` role and name. The suite was run
+against the change and all 67 passed with no edit to any of them.
+
+One spec *was* changed, and it is a strengthening rather than a loosening.
+`e2e/m1-acceptance.spec.ts` asserted a card's **optimistic** arrival in
+Packaging and then navigated. The board writes the optimistic position before
+the server answers, so on a cold `next dev` — where the first compile of a route
+is seconds — the navigation aborted the in-flight `move_video` and the walk
+failed on the reload that follows. The fix is a new `movesSettled()` that waits
+for no card to be `aria-busy`, i.e. for the board to *say* the move finished.
+That is one more assertion, not one fewer: the old spec never checked that the
+move completed at all. It is a latent race that predates this milestone; it was
+reachable here because the first run of the suite was a cold one.
+
+### A behaviour bug the repeat run found, and its fix
+
+Running the suite a **second** time against the same stack failed
+`the keyboard set is one set` on a different step: press `2`, then press `1`
+before channel 2's board has finished rendering, and the digit that should take
+you back does nothing at all.
+
+The cause is in `components/channel-shortcuts.tsx`, not in the spec.
+`router.push` updates the URL *first*, so between the URL changing and the new
+page's React tree committing, the registration still mounted belongs to the old
+page — and its guard was `if (channel.slug === currentSlug) return`, where
+`currentSlug` is the prop the *old* render captured. On channel 1's page that
+reads "you are already on channel 1", so the key is swallowed. The board then
+sits on channel 2 with no indication anything was pressed.
+
+The guard now asks the document — `window.location.pathname` — which has
+already changed by then. Same reasoning as M1's finding 13, where the board's
+in-flight guard had to move from state to a ref: a handler that fires *between*
+renders has to read something that is current between renders. `currentSlug` was
+then unused, so the prop is gone rather than left as decoration.
+
+It has no spec of its own: the window it lives in is "after the URL changed and
+before React committed", which Playwright cannot hold open on demand, and a test
+that only sometimes enters it is worse than none. What the suite does instead is
+stop *depending* on it — each hop in the keyboard walk now waits for the
+destination's own `<h1>` rather than for the URL alone, which is a stronger
+assertion (arrival, not intent) and the one that would have caught this as a
+failure of the app rather than as a flake.
+
+`e2e/shell.spec.ts` is new: six specs covering the four theme cases, the
+toggle's cycle and persistence, the sidebar's nav semantics and its refusal to
+link to `/now`, `/calendar` or `/ideas`, the two gutters, and the board's
+metrics measured as real boxes (216px columns, a 16px gap, an 8px card with
+12/13 padding and a 1px border in both the plain and the selected state).
+
+### Honest limits
+
+- **The right rail is declared and unused.** `--spacing-rail-min` /
+  `--spacing-rail-max` (276–452px) are in the theme because the canvas fixes
+  them, but no page has a rail yet — the first one is the checklist panel.
+  Tokens with no consumer are a small debt; naming it here is cheaper than
+  rediscovering it.
+- **React logs a development-only warning** for the `<script>` in the root
+  layout: *"Encountered a script tag while rendering React component."* That is
+  the behaviour this wants — the script belongs to the server's document and has
+  already run by the time React exists. It does not appear in a production
+  build; that was checked with `next build && next start`, not assumed.
+- **The radii on M2's packaging controls were mapped, not re-judged.** Every
+  `rounded-md`/`rounded-lg`/`rounded` became a token by element kind — buttons
+  to 6px, fields to 7px, cards and panels to 8px — one file at a time, but from
+  the old class rather than from a fresh look at each control.
+- Everything below was verified against the local dev stack
+  (`scripts/dev-stack/`), never a hosted Supabase project. The M1 deploy gap is
+  still open.
+- The fonts are fetched from Google at **build time**. That worked here, but a
+  build machine with no egress to `fonts.googleapis.com` will fail the build
+  rather than fall back — `next/font` is explicit about this and it is the
+  price of self-hosting.
+
+### Deliberately not built
+
+PLAN.md's M3 content in full — the checklist UI, the ratio on the card, `/now`
+and the weekly review strip — plus everything M4–M9. The three sidebar entries
+that name them are disabled controls, not links. No Anthropic API call, no
+assist button, no thumbnail role, no idea matrix, no calendar, no settings
+screen.
+
+### Gates, as of this commit
+
+Run in this order, as the last thing done to this milestone:
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both `tsconfig.json` and `tsconfig.harness.json`) |
+| `npm run lint` | clean |
+| `npm run build` | succeeds; seven routes, unchanged from M2 |
+| `./scripts/verify-db.sh m3_final` | OK — four migrations applied, 13 test files passed (this milestone touches no SQL) |
+| `npm run test` | 88 passed (5 files) — 8 of them `lib/theme.test.ts` |
+| `npm run e2e` | 73 passed, 1 skipped of 74, 3.1m |
+
+The skipped spec is `session-refresh`, which skips itself unless the stack was
+started with a short token TTL — `npm run e2e:refresh` is its own command.
+
+The e2e figure is from **three** runs: one cold (`E2E_REUSE=0`, a freshly reset
+database and a freshly started stack) and then two consecutive runs against that
+same, unreset stack. All three are 73/1. The repeat runs are not ceremony —
+the first cold run is what exposed the acceptance walk's optimistic-move race,
+and the second repeat run is what exposed the channel-shortcut bug above.
+
+## M3 — Checklists: the strip, the list, and the ratio on the card
+
+This is PLAN.md's M3 line — *"checklist UI (tick, add-at-top, delete, 'reset
+from template'), ratio on cards"* — built on top of the design shell above.
+`/now` and the weekly review strip are the other halves of the same milestone
+and are written up separately.
+
+### What it delivers
+
+- **`lib/checklist.ts`** — the rules, apart from the screens: the `ChecklistItem`
+  shape and its reader, the total order (`position`, then age, then id), the
+  `min(position) - 1` a custom item takes, `done/total`, "the next unticked
+  row", `est_minutes` NULL reading as 10, the text rule for a custom item, and
+  the one **evidence table**. Unit-tested in `lib/checklist.test.ts` (14 cases).
+- **`app/actions/checklist.ts`** — `toggleChecklistItem`, `addChecklistItem`,
+  `deleteChecklistItem`, `resetChecklist`. Every one of them reads
+  `videos.stage_id` itself rather than trusting the caller, and revalidates the
+  detail page and the video's board.
+- **`components/checklist/`** — `use-checklist.ts` (the optimistic state and its
+  rollback), `checklist-strip.tsx` (the fixed one-line home), `checklist-list.tsx`
+  (the rows, the add box, the two-step reset) and `ratios.ts` (the board's read).
+- **The card ratio.** `components/board/types.ts` gains `checklist`, the board
+  page fills it, and `components/board/video-card.tsx` renders it — in the slot
+  M1 deliberately left empty.
+- **`e2e/checklist.spec.ts`** — eight specs, every browser assertion paired with
+  a SQL read of the rows it should have written.
+
+Nothing here copies a template on stage entry: `move_video` and `capture_video`
+already do that (`0001_init.sql`), and this milestone consumes it.
+
+### Three deviations from PLAN.md, stated up front
+
+1. **The strip's position.** PLAN.md puts the checklist "directly under the
+   section tabs". `/videos/[id]` has no section tabs yet — it is one column of
+   blocks — so the strip takes the position the tabs would sit above:
+   immediately below the page header, above the packaging block, identical on
+   every video. It does not move when the tabs arrive.
+2. **"Reset from template" is two writes, not one transaction.** PLAN.md defines
+   reset as *delete + re-copy*, and supabase-js has no transactions, so it is a
+   DELETE and then an INSERT over two PostgREST requests. The templates are read
+   **first**, so the copy is never attempted with nothing to copy; if the insert
+   still fails, the action says the list was cleared and the template did not go
+   back, and pressing Reset again is a complete retry because the templates were
+   never touched. The alternative is a fifth `security definer` function for an
+   operation with no cross-row invariant to protect — and
+   `supabase/tests/90_schema_contract.test.sql` pins the function count at four.
+   The UI asks before calling it, because it discards ticks.
+3. **No `est_minutes` on a custom item.** The add box is one line and writes
+   NULL, which every reader treats as ten minutes (PLAN.md says so twice). Per
+   item estimates are a template-editor concern and belong to M7.
+
+### The optimistic tick, and the rollback that is real
+
+M2's reviewers found three bugs in this exact area, so `use-checklist.ts` is
+built on the queue that already exists in `components/autosave.tsx` rather than
+on a second one. What it adds is the merge — for a list, a patch is a *sequence
+of operations*, so operations concatenate where a field's value would replace —
+and three rules:
+
+1. **A failure puts the screen back.** Not "an error line beside a tick that
+   stayed ticked".
+2. **Only what did not land is rolled back.** Writes go out in order, one at a
+   time; when the third of five fails, the first two are on the server and stay,
+   and the third to fifth are reverted newest-first — which lands the list
+   exactly where it was before the third.
+3. **The server's answer replaces the guess.** The real id of an added row, the
+   real `checked_at` of a tick.
+
+The undo information is captured when the operation is *dispatched*, not
+recomputed when it fails: by then a later operation may have changed the same
+row, and "what it was before this one" is no longer something the list can be
+asked.
+
+This is deliberately the opposite of the packaging block's rule, and for a
+stated reason: a packaging patch carries text a person typed, so a failure must
+never revert the editor. A tick carries no text and *is* the screen, so there
+the honest answer is to put it back. What gets kept instead is the half-typed
+line in the add box.
+
+`e2e/checklist.spec.ts` proves the optimistic half and the rollback separately:
+the row is deleted underneath the open page, the POST is held open for 1.5s with
+a route handler, and the spec asserts the checkbox is ticked and the ratio reads
+`1/8` *while the write is out*, then asserts both go back and the line says why.
+Without the delay, the test would pass just as well against a checkbox that
+never ticked at all.
+
+### Evidence, and the tick it does not make
+
+Where the app can count the thing a row asks about, the count sits beside the
+row: `3 written` next to "Generated 10–20 title candidates", `76/55` next to
+"Title under 55 characters", `2/3 written` next to "Hook drafted in 3 versions".
+Three rows of the seeded eight; the other five say nothing rather than guess.
+
+- **One table, in `lib/checklist.ts`.** Not an `if` beside each row in the
+  markup — that is how three screens end up counting candidates three ways.
+- **Matched on the row's text**, because a `checklist_items` row is a snapshot
+  with no link back to its template (PLAN.md open question 2 leaves
+  `template_item_id` out of v1). The patterns are loose enough to survive a
+  lightly reworded template and tight enough not to fire on a neighbour: the
+  hook pattern insists on the word *versions*, so Scripting's "Hook scripted
+  word-for-word" is not counted as the packaging hook row. A unit test asserts
+  that none of the nine Scripting rows matches.
+- **The numbers are counted on the server**, from the same row and through the
+  same lenient readers the packaging block uses, so a row and the editor beside
+  it cannot disagree about how many candidates exist.
+- **Nothing is auto-ticked.** PLAN.md review item 21 leaves auto-tick out of v1:
+  the app can say *you have written two hooks*; only the person can say *the
+  strongest is picked*. A spec asserts the ratio is still `0/8` with all three
+  counts on screen.
+
+### The ratio on the card, and why it is one query per column
+
+The ratio a card shows is the video's **current** stage's list, and
+`checklist_items` holds a row for every stage the video has ever entered — so
+the filter needed is "`stage_id` = *that video's* stage", which is a different
+value per row and not something one PostgREST filter can say. Reading every item
+for every video and filtering in memory runs into `db-max-rows` (1000, matching
+a hosted project), at which point the rows are silently truncated and every
+ratio past the cut is wrong.
+
+`components/checklist/ratios.ts` therefore groups the cards by the stage they
+are in and runs one exact query per occupied column (at most nine), together.
+Each asks for one row more than it will trust; if that many come back the whole
+group is left **absent** from the map and those cards render no ratio, because
+a number that might be short is worse than no number.
+
+A stage with no checklist renders nothing at all. "0/0" reads as *nothing to
+do*, which is the opposite of what an empty list means — M1 removed exactly that
+string from this slot, and it has not come back.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean for every file in this slice |
+| `npm run lint` | clean |
+| `./scripts/verify-db.sh` | OK — 13 SQL test files passed (this slice touches no SQL) |
+| `npm run test` | 178 passed (8 files), 14 of them `lib/checklist.test.ts` |
+| `npx playwright test checklist` | 8 passed — and again, and again (three consecutive runs) |
+| `npm run e2e` (whole suite) | 87 passed, 1 failed — see below |
+
+The one failure is **not** this slice: `e2e/shell.spec.ts` still asserts that the
+sidebar's "Now" entry is a *disabled button*, and the `/now` work in this same
+milestone has turned it into a link. That assertion belongs to the change that
+invalidated it. Nothing in `components/checklist/**`,
+`app/actions/checklist.ts`, `lib/checklist.ts` or the board card touches the
+sidebar.
+
+### One behaviour worth naming: the video that moves underneath the page
+
+Every action reads `videos.stage_id` itself rather than trusting the page, so an
+item added from a page that has been open while the video moved is filed against
+the stage the video is **in now** — never against the one on screen, where no
+read would ever return it again. The action's revalidation then re-renders the
+route, and because the strip is keyed by the stage it remounts onto the real
+list with the new row at the top. Spec 8 walks exactly that: it moves the video
+with SQL behind the page's back, adds an item, and watches the strip land on the
+Scripting list with the row at position 0.
+
+The hook keeps a rollback path for the case where that re-render does not
+arrive; it reports the move and offers a reload rather than a retry, because
+re-sending would file the row twice.
+
+### Deliberately not built here
+
+Per-item estimate editing and template editing (M7), reordering rows by hand
+(the order is the procedure; a custom item goes to the top and that is the only
+ordering gesture), ticking from the strip without opening it (`/now` is the
+tick-in-place surface), and any propagation of a template edit into in-flight
+items — PLAN.md open question 2 makes that deliberately impossible.
+
+## M3 — `/now`, the ranking, and the weekly review strip
+
+This is the other half of PLAN.md's M3 line — *"`/now` with sections, inline
+controls per `input` kind, staleness sort, ≤ 10-min filter, channel chips,
+`x`/`j`/`k`, board header strip"* — and the half BRIEF.md calls *as important as
+the board*: **"I have 10 minutes — what can I move right now?"** The checklist
+UI it consumes is written up above; the design shell both sit inside is written
+up above that.
+
+### What it delivers
+
+- **`lib/next-action.ts`** — the ranking, pure and clock-free. PLAN.md's eight
+  rules in order, first match wins, each emitting `{label, section, input}` plus
+  the payload that control needs; `channelExpectation()` (the configured CTR, or
+  the median of the channel's last ten); `nextStageAfter()` (by
+  `CORE_KIND_ORDER`, never by `position`); `compareRows()` (Overdue → Ready →
+  Waiting, then longest in stage first, then id so the order is total);
+  `matchesFilters()`. It imports the checklist rules from `lib/checklist.ts` and
+  the gate predicate from `lib/packaging.ts` rather than restating either.
+- **`lib/next-action.test.ts`** — 68 cases: one or more per rule, every trap
+  PLAN.md names in prose, and its whole M3 review list (a video published 25
+  hours ago with no metrics is Overdue *including with the Repurposed lane
+  switched off*; a bank of 30 ideas contributes zero rows; a Scheduled video for
+  next Tuesday is Waiting; a Packaging video with everything filled offers the
+  Move).
+- **`app/now/page.tsx`** — five flat, RLS-scoped reads (channels, enabled
+  stages, non-archived videos, their current-stage checklist items, the swap
+  log), one clock read, and no rule of its own.
+- **`components/now/`** — `now-view.tsx` (the filters, the three sections, the
+  keyboard, and the one place that writes), `now-row.tsx` (the row and the eight
+  controls), `metrics-pair.tsx` (impressions and CTR, together, always), and
+  `intent.ts` (what a control asks for, and what `x` will and will not do).
+- **`app/actions/metrics.ts`** — `logMetrics` and `dismissSwap`: the narrow
+  slice of the post-publish block that rules 2 and 3 need in order to be
+  completable in place.
+- **`lib/stage-stats.ts`** + **`components/board/weekly-strip.tsx`** — count,
+  oldest and median days in stage per column, all from `stage_entered_at`,
+  rendered above the board.
+- **`e2e/now.spec.ts`** — six specs walking the Monday scenario, every browser
+  claim that changes a row paired with a SQL read of that row, and the URL
+  asserted after every completion.
+- The sidebar's **Now** entry stops being a disabled placeholder and becomes a
+  link.
+
+### Two words that both mean "the gate", and why that matters
+
+Rule 1 ("Complete packaging: …") reads the gate as a **field predicate only** —
+title, written concept, exactly one chosen hook — and deliberately ignores
+`packaging_skipped_at`. That is PLAN.md's gate section spelled out: *skipping …
+puts "Complete packaging" at the top of `/now` for that video until `gate_ok`
+holds*. A skip buys the move, not the work. Rule 7 reads the same predicate.
+
+Rule 8 ("Move to …") reads the **other** gate: the one `move_video` will
+actually apply, which a skip does satisfy. A row that offered a move the
+database would then refuse would be the worst row in this list.
+
+Both come from `packagingGate()` in `lib/packaging.ts`; the skip-ignoring one is
+the same call with the skip cleared. Neither is a second copy of the `elsif`
+chain, because two copies eventually name different fields for the same row.
+
+### Completable in place, and what that cost
+
+Every row renders the control its `input` names, and finishing one patches the
+**one video** it was about and re-runs the same `rankNow()` the server ran. That
+is why the client is given the videos rather than the rows: the next checklist
+item takes the finished row's place, in the same position, without a reload and
+without a second implementation of the ranking on the wire.
+
+Two intents also ask for a fresh server render afterwards (`router.refresh()`):
+a move and a confirm-live. `move_video` snapshots the next stage's checklist
+templates into `checklist_items` on arrival, and the browser cannot know what
+they say. Everything else is a column the page already has.
+
+A local patch is a *prediction*, tagged with the props it was computed over, and
+it expires the moment a newer server render lands — the shape `FlowFields`
+settled on in M2, for the same reason.
+
+### What `x` refuses to do
+
+`x` completes the selected row where completion is unambiguous and needs no
+input: a tick and a move. For every other row it puts the caret in the row's
+control instead. That is the same two keystrokes without the guess, and it is
+the difference between a shortcut and a hazard — `x` must never silently make a
+judgement (dismiss a swap prompt, declare a block over, pick a hook) on a row
+the user has not read.
+
+"Still waiting", the other half of the Waiting row's control, **writes
+nothing**. It is an acknowledgement — the block is real and has not moved — so
+it takes the row off this session's list and leaves the column alone. Writing
+there would either reset `waiting_since`, losing the age that is the whole point
+of the section, or invent a "snoozed until" column PLAN.md does not have.
+
+### Impressions and CTR are one component
+
+`components/now/metrics-pair.tsx` is the only place either number is rendered.
+The rule is written down three times — BRIEF.md (*always display impressions and
+CTR together, never CTR alone*), PLAN.md (*`logMetrics` rejects one without the
+other*) and `0001_init.sql` (`check ((first24_impressions is null) =
+(first24_ctr is null))`) — and all three are enforced: the component refuses a
+half-filled pair before any network call, the action refuses it again, and the
+CHECK is there for anything that finds another way in. A rate without a
+denominator is not a measurement, and the swap decision is made on the
+difference.
+
+### Deviations from PLAN.md, stated plainly
+
+1. **`/` still lands on the board, not on `/now`.** PLAN.md routes it to
+   `/now`. Sixty-seven existing specs sign in by waiting for a board URL, and
+   changing where the application lands would be a change to what every one of
+   them asserts. `/now` is one click away in the sidebar and is a real link as
+   of this milestone; moving the front door belongs with M9's polish pass, where
+   the sign-in helper can be changed once, deliberately.
+2. **A Scheduled video with no target date produces no row.** Rule 5 is written
+   in terms of a date — *in the future → Waiting; on/after → Ready* — and with
+   no date there is no honest branch: "confirm it went live" is a lie about a
+   video that has not, and a Waiting row with no date to wait for says nothing.
+   It falls through to its checklist, and the Scheduled stage has no seeded
+   checklist, so such a video is silent on this page. It is still on the board
+   with its days-in-stage climbing. Naming the gap is better than inventing a
+   ninth rule.
+3. **The Waiting half of rule 5 carries the same control as the Ready half.**
+   PLAN.md names a control for every row but describes "Goes live <date>" as
+   information. Rather than add a ninth `input` for "none", the row renders the
+   URL field it will need anyway: the capability is identical, and the section
+   is what says whether it is today's problem. Confirming still requires a URL
+   to be typed, so it cannot happen by accident.
+4. **The swap row has one of its two answers.** Rule 3 renders, names both
+   numbers and offers "Keep it" (which writes `swap_dismissed_at`). The swap
+   itself needs a role that has an asset, a reason and an append-only log row —
+   all of which arrive with the thumbnail slots in M4 — so it is a real disabled
+   control naming that milestone, following M1's settled rule about affordances
+   that cannot be honoured yet.
+5. **The weekly strip is not aligned to the columns.** The obvious design is a
+   cell above each column. The board scrolls horizontally and the page does not,
+   so that would need a second synchronised scroller or would drift out of
+   alignment the moment anybody scrolled — and a header that lies about which
+   column it describes is worse than one that names them. Each cell names its
+   stage, and a column holding nothing is not drawn at all.
+
+### Honest limits
+
+- **The clock is frozen for the life of a render.** Ages on `/now` are computed
+  from the request's own `Date.now()`, passed down as a number. That is what
+  makes the server's HTML and the browser's first render agree, and it means a
+  page left open overnight still says "11 days". A reload is the refresh.
+- **`logMetrics` does not write `first24_views` or `new_viewers_note` from this
+  page.** Views is in the action's vocabulary and optional; the note wants a
+  sentence and belongs on the detail page in M4.
+- **Rule 3's fallback expectation is computed from the videos the page already
+  read**, not from a dedicated query. Every video with a logged CTR is in that
+  read, so the sample is right; if the 2,000-row bound is ever hit, it would be
+  the first thing to become wrong.
+- **One write at a time.** `perform()` refuses to start a second completion
+  while one is in flight, across the whole list rather than per row. For a page
+  worked with one hand on `x` that is the safe end of the trade.
+- **The strip's "piling up" threshold is the channel's `stale_days`, applied to
+  the median.** The median rather than the oldest: one forgotten video is a
+  video, several slow ones are a stage. That choice is not in PLAN.md; it is the
+  only interpretation that makes the third number worth rendering.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm test` | 191 passed across 9 files — 68 of them `lib/next-action.test.ts`, 8 `lib/stage-stats.test.ts` |
+| `npm run typecheck` | clean (`tsc --noEmit` and the harness project) |
+| `npm run lint` | clean |
+| `./scripts/verify-db.sh` | OK — migrations applied, 13 SQL test files passed. No migration was added by this slice |
+| `npx playwright test now` | 7/7 |
+| `npx playwright test shell` | 6/6, including the one assertion this slice had to change |
+
+**The one spec this slice edited, and why it is a strengthening.**
+`e2e/shell.spec.ts` asserted that Now, Calendar and Ideas were all disabled
+buttons whose `title` names a milestone, and that no sidebar link pointed at
+`/now`, `/calendar` or `/ideas`. `/now` exists now, so the loop covers Calendar
+and Ideas, and the Now entry gained three assertions it did not have: it is a
+link, its `href` is `/now`, and following it reaches a page that hydrates and
+marks itself `aria-current="page"`. The rule the disabled controls exist to keep
+— *no dead links in the sidebar* — is checked more strictly than before, not
+less.
+
+**What a full-suite run looked like at the time of writing.** `npx playwright
+test` was run twice end to end. The second run finished 77 passed, 1 skipped
+(the access-token expiry spec, which needs `npm run e2e:refresh`), 11 failed —
+and then, re-run, 29 of those 30 passed and one remained:
+`e2e/m2-acceptance.spec.ts` › *the gate opens when the three fields are filled*.
+Every one of those failures is on `/videos/[id]`, which a parallel slice was
+refactoring into section tabs while the suite ran (`app/videos/[id]/page.tsx`
+was mid-edit and did not typecheck at one point during the run). Nothing in this
+slice touches the detail page, the packaging components or those specs; the
+failure is reported here rather than explained away, and it belongs to whoever
+lands the section tabs.
+
+### Not covered end to end
+
+Two of the eight rows are proved by `lib/next-action.test.ts` and exercised by
+nothing in a browser:
+
+- **Rule 3, the swap prompt.** Producing it needs a channel with an expectation,
+  a published video with logged metrics below it and no swap since — and the
+  half of the row that would finish the job (the swap itself, with a role, an
+  asset and a reason) is M4. `dismissSwap` is written, typed and reachable; it
+  has no spec of its own until there is a swap to dismiss it in favour of.
+- **Rule 5's Ready branch, "Confirm live + record URL".** The ranking, the
+  date comparison and the `published_at` stamp are unit-tested, and
+  `moveVideo`'s new optional `publishedAt` is a pass-through to a parameter
+  `move_video` has had since `0001_init.sql`. What is not walked in a browser is
+  the two-write sequence (URL first, then the move) and the refresh that follows
+  it. The Waiting branch of the same rule *is* walked.
+
+Both are named here rather than covered by a spec that would have to build most
+of M4 to exist.

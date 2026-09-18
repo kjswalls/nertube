@@ -8,11 +8,16 @@ import { useShortcuts, type Shortcut } from "@/lib/shortcuts";
 /**
  * `1`..`9` — switch channel (PLAN.md's "Shortcuts": *`1..9` switch channel*).
  *
- * Mounted by the header, which is the one component that always knows the
+ * Mounted by the sidebar, which is the one component that always knows the
  * channel list, so the digits work on every signed-in route rather than only on
  * a board. The nth digit goes to the nth channel's board, in the same order the
- * header draws the chips and the capture form numbers them — one order for the
+ * sidebar draws the rows and the capture form numbers them — one order for the
  * whole application, so "channel 2" means one thing.
+ *
+ * It deliberately takes no "current channel" prop: the only question it asks
+ * about the current route is "am I already on this board", and the answer to
+ * that has to come from the document rather than from a prop captured at the
+ * last render — see `run` below.
  *
  * ## Where the digits are *not* a channel switch
  *
@@ -34,10 +39,8 @@ export interface ShortcutChannel {
 
 export function ChannelShortcuts({
   channels,
-  currentSlug,
 }: {
   channels: readonly ShortcutChannel[];
-  currentSlug?: string;
 }) {
   const router = useRouter();
 
@@ -52,12 +55,29 @@ export function ChannelShortcuts({
             ? { keys: channels.length > 1 ? "1–9" : "1", text: "switch channel" }
             : undefined,
         run: (event: KeyboardEvent) => {
-          if (channel.slug === currentSlug) return;
+          const target = `/c/${channel.slug}/board`;
+          /*
+            "Am I already there?" is asked of the *document*, not of the
+            `currentSlug` prop this closure captured.
+
+            The two disagree for as long as a client-side navigation takes.
+            Press 2, then press 1 before channel 2's board has finished
+            rendering, and the registration still mounted is the one from
+            channel 1's page — whose `currentSlug` is still "1", so the key
+            that should take you back does nothing at all and the board stays
+            where it was. `window.location.pathname` has already changed by
+            then, because `router.push` updates the URL first.
+
+            Same reasoning as the board's in-flight guard reading a ref rather
+            than state: a handler that fires between renders has to read
+            something that is current between renders.
+          */
+          if (window.location.pathname === target) return;
           event.preventDefault();
-          router.push(`/c/${channel.slug}/board`);
+          router.push(target);
         },
       })),
-    [channels, currentSlug, router],
+    [channels, router],
   );
 
   useShortcuts(shortcuts, { enabled: channels.length > 1 });

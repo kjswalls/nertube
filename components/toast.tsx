@@ -176,8 +176,8 @@ function ToastItem({
       data-testid="toast"
       data-tone={toast.tone}
       className={[
-        "pointer-events-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-background px-3 py-2 text-sm shadow-lg",
-        toast.tone === "error" ? "border-red-500/60" : "border-border",
+        "pointer-events-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-card border bg-background px-3 py-2 text-sm shadow-lg",
+        toast.tone === "error" ? "border-over-limit/60" : "border-border",
       ].join(" ")}
     >
       <p className="min-w-0 flex-1">{toast.message}</p>
@@ -186,7 +186,7 @@ function ToastItem({
         <Link
           key={link.href + link.label}
           href={link.href}
-          className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           {link.label}
         </Link>
@@ -195,7 +195,7 @@ function ToastItem({
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
-        className="shrink-0 rounded px-1 text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/40"
+        className="shrink-0 rounded-button px-1 text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
       >
         <span aria-hidden="true">×</span>
         <span className="sr-only">Dismiss</span>

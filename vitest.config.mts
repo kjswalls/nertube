@@ -13,4 +13,13 @@ export default defineConfig({
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', 'e2e/**'],
   },
+  /**
+   * The same `@/` that `tsconfig.json` gives the application and that every
+   * component imports with. Without it a pure module under `components/` can be
+   * typechecked but not unit-tested, which quietly pushes testable logic into
+   * `lib/` for the resolver's sake rather than for a reason.
+   */
+  resolve: {
+    alias: { '@': new URL('.', import.meta.url).pathname.replace(/\/$/, '') },
+  },
 });

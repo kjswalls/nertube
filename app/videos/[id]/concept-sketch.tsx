@@ -175,7 +175,7 @@ export function ConceptSketch({
         data-testid="concept-sketch-frame"
         data-has-sketch={showing ? "true" : "false"}
         className={[
-          "aspect-video w-full max-w-sm overflow-hidden rounded-md border",
+          "aspect-video w-full max-w-sm overflow-hidden rounded-input border",
           showing ? "border-border bg-surface" : "border-dashed border-border bg-surface/50",
         ].join(" ")}
       >
@@ -220,7 +220,7 @@ export function ConceptSketch({
           accept={CONCEPT_SKETCH_ACCEPT}
           disabled={busy !== null}
           onChange={onFile}
-          className="w-full max-w-sm text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-2 file:text-sm file:text-foreground"
+          className="w-full max-w-sm text-sm file:mr-3 file:min-h-11 file:rounded-input file:border file:border-border file:bg-surface file:px-3 file:py-2 file:text-sm file:text-foreground"
         />
         <p className="text-xs text-muted">
           PNG, JPEG, WebP, GIF or AVIF, up to {MAX_SKETCH_LABEL}. A new one
@@ -233,7 +233,7 @@ export function ConceptSketch({
         data-testid="sketch-status"
         className={[
           "min-h-4 text-xs",
-          error ? "text-amber-700 dark:text-amber-400" : "text-muted",
+          error ? "text-attention" : "text-muted",
         ].join(" ")}
       >
         {error

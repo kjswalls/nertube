@@ -164,12 +164,12 @@ export function HooksEditor({
               add();
             }
           }}
-          className="min-w-0 flex-1 resize-y rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="min-w-0 flex-1 resize-y rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
         <button
           type="submit"
           data-testid="hook-add"
-          className="h-fit shrink-0 rounded-md border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+          className="h-fit shrink-0 rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
         >
           Add
         </button>
@@ -179,7 +179,7 @@ export function HooksEditor({
         id={noticeId}
         role="status"
         data-testid="hook-notice"
-        className="min-h-4 text-xs text-amber-700 dark:text-amber-400"
+        className="min-h-4 text-xs text-attention"
       >
         {notice ?? ""}
       </p>
@@ -192,8 +192,8 @@ export function HooksEditor({
               data-testid="hook-row"
               data-chosen={hook.chosen ? "true" : "false"}
               className={[
-                "flex flex-wrap items-start gap-2 rounded-md border px-2 py-2",
-                hook.chosen ? "border-emerald-600/60 bg-emerald-600/5" : "border-border",
+                "flex flex-wrap items-start gap-2 rounded-input border px-2 py-2",
+                hook.chosen ? "border-ready/60 bg-ready/[0.07]" : "border-border",
               ].join(" ")}
             >
               <label className="sr-only" htmlFor={`${addId}-text-${hook.id}`}>
@@ -207,7 +207,7 @@ export function HooksEditor({
                 data-testid="hook-text"
                 onChange={(event) => onEditText(hook.id, event.target.value)}
                 onBlur={onCommit}
-                className="min-w-0 flex-1 resize-y rounded border border-transparent bg-transparent px-1 py-1 text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-foreground/40"
+                className="min-w-0 flex-1 resize-y rounded-input border border-transparent bg-transparent px-1 py-1 text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
               />
 
               <button
@@ -227,9 +227,9 @@ export function HooksEditor({
                 }
                 onClick={() => onToggleChosen(hook.id)}
                 className={[
-                  "shrink-0 rounded border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-foreground/40",
+                  "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent",
                   hook.chosen
-                    ? "border-emerald-600/60 bg-emerald-600/10"
+                    ? "border-ready/60 bg-ready/10"
                     : "border-border hover:bg-surface",
                 ].join(" ")}
               >
@@ -247,7 +247,7 @@ export function HooksEditor({
                     : "";
                   onRemove(hook.id);
                 }}
-                className="shrink-0 rounded border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-foreground/40"
+                className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
               >
                 Remove
               </button>
@@ -256,7 +256,7 @@ export function HooksEditor({
                 <p
                   role="alert"
                   data-testid="hook-issue"
-                  className="w-full text-xs text-amber-700 dark:text-amber-400"
+                  className="w-full text-xs text-attention"
                 >
                   {issue.message} Nothing else on this block is held up by it —
                   fix this row or remove it and it saves.
@@ -271,7 +271,7 @@ export function HooksEditor({
         <p
           role="alert"
           data-testid="hook-issue"
-          className="text-xs text-amber-700 dark:text-amber-400"
+          className="text-xs text-attention"
         >
           {issue.message}
         </p>

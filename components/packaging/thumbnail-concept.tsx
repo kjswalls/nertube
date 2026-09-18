@@ -67,7 +67,7 @@ export function ThumbnailConcept({
         data-testid="thumbnail-concept"
         onChange={(event) => onChange(event.target.value)}
         onBlur={onCommit}
-        className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+        className="w-full resize-y rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
       />
     </div>
   );

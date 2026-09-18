@@ -25,12 +25,14 @@ export function ShortcutHints() {
   return (
     <p
       data-testid="shortcut-hints"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-muted"
     >
       <span className="sr-only">Keyboard shortcuts on this page:</span>
       {hints.map((shortcut) => (
         <span key={shortcut.hint!.keys} className="whitespace-nowrap">
-          <kbd className="rounded border border-border px-1 font-sans">
+          {/* A shortcut key is something the tool measured out for you, so it
+              is drawn in the mono face — the same face as counts and ages. */}
+          <kbd className="rounded-button border border-border px-1 font-mono text-[10px]">
             {shortcut.hint!.keys}
           </kbd>{" "}
           {shortcut.hint!.text}

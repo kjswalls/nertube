@@ -13,7 +13,7 @@ import { requireUser } from "@/lib/supabase/require-user";
 export default async function Home() {
   const { supabase } = await requireUser();
 
-  // "First" = earliest created, matching the order the header's switcher uses.
+  // "First" = earliest created, matching the order the sidebar lists them in.
   const { data: channel } = await supabase
     .from("channels")
     .select("slug")

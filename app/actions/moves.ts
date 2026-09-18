@@ -63,6 +63,23 @@ const MoveInput = z.object({
   videoId: z.uuid(),
   stageId: z.uuid(),
   /**
+   * What to stamp `published_at` with, when this move is the one that reaches a
+   * Published stage. Absent means `now()`, which is what a drag on the board
+   * means.
+   *
+   * `/now`'s "Confirm live + record URL" row passes the video's own
+   * `target_publish_date` here, because PLAN.md's ranking rule 5 says so:
+   * *`confirmLive` = `move_video(published, p_published_at = target date)` +
+   * URL*. The video went live when YouTube said it would, not when the creator
+   * got round to ticking the row — and `published_at + 24h` is what rule 2 then
+   * counts from, so getting this wrong would make the metrics prompt a day late.
+   *
+   * `move_video` only reads it on **first** entry to a Published stage
+   * (`when v_stage.kind = 'published' and v.published_at is null`), so it can
+   * never rewrite a date that is already recorded.
+   */
+  publishedAt: z.iso.datetime({ offset: true }).optional(),
+  /**
    * Only ever used to revalidate the right board path. It is never trusted as
    * an authorisation input — RLS and `move_video`'s own ownership check decide
    * that — but it lands in `revalidatePath`, so it is pinned to the shape
@@ -121,6 +138,9 @@ export async function moveVideo(
   const { data, error } = await supabase.rpc("move_video", {
     p_video: parsed.data.videoId,
     p_stage: parsed.data.stageId,
+    ...(parsed.data.publishedAt === undefined
+      ? {}
+      : { p_published_at: parsed.data.publishedAt }),
   });
 
   if (error) {

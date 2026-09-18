@@ -137,7 +137,7 @@ export function StageSelect({
         value={current.id}
         disabled={pending}
         onChange={(event) => move(event.target.value)}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-60"
+        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
       >
         {knowsCurrent ? null : (
           <option value={current.id}>{current.name} (turned off)</option>
@@ -160,7 +160,7 @@ export function StageSelect({
         className={[
           "min-h-4 text-xs",
           status.kind === "error"
-            ? "text-amber-700 dark:text-amber-400"
+            ? "text-attention"
             : "text-muted",
         ].join(" ")}
       >

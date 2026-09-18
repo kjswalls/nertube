@@ -235,7 +235,7 @@ function FieldLabel({
 
 const INPUT_CLASS =
   // 16px text so iOS does not zoom the page when the field takes focus.
-  "w-full rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-foreground/40";
+  "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 /**
  * Turn one flow save into the `SaveOutcome` the autosave hook speaks.
@@ -370,7 +370,7 @@ function TargetDateField({
             field.setValue("");
             field.commit();
           }}
-          className="shrink-0 rounded-md border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
         >
           Clear
         </button>
@@ -456,7 +456,7 @@ function WaitingOnField({
             field.setValue("");
             field.commit();
           }}
-          className="shrink-0 rounded-md border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
         >
           Unblocked
         </button>
@@ -558,7 +558,7 @@ function YoutubeUrlField({
               href={field.value}
               target="_blank"
               rel="noreferrer noopener"
-              className="underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-foreground/40"
+              className="underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               Watch on YouTube
             </a>
@@ -660,7 +660,7 @@ function ArchivedBanner() {
   return (
     <p
       data-testid="archived-banner"
-      className="rounded-md border border-amber-500/60 bg-amber-500/5 px-3 py-2 text-sm"
+      className="rounded-input border border-attention/60 bg-attention/[0.07] px-3 py-2 text-sm"
     >
       <strong className="font-semibold">Archived.</strong> This video is off the
       board. Nothing has been deleted — its stage, dates and notes are all still
@@ -724,7 +724,7 @@ function ArchiveButton({
           data-archived={archived ? "true" : "false"}
           disabled={pending}
           onClick={() => send(!archived)}
-          className="rounded-md border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-40"
+          className="rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
         >
           {pending
             ? archived
