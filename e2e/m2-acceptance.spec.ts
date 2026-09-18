@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { untilTaken } from './hydration';
 
 /**
  * M2 acceptance — PLAN.md's own list, walked in a browser.
@@ -340,7 +341,15 @@ test('skipping packaging with a reason puts the badge on the card and opens the 
   await expect(gate(page)).toHaveAttribute('data-gate', 'thumbnail_concept');
 
   // Three deliberate acts: open the disclosure, read what it does, type why.
-  await page.getByTestId('packaging-skip-open').click();
+  // Retried, because this click lands immediately after the page loads and a
+  // click before hydration is swallowed — see `e2e/hydration.ts`.
+  await untilTaken(
+    () => page.getByTestId('packaging-skip-open').click(),
+    () =>
+      expect(page.getByTestId('packaging-skip-confirm')).toBeVisible({
+        timeout: 1_000,
+      }),
+  );
 
   // An empty reason is refused out loud rather than by a dead button.
   await page.getByTestId('packaging-skip-confirm').click();

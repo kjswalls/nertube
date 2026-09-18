@@ -9,6 +9,7 @@ import {
   SEED_STAGES,
 } from '../lib/defaults';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { untilTaken } from './hydration';
 
 /**
  * M2 — the packaging block.
@@ -301,12 +302,29 @@ test('filling the three gate fields turns the indicator to ready, and move_video
   await page.reload();
   const conceptAfterMove = page.getByTestId('thumbnail-concept');
 
-  // Cleared afterwards: PLAN.md's "clear the title afterwards and see
-  // 'Complete packaging'". The indicator goes back, and so does the function.
-  await conceptAfterMove.fill('');
-  await conceptAfterMove.blur();
-  await expectSaved(page);
-  await expect(gate(page)).toHaveAttribute('data-gate', 'thumbnail_concept');
+  /*
+    Cleared afterwards: PLAN.md's "clear the title afterwards and see 'Complete
+    packaging'". The indicator goes back, and so does the function.
+
+    Retried, because this is the first interaction after a reload and typing
+    into a field whose handler does not exist yet goes nowhere — see
+    `e2e/hydration.ts`. Clearing a field is idempotent, so repeating it is only
+    what a person would do when their first go had no effect.
+  */
+  await untilTaken(
+    async () => {
+      await conceptAfterMove.fill('');
+      await conceptAfterMove.blur();
+    },
+    async () => {
+      await expect(saveStatus(page)).toHaveText(/^Saved$/, { timeout: 2_000 });
+      await expect(gate(page)).toHaveAttribute(
+        'data-gate',
+        'thumbnail_concept',
+        { timeout: 2_000 },
+      );
+    },
+  );
 
   expect(await readRow(videoId)).toMatchObject({ thumbnail_concept: null });
   expect(await tryMove(videoId, 'filming')).toMatch(/gate:thumbnail_concept/);

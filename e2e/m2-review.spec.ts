@@ -9,6 +9,7 @@ import {
   SEED_STAGES,
 } from '../lib/defaults';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { untilTaken } from './hydration';
 
 /**
  * M2 — the adversarial review, walked.
@@ -601,23 +602,14 @@ test('the skip button is not silently dead while an unrelated save is in flight'
   await signIn(page);
   await page.goto(`/videos/${videoId}`);
 
-  /*
-    Opened with a retry, which is about this page rather than about this test.
-
-    The disclosure is a server-rendered button whose handler only exists once
-    the route has hydrated, and M4 made the video page heavier — all five
-    sections stay mounted so that switching one never costs an unsaved edit, and
-    two of the five stopped being a heading and a paragraph. A click that lands
-    in that window is swallowed with nothing on screen to say so, which is
-    exactly what a person would do about it: click again. `toPass` is that,
-    written down.
-  */
-  await expect(async () => {
-    await page.getByTestId('packaging-skip-open').click();
-    await expect(page.getByTestId('skip-reason-input')).toBeVisible({
-      timeout: 1_000,
-    });
-  }).toPass({ timeout: 20_000 });
+  // Opened with a retry, which is about this page rather than about this test:
+  // a click that lands before the route has hydrated is swallowed. See
+  // `e2e/hydration.ts` for what that window is and why the page keeps it.
+  await untilTaken(
+    () => page.getByTestId('packaging-skip-open').click(),
+    () =>
+      expect(page.getByTestId('skip-reason-input')).toBeVisible({ timeout: 1_000 }),
+  );
 
   await page
     .getByTestId('skip-reason-input')
