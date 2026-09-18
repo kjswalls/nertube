@@ -1,8 +1,3 @@
-"use client";
-
-import { useState } from "react";
-
-import type { VideoState } from "@/app/actions/videos";
 import type { BucketChoices } from "@/lib/buckets";
 
 import { BucketRow } from "./bucket-row";
@@ -26,6 +21,16 @@ import { TagEditor } from "./tag-editor";
  * is Packaging, which is also the first screen an idea is opened on; filing
  * belongs where you land, not a tab along.
  *
+ * ## It is a Server Component, deliberately
+ *
+ * The heading, the sentence and the section chrome are static, and this page
+ * already mounts five sections at once — hydration is one synchronous pass over
+ * all of them, and everything added to it widens the window in which a
+ * server-rendered control has no handler yet and a first click is swallowed
+ * (`e2e/hydration.ts` has the argument). So only the two things that genuinely
+ * need a browser are client components: the bucket row and the tag editor. This
+ * file holds no state and ships no JavaScript.
+ *
  * ## Both halves write the same way
  *
  * One version token, one write path (`updateVideo`), one save queue each
@@ -47,32 +52,9 @@ export function FilingBlock({
   verticalId: string | null;
   horizontalId: string | null;
   tags: readonly string[];
-  /** The tags this channel's other videos already use, most-used first. */
+  /** The tags this channel's videos already use, most-used first. */
   vocabulary: readonly string[];
 }) {
-  /**
-   * The channel's vocabulary, grown by what this page saves.
-   *
-   * The list comes down with the server render, so a tag added here would not
-   * appear as a suggestion until the route was re-rendered — which matters for
-   * the obvious case of removing a tag and immediately wanting it back. Only
-   * grown, never pruned: a tag this video drops may well still be on five
-   * others, and this page cannot know.
-   */
-  const [learned, setLearned] = useState<readonly string[]>([]);
-
-  function absorb(video: VideoState): void {
-    setLearned((current) => {
-      const known = new Set(
-        [...vocabulary, ...current].map((tag) => tag.toLocaleLowerCase()),
-      );
-      const added = video.tags.filter(
-        (tag) => !known.has(tag.toLocaleLowerCase()),
-      );
-      return added.length === 0 ? current : [...current, ...added];
-    });
-  }
-
   return (
     <section
       data-testid="filing-block"
@@ -97,12 +79,7 @@ export function FilingBlock({
         horizontalId={horizontalId}
       />
 
-      <TagEditor
-        videoId={videoId}
-        initial={tags}
-        vocabulary={[...vocabulary, ...learned]}
-        onSaved={absorb}
-      />
+      <TagEditor videoId={videoId} initial={tags} vocabulary={vocabulary} />
     </section>
   );
 }

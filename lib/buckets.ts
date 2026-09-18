@@ -87,3 +87,57 @@ export function describeBucketRefusal(
     `renamed somewhere else — reload to see this channel's buckets as they are now.`
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Membership — the one answer to "is this video in that bucket?"              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two bucket slots a video carries, one per axis.
+ *
+ * Deliberately structural rather than a named row type: the idea bank's `Idea`,
+ * the matrix's `MatrixVideo` and a raw `videos` row all satisfy it, so all
+ * three can be asked the same question without first being converted into a
+ * common shape.
+ */
+export interface BucketSlots {
+  readonly verticalId: string | null;
+  readonly horizontalId: string | null;
+}
+
+/**
+ * Which bucket this video sits in on `axis`, or `null` when it is unfiled.
+ *
+ * This is the whole of "which bucket is it in", and it exists as a function for
+ * one reason: the idea bank filters by bucket and the matrix counts by bucket,
+ * and if those two ever answered differently the product would be showing a
+ * cell that says 3 above a list that shows 2, with nothing on either page to
+ * say which one is lying. `components/ideas/list/filtering.ts` and
+ * `components/ideas/matrix/tally.ts` both route through here, and
+ * `components/ideas/agreement.test.ts` runs one fixture through both and
+ * asserts they name the same videos.
+ *
+ * It takes the axis as an argument rather than exposing the two fields because
+ * the axis is the thing that varies — a caller holding `axis` as data (a filter
+ * key, a URL parameter, a column header) would otherwise write the ternary
+ * itself, once per call site, which is the duplication this is here to
+ * prevent.
+ */
+export function bucketOn(slots: BucketSlots, axis: BucketAxis): string | null {
+  return axis === "vertical" ? slots.verticalId : slots.horizontalId;
+}
+
+/**
+ * Does this video sit in `bucketId` on `axis`?
+ *
+ * `null` for `bucketId` means "any bucket, and unfiled too" — the filter is off.
+ * That is the convention both callers need: a bank with no vertical filter
+ * shows every row, including the ones with no vertical at all.
+ */
+export function inBucket(
+  slots: BucketSlots,
+  axis: BucketAxis,
+  bucketId: string | null,
+): boolean {
+  return bucketId === null || bucketOn(slots, axis) === bucketId;
+}

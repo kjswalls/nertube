@@ -95,36 +95,44 @@ export function IdeaFilterBar({
         </select>
       </label>
 
-      <label className={labelClass} htmlFor={verticalId}>
-        Vertical
-        <select
-          id={verticalId}
-          data-testid="idea-vertical-filter"
-          value={filters.verticalId ?? ""}
-          onChange={(event) =>
-            onChange({ ...filters, verticalId: event.target.value || null })
-          }
-          className={selectClass}
-        >
-          <option value="">Any</option>
-          {verticals.map((bucket) => (
-            <option key={bucket.id} value={bucket.id}>
-              {bucket.name} ({counts.verticals.get(bucket.id) ?? 0})
-            </option>
-          ))}
-        </select>
+      <div className="flex items-center gap-1.5">
+        <label className={labelClass} htmlFor={verticalId}>
+          Vertical
+          <select
+            id={verticalId}
+            data-testid="idea-vertical-filter"
+            value={filters.verticalId ?? ""}
+            onChange={(event) =>
+              onChange({ ...filters, verticalId: event.target.value || null })
+            }
+            className={selectClass}
+          >
+            <option value="">Any</option>
+            {verticals.map((bucket) => (
+              <option key={bucket.id} value={bucket.id}>
+                {bucket.name} ({counts.verticals.get(bucket.id) ?? 0})
+              </option>
+            ))}
+          </select>
+        </label>
         {verticals.length === 0 ? (
-          // The seed leaves verticals empty on purpose — they are the channel's
-          // own topic pillars. Saying so beats an empty menu.
+          /*
+            The seed leaves verticals empty on purpose — they are the channel's
+            own topic pillars. Saying so beats an empty menu.
+
+            Outside the <label>, because a label's text content IS the control's
+            accessible name: inside, this select would announce as "Vertical
+            none yet".
+          */
           <span
             data-testid="no-verticals"
             title="A new channel has no verticals: they are your 3–5 topic pillars, and settings (M7) is where they get named."
-            className="font-mono text-[10px]"
+            className="font-mono text-[10px] text-muted"
           >
             none yet
           </span>
         ) : null}
-      </label>
+      </div>
 
       <label className={labelClass} htmlFor={horizontalId}>
         Horizontal

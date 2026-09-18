@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 
-import { AppSidebar, type SidebarSection } from "@/components/app-sidebar";
+import {
+  AppSidebar,
+  boardChannelOf,
+  type SidebarSection,
+} from "@/components/app-sidebar";
+import { countIdeas } from "@/lib/ideas-data";
 import { countNowRows, readNowInputs } from "@/lib/now-data";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -53,6 +58,15 @@ import { requireUser } from "@/lib/supabase/require-user";
  * in the same order with one column fewer — two answers to one question, in six
  * lines of one function, in a milestone whose whole theme is that there is one
  * reader per question.
+ *
+ * ## The Ideas count
+ *
+ * The same argument, one channel at a time. The Ideas row links to
+ * `boardChannelOf(...)`'s bank, so the number beside it is that channel's bank
+ * and no other — which is why `boardChannelOf` is exported from the sidebar and
+ * read here rather than written out twice. `lib/ideas-data.ts` owns the
+ * definition of "an idea" it counts by, and returns `null` rather than throwing
+ * or guessing zero when it cannot read.
  *
  * ## The badge is allowed to fail; the page is not
  *
@@ -108,6 +122,12 @@ export async function AppShell({
     // The chrome degrades; the page does not disappear. See the note above.
   }
 
+  // The bank the Ideas row opens, and therefore the bank it counts. Its own
+  // reader swallows its own failures, so there is nothing to catch here.
+  const ideasChannel = boardChannelOf(channels, currentSlug);
+  const ideasCount =
+    ideasChannel === undefined ? null : await countIdeas(ideasChannel.id);
+
   return (
     /*
       `overflow-x: clip` and not `hidden`: `hidden` on one axis forces the other
@@ -152,6 +172,7 @@ export async function AppShell({
         currentSlug={currentSlug}
         section={section}
         nowCount={nowCount}
+        ideasCount={ideasCount}
         userEmail={user.email ?? null}
       />
 

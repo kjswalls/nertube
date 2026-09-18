@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { IdeaList } from "@/components/ideas/list/idea-list";
 import type { Idea, IdeaBucket } from "@/components/ideas/list/types";
+import { lookupOf, readIdeaFilters } from "@/components/ideas/list/url";
 import { MatrixView } from "@/components/ideas/matrix/matrix-view";
 import { IdeasViewSwitch } from "@/components/ideas/matrix/view-switch";
 import { formatAge } from "@/components/video-detail/age";
@@ -57,17 +58,24 @@ export default async function IdeasPage({
 }: {
   params: Promise<{ slug: string }>;
   /*
-    The seam the matrix lands on. `?view=matrix` is PLAN.md's own spelling —
-    one route, two ways of looking at the same buckets — and the switch is a
-    single branch after the channel lookup, so the bank's reads are not paid
-    for by a request that wanted the grid. `components/ideas/matrix/**` owns
-    everything past that branch; `?cell=` is the matrix's own parameter and is
-    handed straight through.
+    One route, two views, and one set of filters, all in the query string.
+
+    - `?view=matrix` is PLAN.md's own spelling, and the switch is a single
+      branch after the channel lookup so the bank's reads are not paid for by a
+      request that wanted the grid. `components/ideas/matrix/**` owns
+      everything past that branch, and `?cell=` is its own parameter.
+    - `?q`, `?tag`, `?vertical`, `?horizontal`, `?archived` are the bank's
+      filters, named in one place (`components/ideas/list/url.ts`) so that the
+      matrix's drill-down can build a link into a filtered bank without
+      re-deciding what the parameters are called.
   */
-  searchParams: Promise<{ view?: string | string[]; cell?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
-  const { view, cell } = await searchParams;
+  const query = await searchParams;
+  const get = lookupOf(query);
+  const view = get("view");
+  const cell = get("cell");
   const { supabase } = await requireUser();
 
   // RLS scopes this to the signed-in user, so somebody else's slug is
@@ -82,16 +90,12 @@ export default async function IdeasPage({
     notFound();
   }
 
-  if (first(view) === "matrix") {
+  if (view === "matrix") {
     return (
       <AppShell currentSlug={slug} section="ideas" gutter="reading">
         <div className="flex flex-col gap-4">
           <IdeasViewSwitch channelSlug={channel.slug} current="matrix" />
-          <MatrixView
-            supabase={supabase}
-            channel={channel}
-            cell={first(cell) ?? null}
-          />
+          <MatrixView supabase={supabase} channel={channel} cell={cell ?? null} />
         </div>
       </AppShell>
     );
@@ -224,17 +228,17 @@ export default async function IdeasPage({
         verticals={verticals}
         horizontals={horizontals}
         promoteStage={promoteStage}
+        /*
+          Resolved here rather than in the browser, so a pasted link is checked
+          against this channel's buckets before it becomes a filter: an id that
+          no longer exists (or belongs to another channel) is dropped and the
+          bank opens unfiltered, instead of rendering "no idea is in the
+          vertical “that bucket”".
+        */
+        initialFilters={readIdeaFilters(get, { verticals, horizontals })}
       />
     </AppShell>
   );
-}
-
-/**
- * A query parameter as one value. Next hands back `string | string[]`, and
- * `?view=matrix&view=list` is a URL somebody can type.
- */
-function first(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 /**

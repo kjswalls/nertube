@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import type { VideoState } from "@/app/actions/videos";
 import { SaveStatus, useSaveQueue } from "@/components/autosave";
 import { useVideoVersion } from "@/components/video-version";
 import type { BucketChoices } from "@/lib/buckets";
@@ -40,7 +39,6 @@ export function BucketRow({
   choices,
   verticalId,
   horizontalId,
-  onSaved,
 }: {
   videoId: string;
   /** This video's channel's buckets, already split by axis. */
@@ -48,8 +46,6 @@ export function BucketRow({
   /** `videos.vertical_id` / `horizontal_id` as the server render read them. */
   verticalId: string | null;
   horizontalId: string | null;
-  /** The row the save confirmed — the page adopts its `updated_at`. */
-  onSaved?: (video: VideoState) => void;
 }) {
   const version = useVideoVersion();
 
@@ -71,7 +67,6 @@ export function BucketRow({
         // Re-read from the row rather than assumed: this is what is stored.
         setConfirmed(next);
         setShown(next);
-        onSaved?.(video);
       }),
     // A failure parks whatever was queued behind it rather than sending it, so
     // the menus have to go back to the row for that work too — otherwise a

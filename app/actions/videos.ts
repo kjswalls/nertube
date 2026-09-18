@@ -550,7 +550,13 @@ export async function updateVideo(
       bucket ids the database has moved past, and the only useful next step is
       to look at what it holds now.
     */
-    const refusal = describeBucketRefusal(error.code, error.message);
+    const refusal = describeBucketRefusal(
+      error.code,
+      // Postgres puts the constraint name in the message and the offending key
+      // in the details; PostgREST forwards both, and which one carries the
+      // column name is not something this file should bet on.
+      `${error.message} ${error.details ?? ""} ${error.hint ?? ""}`,
+    );
     if (refusal) return { ok: false, error: refusal, conflict: true };
 
     // Every other refusal reaches the user as itself: the hooks CHECK (a fourth

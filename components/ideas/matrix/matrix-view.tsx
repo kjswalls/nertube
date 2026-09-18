@@ -34,9 +34,18 @@ import type { createClient } from "@/lib/supabase/server";
  *
  * The consequence, stated so nobody has to discover it: the number in a cell is
  * **not** the number of rows the idea-bank list shows for the same two buckets,
- * because that list is the Idea stage alone. Each cell says "3 videos" rather
- * than "3 ideas" and its drill-down names the stage each one is in, which is
- * what keeps the two pages from looking like they disagree.
+ * because that list is the Idea stage alone. Three things keep that from
+ * reading as a disagreement rather than a difference of scope:
+ *
+ * - each cell says "3 videos" rather than "3 ideas", and its drill-down names
+ *   the stage each one is in;
+ * - the drill-down also says how many of them are still in the bank, and links
+ *   there with both bucket filters already set
+ *   (`components/ideas/list/url.ts` builds the address);
+ * - and *which* videos are in a bucket is decided by one function for both
+ *   pages — `bucketOn` in `lib/buckets.ts`, which `tally.ts` and the bank's
+ *   `filtering.ts` both call. `components/ideas/agreement.test.ts` runs one
+ *   fixture through both and asserts they name the same rows.
  *
  * ## The reads
  *
@@ -82,7 +91,7 @@ export async function MatrixView({
 
   const { data: stageRows, error: stagesError } = await supabase
     .from("stages")
-    .select("id, name")
+    .select("id, name, kind")
     .eq("channel_id", channel.id);
 
   if (stagesError) {
@@ -91,6 +100,19 @@ export async function MatrixView({
     );
   }
   const stageNames = new Map(stageRows.map((stage) => [stage.id, stage.name]));
+
+  /*
+    Which stage is the bank.
+
+    `kind` and not the name, for the reason every other branch in this app keys
+    on `kind`: Idea can be renamed in settings, and a page that looked for the
+    word would stop agreeing with `/c/[slug]/ideas` the moment somebody did.
+    A channel whose Idea stage has been disabled still has a bank — the list
+    route makes the same point at more length — so `is_enabled` is not consulted
+    here either.
+  */
+  const ideaStageId =
+    stageRows.find((stage) => stage.kind === "idea")?.id ?? null;
 
   const { data: videoRows, error: videosError } = await supabase
     .from("videos")
@@ -117,6 +139,9 @@ export async function MatrixView({
     targetPublishDate: video.target_publish_date,
     publishedAt: video.published_at,
     stageName: stageNames.get(video.stage_id) ?? null,
+    // Archived rows never reach here (the query excludes them), which is the
+    // other half of what the bank means by "in the bank".
+    inBank: ideaStageId !== null && video.stage_id === ideaStageId,
   }));
 
   /*

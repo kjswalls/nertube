@@ -1,3 +1,5 @@
+import { inBucket } from "@/lib/buckets";
+
 import type { Idea, IdeaBucket, IdeaFilters } from "./types";
 
 /**
@@ -99,8 +101,10 @@ const CRITERIA: readonly Criterion[] = [
   {
     kind: "vertical",
     active: (filters) => filters.verticalId !== null,
-    test: (idea, filters) =>
-      filters.verticalId === null || idea.verticalId === filters.verticalId,
+    // `inBucket` and not `idea.verticalId === filters.verticalId`: the matrix
+    // decides the same thing about the same rows, and the two must not be able
+    // to drift. See `lib/buckets.ts` and `components/ideas/agreement.test.ts`.
+    test: (idea, filters) => inBucket(idea, "vertical", filters.verticalId),
     predicate: (filters, labels) =>
       `is in the vertical ${quoted(nameOf(labels.verticals, filters.verticalId))}`,
     noun: (filters, labels) =>
@@ -109,9 +113,7 @@ const CRITERIA: readonly Criterion[] = [
   {
     kind: "horizontal",
     active: (filters) => filters.horizontalId !== null,
-    test: (idea, filters) =>
-      filters.horizontalId === null ||
-      idea.horizontalId === filters.horizontalId,
+    test: (idea, filters) => inBucket(idea, "horizontal", filters.horizontalId),
     predicate: (filters, labels) =>
       `is in the horizontal ${quoted(nameOf(labels.horizontals, filters.horizontalId))}`,
     noun: (filters, labels) =>

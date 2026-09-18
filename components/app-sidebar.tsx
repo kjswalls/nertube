@@ -16,6 +16,22 @@ export interface SidebarChannel {
 }
 
 /**
+ * Which channel the Board and Ideas rows are *of*.
+ *
+ * The route's channel, or the first one — the same order `/` redirects by, so
+ * the two never disagree. Exported because `AppShell` has to read the idea
+ * count for exactly this channel before it can hand it down, and two copies of
+ * this one-liner is how a badge ends up counting a different channel's bank
+ * than the link beside it opens.
+ */
+export function boardChannelOf(
+  channels: readonly SidebarChannel[],
+  currentSlug?: string,
+): SidebarChannel | undefined {
+  return channels.find((channel) => channel.slug === currentSlug) ?? channels[0];
+}
+
+/**
  * The 224px sidebar: sections, channels, and the account.
  *
  * It replaces the M0–M2 top header. A horizontal bar cost 56px of a board that
@@ -69,6 +85,7 @@ export function AppSidebar({
   currentSlug,
   section,
   nowCount,
+  ideasCount,
   userEmail,
 }: {
   channels: readonly SidebarChannel[];
@@ -86,12 +103,14 @@ export function AppSidebar({
    * Undefined on a route that has no shell-level read to do it with.
    */
   nowCount?: number;
+  /**
+   * How many live ideas the Ideas row's channel is holding, or `null` when the
+   * read failed and `undefined` when nobody asked. See `lib/ideas-data.ts`.
+   */
+  ideasCount?: number | null;
   userEmail: string | null;
 }) {
-  // "Board" needs a channel to be the board *of*: the route's, or the first
-  // one — the same order `/` redirects by, so the two never disagree.
-  const boardChannel =
-    channels.find((channel) => channel.slug === currentSlug) ?? channels[0];
+  const boardChannel = boardChannelOf(channels, currentSlug);
 
   return (
     // Two elements, because "the sidebar is 224px of its own ground" and "the
@@ -192,6 +211,39 @@ export function AppSidebar({
                 <SidebarLink
                   href={`/c/${boardChannel.slug}/ideas`}
                   current={section === "ideas" ? "page" : false}
+                  /*
+                    The bank's size, drawn exactly the way the Now count is:
+                    `aria-hidden` on the chip so the link's accessible name
+                    stays "Ideas", the number repeated in `title` so a screen
+                    reader gets it as the link's description, and nothing at all
+                    when it is zero or unknown.
+
+                    It is the *unfiltered* count, like `/now`'s. Narrowing the
+                    bank with the filters on the page does not change how many
+                    ideas there are, and a badge that followed the filters would
+                    be reporting the filter rather than the bank.
+                  */
+                  title={
+                    ideasCount === undefined ||
+                    ideasCount === null ||
+                    ideasCount === 0
+                      ? undefined
+                      : `${ideasCount} ${ideasCount === 1 ? "idea" : "ideas"} in ${boardChannel.name}'s bank`
+                  }
+                  trailing={
+                    ideasCount === undefined ||
+                    ideasCount === null ||
+                    ideasCount === 0 ? null : (
+                      <span
+                        aria-hidden="true"
+                        data-testid="sidebar-ideas-count"
+                        data-count={ideasCount}
+                        className="font-mono text-[10px] text-muted"
+                      >
+                        {ideasCount}
+                      </span>
+                    )
+                  }
                 >
                   Ideas
                 </SidebarLink>

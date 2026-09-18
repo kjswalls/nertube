@@ -38,6 +38,7 @@ function video(input: Partial<MatrixVideo> & { id: string }): MatrixVideo {
     targetPublishDate: null,
     publishedAt: null,
     stageName: "Idea",
+    inBank: true,
     ...input,
   };
 }

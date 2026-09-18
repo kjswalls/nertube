@@ -2,7 +2,6 @@
 
 import { useId, useMemo, useState } from "react";
 
-import type { VideoState } from "@/app/actions/videos";
 import { SaveStatus, useSaveQueue } from "@/components/autosave";
 import { useVideoVersion } from "@/components/video-version";
 import { MAX_TAG_LENGTH, MAX_TAGS, TagListSchema } from "@/lib/video-fields";
@@ -45,14 +44,12 @@ export function TagEditor({
   videoId,
   initial,
   vocabulary,
-  onSaved,
 }: {
   videoId: string;
   /** `videos.tags` as the server render read it. */
   initial: readonly string[];
   /** Every tag used by this channel's videos, in use-count order. */
   vocabulary: readonly string[];
-  onSaved?: (video: VideoState) => void;
 }) {
   const version = useVideoVersion();
   const inputId = useId();
@@ -63,6 +60,16 @@ export function TagEditor({
   /** What is on screen — ahead of the row while a save is in flight. */
   const [shown, setShown] = useState<readonly string[]>(initial);
   const [draft, setDraft] = useState("");
+  /**
+   * Tags this editor has added that the channel's vocabulary did not have yet.
+   *
+   * The vocabulary comes down with the server render, so without this a tag
+   * added here and then removed would not be offered back until the route
+   * re-rendered — which is exactly the moment someone wants it back. Only
+   * grown, never pruned: a tag this video drops may well still be on five
+   * others, and this component cannot know.
+   */
+  const [learned, setLearned] = useState<readonly string[]>([]);
   /** A refusal this component made itself, before any round trip. */
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -74,18 +81,32 @@ export function TagEditor({
       saveFiling(videoId, version, { tags }, (video) => {
         setConfirmed(video.tags);
         setShown(video.tags);
-        onSaved?.(video);
+        setLearned((current) => {
+          const known = new Set(
+            [...vocabulary, ...current].map((tag) => tag.toLocaleLowerCase()),
+          );
+          const added = video.tags.filter(
+            (tag) => !known.has(tag.toLocaleLowerCase()),
+          );
+          return added.length === 0 ? current : [...current, ...added];
+        });
       }),
     onFailure: () => setShown(confirmed),
   });
 
+  /** Everything this channel is known to use: the server's list plus our own. */
+  const known = useMemo(
+    () => [...vocabulary, ...learned],
+    [learned, vocabulary],
+  );
+
   /** The channel's tags this video does not already carry. */
   const suggestions = useMemo(() => {
     const mine = new Set(shown.map((tag) => tag.toLocaleLowerCase()));
-    return vocabulary
+    return known
       .filter((tag) => !mine.has(tag.toLocaleLowerCase()))
       .slice(0, SUGGESTION_LIMIT);
-  }, [shown, vocabulary]);
+  }, [known, shown]);
 
   /**
    * Put a list on screen and on the wire, or say why not.
@@ -228,7 +249,7 @@ export function TagEditor({
             below are the short list; this is everything, for a channel that has
             more tags than chips worth drawing. */}
         <datalist id={listId} data-testid="tag-vocabulary">
-          {vocabulary.map((tag) => (
+          {known.map((tag) => (
             <option key={tag} value={tag} />
           ))}
         </datalist>

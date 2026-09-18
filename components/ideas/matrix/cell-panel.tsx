@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { ideaBankHref } from "@/components/ideas/list/url";
+
 import type { CellTally, MatrixBucket } from "./tally";
 
 /**
@@ -15,6 +17,17 @@ import type { CellTally, MatrixBucket } from "./tally";
  * construction — `buildTally` puts each video into exactly one cell and this
  * renders that cell's array. That is the property `e2e/matrix.spec.ts` checks
  * against the database rather than against itself.
+ *
+ * ## The link back into the bank
+ *
+ * The matrix counts every stage and the bank lists the Idea stage, so a cell
+ * reading 3 above a bank showing 1 is correct and looks like a bug. The panel
+ * therefore says the bank's number itself — `cell.inBank`, counted in the same
+ * pass as `cell.count` — and offers it as a link with both bucket filters
+ * already on, built by `ideaBankHref` so the two pages cannot disagree about
+ * what the parameters are called. When none of the cell's videos are still in
+ * the bank the link is replaced by the sentence that says so, rather than
+ * pointing at a list that would be empty.
  */
 export function CellPanel({
   channelSlug,
@@ -56,7 +69,25 @@ export function CellPanel({
       <p className="text-[12px] text-muted">
         <span className="font-mono">{cell.count}</span>{" "}
         {cell.count === 1 ? "video" : "videos"} at this intersection,{" "}
-        <span className="font-mono">{cell.published}</span> published.
+        <span className="font-mono">{cell.published}</span> published.{" "}
+        {cell.inBank === 0 ? (
+          <span data-testid="cell-bank-none">
+            None of them are still in the idea bank.
+          </span>
+        ) : (
+          <Link
+            href={ideaBankHref(channelSlug, {
+              verticalId: vertical.id,
+              horizontalId: horizontal.id,
+            })}
+            data-testid="cell-bank-link"
+            data-in-bank={cell.inBank}
+            className="rounded-button underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <span className="font-mono">{cell.inBank}</span>{" "}
+            {cell.inBank === 1 ? "is" : "are"} still in the idea bank
+          </Link>
+        )}
       </p>
 
       <ul data-testid="cell-videos" className="flex flex-col">

@@ -3739,6 +3739,44 @@ idea is ever opened on; filing belongs where you land, not a tab along. A sixth
 section was the other alternative and would have been a tab with two fields in
 it.
 
+### What the page's weight cost, and what was done about it
+
+The first full browser run after this block landed had exactly one reproducible
+failure, and it was not in this slice's own spec: `e2e/packaging.spec.ts`'s
+skip test clicks the skip disclosure immediately after `page.goto`, with no
+retry, and the click was being **swallowed** — the control was on screen, but
+the route had not hydrated yet, so nothing was listening.
+
+That is the property `e2e/hydration.ts` documents at length: all five sections
+stay mounted (which is what makes switching them free of consequences for a
+half-typed field), hydration is one synchronous pass over the whole tree, and
+so every component added to the page widens the window in which a
+server-rendered control has no handler. That file also names the honest fix if
+it gets worse: **make the sections lighter — not unmount them, and not paper
+over it in the spec.**
+
+So the filing block was made a **Server Component**. The heading, the sentence
+and the section chrome ship no JavaScript now, and the vocabulary-growing state
+that used to live in the block moved into the tag editor, which is a client
+component either way. That is one fewer component in the hydration pass, and it
+is enough: `packaging.spec.ts` passes again, unmodified. Measured on the same
+machine and the same stack, the video page's time to `data-shortcut-ready` went
+from about 1.6s to about 0.9s — the same as before the block existed.
+
+Nothing in `e2e/packaging.spec.ts` was touched. A spec that was passing before
+this slice and fails after it is a regression in the page, not in the spec, and
+adding a retry to it would have hidden a first click that a real person would
+also have lost.
+
+What is honest to add: that case is no longer *failing*, but it is still the
+thinnest margin on the page. Before the fix it failed every time — in the full
+suite and on its own. After it, it passed five runs in a row across three
+different spec combinations and failed once, on a run whose first navigation
+also paid for a cold `next dev` compile of a freshly copied tree. That is the
+same flake class the video page's other specs have had since M4, and the same
+remedy applies if it worsens: fewer components in the hydration pass, not a
+longer wait in the test.
+
 ### The picker's promise, stated exactly
 
 There is no application-level check anywhere in this slice that a bucket belongs
@@ -3783,9 +3821,31 @@ not a value the next channel has.
 |---|---|
 | `npm run typecheck` | clean (both projects) |
 | `npm run lint` | clean |
-| `npm test` | see the integration pass — unchanged by this slice |
+| `npm test` | 13 files, 250 tests passed |
 | `./scripts/verify-db.sh nertube_m5_buckets` | OK — migrations applied, **14** SQL test files passed |
-| `npx playwright test buckets` | see below |
+| `npx playwright test buckets` | 6 passed |
+| `npx playwright test` (whole suite), run 1 | 148 passed, 1 skipped, 2 failed under load — both pass when re-run alone (below) |
+| `npx playwright test` (whole suite), run 2 | 149 passed, 1 skipped, 1 failed — a *different* case of the same kind, also passing alone |
+| `npm run build` | 9 routes, compiled (run in the copy, for the reason below) |
+
+Two caveats, stated rather than footnoted. **The suite was run from a copy of
+the working tree** (`/tmp/…/e2e-run`, its own ports, its own database
+`nertube_e2e_assign`): the idea-bank slice was iterating in the same directory
+at the same time, and Next allows one `next dev` per directory — its own
+preflight (`scripts/e2e-preflight.mjs`) refuses to start a second. The copy was
+re-synced from the working tree before each run, so what was tested is this
+code.
+
+**And the failures are load flakes, not regressions.** Run 1 lost
+`m2-review.spec.ts:640` (focus after removing a hook row) and
+`preview.spec.ts:1119` (the comparison's clamp attribute); run 2 lost neither of
+those and instead timed out on `m2-review.spec.ts:476` (a target date saved
+without a blur). Re-running both files alone passes all 29 of their cases,
+including all three of those. That is the same pattern the matrix slice
+recorded, in the same two files, for the same reason: the hydration window under
+full-suite load. The one failure in that run that *was* a real regression — the
+packaging skip click — is the one above, and it is fixed in the page rather than
+in the spec.
 
 ### The SQL test, and what it adds to `50_buckets`
 
@@ -3844,6 +3904,8 @@ channel's bucket, the wrong axis and another tenant's bucket.
 | Capture's pickers fetch their options when the disclosure opens. | Read the buckets in `AppShell` for every signed-in route. Rejected: a query per page load for a dialog usually never opened is the same friction in a different currency. |
 | A refused bucket is reported as a conflict with a Reload. | A Retry. Rejected: the same patch would be refused the same way; what is stale is the page's idea of the channel's buckets. |
 | The bucket menus grey out while a save is in flight. | Let a second pick queue behind the first. Rejected: the queue parks work behind a failure rather than sending it, so a second pick made during a failing save could sit on screen having never been written. |
+| The filing block is a Server Component; only the two controls are client ones. | One client component for the whole block. Rejected after measuring: it cost the page enough hydration time to lose the packaging skip disclosure's first click. |
+| The matrix's "filing it under X · Y" line disappears the moment either menu is changed. | Keep the sentence and let it go stale. Rejected: a line claiming one pair over a picker showing another is worse than no line. |
 
 ### Honest limits
 
@@ -3854,10 +3916,11 @@ channel's bucket, the wrong axis and another tenant's bucket.
   limit 2000`), counted in memory. That is right for PLAN.md's sizing — one
   user, hundreds of rows — and would want a `group by` over an `unnest` if a
   channel ever held tens of thousands.
-- **A tag added here appears in this page's suggestion row immediately, but the
-  bank's filter chips only after that route re-renders.** `updateVideo` now
-  revalidates `/c/[slug]/ideas`, so a navigation is enough; a second open tab is
-  not told.
+- **A tag added here appears in this page's suggestion row immediately** (the
+  tag editor grows its own copy of the vocabulary from what each save confirms)
+  **but the bank's filter chips only after that route re-renders.**
+  `updateVideo` now revalidates `/c/[slug]/ideas`, so a navigation is enough; a
+  second open tab is not told.
 - **The capture pickers do not suggest tags.** Capture's tag box is still the
   comma-separated one, deliberately: it is behind the disclosure on the
   fastest path in the product, and the channel can still change underneath it.
@@ -4010,3 +4073,240 @@ apologising for being one — and is now an anchor to the same route, keeping it
 - **The matrix is not here.** `?view=matrix` is the sibling slice's — see "M5 —
   The content-bucket matrix" above, which owns the branch in the route file and
   everything past it. This section documents the list only.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 9 routes, compiled — `/c/[slug]/ideas` among them |
+| `npm test` | 13 files, 250 tests passed (12 of them `filtering.test.ts`) |
+| `./scripts/verify-db.sh nertube_m5_list` | OK — migrations applied, 14 SQL test files passed |
+| `npx playwright test ideas` | 7 passed (25s) |
+| `npx playwright test` (whole suite) | 147 passed, 1 skipped, 1 failed (15.7m) |
+
+Two honest notes on the numbers.
+
+**The one failure is not this slice's, and not a product bug.** It is
+`e2e/buckets.spec.ts:372` from the sibling filing slice, which was landing in
+this working tree at the same time: its `getByLabel('Idea')` is unscoped and
+matches the board's Idea column, the capture dialog and the capture input at
+once, so Playwright refuses it under strict mode. Every other spec in the suite
+passed, including all thirteen of the files that existed before M5.
+
+**The suite was run on its own ports, database and output directory**
+(`E2E_REUSE=0 E2E_PORT=3121 DEV_STACK_PORT=54341
+DEV_STACK_POSTGREST_PORT=54342 NERTUBE_DEV_DB=nertube_e2e_ideas
+--output=test-results-ideas`). Three slices were building in one tree; a first
+full run of this suite reported two failures in `thumbnails.spec` and
+`upload.spec`, both of them `browserContext.close: ENOENT …
+.playwright-artifacts-N/traces/…`, which is one run clearing the shared
+`test-results/` directory under another. Re-run alone, all seventeen of those
+two files' cases pass, and the clean run above has them green. Next allows one
+`next dev` per directory, so two Playwright runs in one checkout cannot overlap
+at all — that is a fact about the harness, not about the code.
+
+---
+
+## M5 — Integration: one route, two views, and one answer to "which bucket is it in?"
+
+Three slices landed concurrently: the idea bank list, the content-bucket matrix,
+and filing (the bucket pickers and the tag editor). This is the composition —
+what was verified rather than trusted, the two seams that were still open when
+they landed, the acceptance walk, and what is still true and unfixed.
+
+### What was already right, and was checked rather than trusted
+
+Every claim in the three reports above was read against the code before anything
+was changed here.
+
+- **One shortcut mechanism.** `lib/shortcuts.ts` is still the only keyboard
+  registry. The bank's `j`/`k`/`p`/`Enter` go through `useShortcuts`, which
+  already refuses to fire while focus is in an input — so `p` typed into the
+  search box is a letter, and `e2e/ideas.spec.ts` asserts it. No second listener
+  was added anywhere in `components/ideas/**`.
+- **One save queue.** `components/ideas/assign/save-filing.ts` routes the bucket
+  and tag writes through `updateVideo` + `useSaveQueue` + `VideoVersion`. The
+  bank's own writes (`promote`, `archive`, `restore`) are deliberately *not*
+  queued — they are one-shot, non-optimistic calls to `moveVideo` and
+  `updateVideo` — which is a different thing from a second queue.
+- **One modal.** `components/modal.tsx` is still the only dialog. The matrix's
+  capture cell mounts it with `testId="matrix-capture"`; capture's own host
+  mounts the same component.
+- **One write path per concept.** Promote is `moveVideo` → the `move_video` RPC,
+  the same call the board's drag and `[`/`]` make; no gate logic was
+  re-implemented. Archive and Restore are `updateVideo({ archived })`.
+  `capture_video` is still the only client path that creates a video.
+- **No migration, and nothing weakened.** `buckets`, `videos.vertical_id` /
+  `horizontal_id` behind their three-column composite FKs, `videos.tags` and
+  `videos.archived_at` were all already in `0001_init.sql`. The filing slice
+  *added* `supabase/tests/55_bucket_assignment.test.sql`, which pins the shape of
+  both foreign keys in the catalogue; no existing migration was touched.
+- **The board's `+K more in Ideas` is a real anchor** to `/c/<slug>/ideas`,
+  keeping the `idea-overflow` test id so M1's cap assertion still reads.
+- **`e2e/buckets.spec.ts`'s strict-mode failure was already fixed** in the tree
+  by the filing slice before this pass began (the locator is scoped to the
+  dialog now). It was re-run here rather than taken on report.
+
+### Seam 1 — the list and the matrix could have disagreed about a bucket
+
+This is the bug this integration step existed to prevent, and it was genuinely
+reachable: the bank asked `idea.verticalId === filters.verticalId` and the
+matrix asked `video.verticalId !== null && verticalIds.has(video.verticalId)`,
+in two files, written by two agents, over the same column. Nothing was wrong on
+the day; there was simply no reason the two had to stay the same.
+
+**Fix.** `lib/buckets.ts` gained `bucketOn(slots, axis)` and
+`inBucket(slots, axis, bucketId)` — the single answer to "which bucket is this
+video in on this axis". `components/ideas/list/filtering.ts` and
+`components/ideas/matrix/tally.ts` both call it. The interface is structural
+(`{ verticalId, horizontalId }`), so the bank's `Idea`, the matrix's
+`MatrixVideo` and a raw `videos` row all satisfy it without a conversion step.
+
+**Proof.** `components/ideas/agreement.test.ts` — a new file at
+`components/ideas/`, belonging to neither half — builds one fixture of ten rows
+across three stages, one archived, two pillars and two formats, then runs it
+through `buildTally` and through `visibleIdeas` and asserts the two name **the
+same video ids**, not merely the same counts. It does that for every cell of the
+grid, not only the interesting one. Seven tests.
+
+### Seam 2 — the matrix had nowhere to point, because the bank had no address
+
+The matrix slice recorded a deliberate deferral: a populated cell drilled down
+into a panel rather than linking into the bank's bucket filters, because "a link
+into a filter that may not filter yet is the dead-link mistake M1 and M3 both
+filed". The list slice recorded the matching limit: *filter state is not in the
+URL, so a filtered bank cannot be linked*. Both were right; this is where they
+meet.
+
+**The filters are now in the query string.** `components/ideas/list/url.ts` names
+them once — `q`, `tag`, `vertical`, `horizontal`, `archived=1` — and owns both
+directions: the route parses them (`readIdeaFilters`), the list writes them back
+as the user types, and the matrix builds them from a cell (`ideaBankHref`). The
+parameters are spelled the same way `/capture` already spells `vertical` and
+`horizontal`.
+
+- **Written back with `window.history.replaceState`**, which Next supports and
+  syncs into its own router (`node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md`,
+  "Native History API"). No server round trip: the filtering is in-memory over
+  rows that are already in the browser, so a `router.replace` per keystroke would
+  re-run the page's four reads to produce an identical list.
+- **Resolved on the server against this channel's buckets.** A pasted id that
+  this channel does not have on that axis is *dropped*, so a stale link opens the
+  unfiltered bank instead of an empty list explaining itself as "the vertical
+  “that bucket”". A tag is free text with no catalogue, so an unknown tag stays
+  on and `explainEmpty` says in words that nothing carries it.
+
+**And the cell now says the bank's own number.** The matrix counts every stage
+and the bank lists the Idea stage — a difference of *scope*, not of membership,
+but a cell reading 4 above a list showing 2 looks exactly like a bug. So
+`MatrixVideo` gained `inBank` (its stage's `kind` is `idea`), `CellTally` gained
+the count of them, and the drill-down panel prints "2 are still in the idea
+bank" as a link carrying both bucket filters. A cell none of whose videos are
+still in the bank says so instead of offering a link to an empty list.
+
+### Seam 3 — the sidebar's Ideas entry, and M3's finding closed
+
+M3's reviewers filed the Ideas row as unreachable by keyboard and explained only
+by a tooltip. The list slice made it a real `SidebarLink`; this pass finished the
+job.
+
+- It is a link with `aria-current="page"` on the route, it takes focus, and
+  `Enter` navigates — asserted in `e2e/m5-integration.spec.ts` rather than
+  assumed from the markup.
+- It carries a **live count**, drawn exactly the way the Now badge is: the chip
+  is `aria-hidden` so the link's accessible name stays "Ideas", and the number
+  reaches assistive technology through `title` as the link's *description*.
+- The number comes from `lib/ideas-data.ts`, a `cache()`d reader that owns the
+  definition it counts by. Its file comment lists the three ways a cheaper count
+  would have been wrong, all of them reachable from code that already exists:
+  counting by stage *name* (renameable in M7), reusing `readNowInputs` (which
+  reads only `is_enabled` stages, so a channel with its Idea column switched off
+  would show 0 above a page listing 40), and counting archived rows.
+- `boardChannelOf` was extracted from `components/app-sidebar.tsx` and is now
+  read by `AppShell` too, so the badge counts the bank the link opens rather
+  than a second guess at "which channel is Board of".
+- `SidebarDisabled` now has exactly one user left: Calendar (M6).
+
+### The acceptance walk
+
+PLAN.md's M5 line is *"matrix renders, promote lands in Packaging"*.
+`e2e/m5-integration.spec.ts` walks it in one browser session against the real
+stack, reading every claim back from Postgres:
+
+1. `?view=matrix` renders a 2 × 8 grid, and the view switch is two real links.
+2. An empty cell (`craft · interview`) is an `<a href="/capture?c=…&vertical=…&horizontal=…">`;
+   clicking it opens the shared modal, `Enter` captures, and the row it wrote
+   carries both bucket ids and sits in the Idea stage.
+3. The grid then counts it.
+4. Back on the bank, `j` selects and `p` promotes — and the assertion is
+   `select s.kind … where v.title = …` returning `packaging`, not the row
+   disappearing.
+
+The other three cases in that file are the seams above: the sidebar entry, the
+filters surviving a reload and a pasted link, and the cell's three numbers
+checked against the database rather than against the page's other half.
+
+### Decisions taken without the user
+
+- **The filters go in the URL; the view switch does not carry them.** BRIEF.md
+  wants the bank and the matrix to be two ways of looking at one thing, and a
+  narrowed bank you cannot send to yourself is a thing you re-narrow every time.
+  The switch's List link is deliberately bare, because the matrix has no filters
+  to preserve and a List link that restored a search box the grid never showed
+  would be surprising. *Alternative:* carry the filters through the switch and
+  let the matrix ignore them, so a round trip is lossless.
+- **`replaceState`, not `pushState`.** Typing six letters into the search box
+  would otherwise be six history entries and six presses of Back to leave the
+  page. The cost is that Back does not step through filter changes — it leaves
+  the bank, which is what Back means everywhere else in this app.
+  *Alternative:* `pushState`, debounced on the search box only.
+- **An unknown bucket id in the URL is dropped, not honoured.** A stale link
+  degrades to the unfiltered bank. *Alternative:* keep it and say "that filter no
+  longer exists", which is more informative and also puts a control on screen
+  that cannot be turned off from the select it belongs to.
+- **The sidebar's count is the unfiltered bank.** Narrowing the page does not
+  change how many ideas there are, and a badge that followed the filters would be
+  reporting the filter. This is the same rule `/now`'s badge already follows.
+  *Alternative:* count what is on screen.
+- **The cell keeps counting every stage, and says the bank's number beside it.**
+  The alternative — counting only Idea-stage rows so the two numbers match — was
+  rejected by the matrix slice for a good reason (*"where have I never
+  published"* becomes unanswerable from the grid) and is not reopened here. What
+  changed is that the difference is now printed rather than left to be inferred.
+- **Two extra reads on every signed-in route** for the Ideas badge. The price of
+  a count that agrees with the page it points at; `lib/now-data.ts` already pays
+  five for the same reason. *Alternative:* draw no count, or compute it from the
+  `/now` read and accept that it disagrees when the Idea stage is disabled.
+
+### Honest limits, carried forward
+
+- **Back does not undo a filter change** (see `replaceState` above).
+- **No pagination.** Both views read up to 2000 rows in one go, which is
+  PLAN.md's own sizing and the bound the board already uses.
+- **Nothing in the product can create a bucket.** The seed ships eight
+  horizontals and no verticals on purpose, so a new channel's vertical select
+  reads "none yet" and the matrix draws its "no pillars" panel until the bucket
+  editor lands in **M7**. Every pillar in the e2e fixtures is written in SQL for
+  that reason.
+- **`captureVideo` and `updateVideo` are the only writers of `vertical_id` /
+  `horizontal_id`.** The filing slice closed the gap the matrix slice reported:
+  a video captured without buckets can now be filed from the Packaging tab. It
+  still cannot be filed from the bank row or from the matrix's off-grid line —
+  both of which can report the problem and not fix it in place.
+- **Archive still has no undo after a reload**, only Restore behind the "Show
+  archived" toggle.
+- **Assist pills remain inert and disabled** until M8. Nothing in this pass
+  touched them.
+
+### Gates for this pass
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled, 9 routes |
+| `./scripts/verify-db.sh m5_check` | OK — migrations applied, 14 SQL test files passed |
+| `npm run test` | 14 files, 257 tests passed (7 of them the new `agreement.test.ts`) |
+| `npm run e2e` | see below |

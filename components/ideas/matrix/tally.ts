@@ -19,6 +19,8 @@
  *    once, rather than in the component that draws the bar.
  */
 
+import { bucketOn } from "@/lib/buckets";
+
 /* -------------------------------------------------------------------------- */
 /* The month                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -109,6 +111,18 @@ export interface MatrixVideo {
   readonly publishedAt: string | null;
   /** The name of the stage it is sitting in, for the drill-down list. */
   readonly stageName: string | null;
+  /**
+   * Is this row still in the Idea stage — that is, is it one of the rows the
+   * idea bank at `/c/[slug]/ideas` would list?
+   *
+   * The matrix counts every stage on purpose (see `matrix-view.tsx`), so a
+   * cell's count is legitimately larger than the bank's. That is only honest if
+   * the page can also say how much of the cell the bank holds, which is what
+   * this is for: the drill-down panel prints it and links to the bank filtered
+   * by these two buckets, and `e2e/matrix.spec.ts` asserts the two numbers
+   * match.
+   */
+  readonly inBank: boolean;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -121,6 +135,11 @@ export interface CellTally {
   readonly count: number;
   /** How many of them have been published. Zero is the interesting number. */
   readonly published: number;
+  /**
+   * How many of them the idea bank would list — the Idea-stage ones. The cell's
+   * link into the bank carries this number, so the link says what it will show.
+   */
+  readonly inBank: number;
   /** The videos themselves, newest-looking order left to the caller's query. */
   readonly videos: readonly MatrixVideo[];
 }
@@ -186,7 +205,14 @@ export function buildTally(input: {
 
   const cells = new Map<
     string,
-    { verticalId: string; horizontalId: string; count: number; published: number; videos: MatrixVideo[] }
+    {
+      verticalId: string;
+      horizontalId: string;
+      count: number;
+      published: number;
+      inBank: number;
+      videos: MatrixVideo[];
+    }
   >();
   const bucketTotals = new Map<string, number>();
   const bucketThisMonth = new Map<string, number>();
@@ -199,13 +225,21 @@ export function buildTally(input: {
   };
 
   for (const video of input.videos) {
+    /*
+      `bucketOn` and not `video.verticalId` read directly: the idea bank's
+      bucket filter asks the identical question of the identical rows through
+      the identical function (`lib/buckets.ts`), which is what stops a cell
+      saying 3 above a list that shows 2. The `has` check on top of it is the
+      matrix's own extra caution — an id this grid was not given credits
+      nothing, so a stale read can lose a cell but never invent one.
+    */
+    const onVertical = bucketOn(video, "vertical");
+    const onHorizontal = bucketOn(video, "horizontal");
     const vertical =
-      video.verticalId !== null && verticalIds.has(video.verticalId)
-        ? video.verticalId
-        : null;
+      onVertical !== null && verticalIds.has(onVertical) ? onVertical : null;
     const horizontal =
-      video.horizontalId !== null && horizontalIds.has(video.horizontalId)
-        ? video.horizontalId
+      onHorizontal !== null && horizontalIds.has(onHorizontal)
+        ? onHorizontal
         : null;
 
     // The per-bucket numbers are per bucket, not per cell: a video with a
@@ -230,11 +264,19 @@ export function buildTally(input: {
     const key = cellKey(vertical, horizontal);
     let cell = cells.get(key);
     if (!cell) {
-      cell = { verticalId: vertical, horizontalId: horizontal, count: 0, published: 0, videos: [] };
+      cell = {
+        verticalId: vertical,
+        horizontalId: horizontal,
+        count: 0,
+        published: 0,
+        inBank: 0,
+        videos: [],
+      };
       cells.set(key, cell);
     }
     cell.count += 1;
     if (video.publishedAt !== null) cell.published += 1;
+    if (video.inBank) cell.inBank += 1;
     cell.videos.push(video);
   }
 
@@ -276,6 +318,7 @@ export function cellAt(
       horizontalId,
       count: 0,
       published: 0,
+      inBank: 0,
       videos: [],
     }
   );

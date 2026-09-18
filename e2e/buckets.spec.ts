@@ -295,6 +295,42 @@ async function bucketId(
   return result.rows[0].id;
 }
 
+test('a bucket the database refuses is explained, and the row is left alone', async ({
+  page,
+}) => {
+  const videoId = await seedIdea(channel, 'Filed against a bucket that goes away');
+  await page.goto(`/videos/${videoId}`);
+  await hydrated(page);
+
+  /* The page is now holding an option the database is about to stop having.
+     This is the stale-tab case the composite foreign key exists for, staged
+     deliberately: the menu still offers `focus`, and picking it sends an id
+     that no longer names a row. */
+  await db.query(
+    "delete from public.buckets where channel_id = $1 and axis = 'vertical' and name = 'focus'",
+    [channel.id],
+  );
+
+  await untilTaken(
+    async () => {
+      await page.getByTestId('video-vertical').selectOption({ label: 'focus' });
+    },
+    () => expect(page.getByTestId('bucket-row-status')).toHaveAttribute('data-state', 'error'),
+  );
+
+  // Not `videos_vertical_id_channel_id_vertical_axis_fkey`: what happened, and
+  // what to do about it.
+  await expect(page.getByTestId('bucket-row-status')).toContainText('topic pillar');
+  await expect(page.getByTestId('bucket-row-status')).toContainText('reload');
+
+  // A refusal is a conflict, not something a Retry could fix: the page is
+  // holding buckets the channel has moved past.
+  await expect(page.getByTestId('bucket-row-status-reload')).toBeVisible();
+
+  // And nothing was written.
+  expect(await filed(videoId)).toMatchObject({ vertical: null, horizontal: null });
+});
+
 /* -------------------------------------------------------------------------- */
 /* 5 — the tag editor                                                          */
 /* -------------------------------------------------------------------------- */
@@ -469,6 +505,48 @@ test('capture’s fast path is one field, and the buckets live behind the disclo
     vertical: 'focus',
     horizontal: 'listicle',
   });
+});
+
+test('retargeting the capture to another channel reloads the menus and clears the choice', async ({
+  page,
+}) => {
+  await page.goto(`/c/${CHANNEL.slug}/board`);
+  await hydrated(page);
+
+  await untilTaken(
+    async () => {
+      if (await page.getByRole('dialog').isVisible().catch(() => false)) return;
+      await page.keyboard.press('c');
+    },
+    () => expect(page.getByRole('dialog')).toBeVisible(),
+  );
+
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Shift+Enter');
+  await expect(page.getByTestId('capture-buckets-status')).toHaveAttribute(
+    'data-status',
+    'ready',
+  );
+
+  await page.getByTestId('capture-vertical').selectOption({ label: 'focus' });
+  await expect(page.getByTestId('capture-vertical')).not.toHaveValue('');
+
+  // Aim it at the other channel by clicking its chip — what `1..9` does too.
+  await dialog.locator('label', { hasText: OTHER.name }).click();
+
+  await expect(page.getByTestId('capture-buckets-status')).toHaveAttribute(
+    'data-status',
+    'ready',
+  );
+
+  /* The choice is gone and the menu is the other channel's. A bucket belongs to
+     its channel — `videos` binds each slot through a three-column key — so
+     carrying `focus` across would post an id this channel does not have. */
+  await expect(page.getByTestId('capture-vertical')).toHaveValue('');
+  expect(await optionLabels(page, 'capture-vertical')).toEqual([
+    '— not filed —',
+    FOREIGN_PILLAR,
+  ]);
 });
 
 /* -------------------------------------------------------------------------- */

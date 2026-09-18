@@ -17,6 +17,7 @@ import {
   matchesFilters,
   visibleIdeas,
 } from "./filtering";
+import { ideaFilterQuery } from "./url";
 import { NO_IDEA_FILTERS, type Idea, type IdeaBucket, type IdeaFilters } from "./types";
 
 /**
@@ -57,6 +58,22 @@ import { NO_IDEA_FILTERS, type Idea, type IdeaBucket, type IdeaFilters } from ".
  * `j`/`k` select, `p` promote, `Enter` open — registered once through
  * `lib/shortcuts.ts`, which is the application's only keyboard mechanism and
  * which already refuses to fire while the search box has focus.
+ *
+ * ## The filters are in the address bar
+ *
+ * They arrive as `initialFilters`, parsed from the query string by the route
+ * (`components/ideas/list/url.ts` names the parameters), and every change is
+ * written back with `window.history.replaceState` — which Next supports and
+ * syncs with its own router, and which costs no server round trip. That is the
+ * point: the filtering is in-memory over rows that are already here, so a
+ * `router.replace` per keystroke would re-run the page's four reads to produce
+ * an identical list.
+ *
+ * `replaceState` and not `pushState`, deliberately: typing six letters into the
+ * search box would otherwise be six entries in the history stack and six
+ * presses of Back to leave the page. The cost, recorded in
+ * `docs/MILESTONES.md`, is that Back does not step through filter changes — it
+ * leaves the bank, which is what Back means everywhere else in this app.
  */
 export function IdeaList({
   channelName,
@@ -65,6 +82,7 @@ export function IdeaList({
   verticals,
   horizontals,
   promoteStage,
+  initialFilters,
 }: {
   channelName: string;
   channelSlug: string;
@@ -78,11 +96,17 @@ export function IdeaList({
    * the button has to be able to say rather than a button that is missing.
    */
   promoteStage: { id: string; name: string } | { id: null; reason: string };
+  /**
+   * What the query string was asking for when this page was requested. Already
+   * resolved against this channel's buckets by the route, so an id in here is
+   * an id that exists.
+   */
+  initialFilters: IdeaFilters;
 }) {
   const router = useRouter();
   const toast = useToast();
 
-  const [filters, setFilters] = useState<IdeaFilters>(NO_IDEA_FILTERS);
+  const [filters, setFilters] = useState<IdeaFilters>(initialFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -113,6 +137,28 @@ export function IdeaList({
   useEffect(() => {
     listRef.current?.setAttribute("data-ready", "true");
   }, []);
+
+  /*
+    The address bar follows the filters.
+
+    `window.history.replaceState` is the documented way to move the query string
+    without a navigation (`node_modules/next/dist/docs/01-app/01-getting-started/
+    04-linking-and-navigating.md`, "Native History API"); Next syncs it into its
+    own router, so `useSearchParams` elsewhere stays correct and a later
+    `router.refresh()` re-runs the page against the filtered URL rather than the
+    bare one.
+
+    Guarded by a string compare so the effect is a no-op on mount when the URL
+    already says this — which is every arrival from a link, and which is what
+    keeps a shared URL from being rewritten before it has been read.
+  */
+  useEffect(() => {
+    const query = ideaFilterQuery(filters);
+    const path = window.location.pathname;
+    const target = query === "" ? path : `${path}?${query}`;
+    if (`${path}${window.location.search}` === target) return;
+    window.history.replaceState(null, "", target);
+  }, [filters]);
 
   const all = useMemo(() => {
     const patched = overlay && overlay.over === ideas ? overlay.map : null;

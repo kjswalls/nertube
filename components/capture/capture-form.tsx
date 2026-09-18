@@ -61,10 +61,13 @@ export function CaptureForm({
    * Both content buckets, already chosen — the matrix's empty cell filling in
    * the one thing it knows about an idea that does not exist yet.
    *
-   * They ride as hidden inputs, so the no-JavaScript post carries them too, and
-   * they are stated on screen: a form that silently files an idea somewhere is
-   * worse than one that does not file it at all. Both axes or neither — a cell
-   * is an intersection, and half of one is not a thing the matrix can offer.
+   * They are the *initial value* of this form's own two bucket fields: they ride
+   * as hidden inputs while the disclosure is closed, so the no-JavaScript post
+   * carries them too, and as the selected options in the pickers once it is
+   * open. Either way they are stated on screen — a form that silently files an
+   * idea somewhere is worse than one that does not file it at all — and either
+   * way there is exactly one control per name. Both axes or neither: a cell is
+   * an intersection, and half of one is not a thing the matrix can offer.
    *
    * The pair belongs to `initialChannelId`'s channel, and the composite foreign
    * key in `0001_init.sql` binds a video's bucket to its own channel and axis —
@@ -384,7 +387,21 @@ export function CaptureForm({
             : ""}
         </p>
 
-        {prefill ? (
+        {/*
+          The cell's own sentence, while it is still true.
+
+          The matrix hands this form a pair and says so in words, because a form
+          that silently files an idea somewhere is worse than one that does not
+          file it at all. Now that the disclosure can *change* that pair, the
+          sentence is conditional on it: the moment either menu is touched it
+          goes, and the menus — which are on screen, because that is where the
+          change was made — are the statement instead. A stale "filing it under
+          money · review" over a picker reading `focus` is the one thing this
+          line must never become.
+        */}
+        {prefill &&
+        verticalId === prefill.verticalId &&
+        horizontalId === prefill.horizontalId ? (
           <p data-testid="capture-prefill" className="text-xs text-muted">
             Filing it under{" "}
             <span className="text-foreground">{prefill.verticalName}</span> ·{" "}
