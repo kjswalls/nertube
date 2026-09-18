@@ -284,4 +284,103 @@ begin
   end if;
 end $$;
 
+-- 7. The *update* side of the two composite keys ------------------------------
+--
+-- 50_buckets.test.sql pins `on delete set null` on both slots. Nothing pinned
+-- what happens when the referenced **bucket row itself** is updated under a
+-- video, and that is a live client path: `0001_init.sql` revokes UPDATE on
+-- `videos` columns and on `stages`, but `buckets` keeps its full grant, so
+-- `PATCH /rest/v1/buckets` is something a browser can do today even though no
+-- screen reaches it yet (the editor is M7).
+--
+-- The only thing stopping a client flipping a referenced bucket's `axis` — and
+-- so putting a vertical bucket in a video's horizontal slot — is the keys'
+-- default `on update no action`. No migration says that out loud, so a later
+-- one adding `on update cascade` (while building M7's bucket editor, say) would
+-- open exactly that hole with every existing test still green. These two are
+-- the update-side twins of 50's delete-side assertions.
+--
+-- video_a is in `a-side` by now (section 5 moved it), so this files it on that
+-- channel's own pair.
+
+do $$
+declare v public.videos;
+begin
+  update public.videos
+     set vertical_id   = fx.bucket(fx.channel('a-side'), 'vertical',   'gear'),
+         horizontal_id = fx.bucket(fx.channel('a-side'), 'horizontal', 'review')
+   where id = fx.video_a();
+
+  select * into v from public.videos where id = fx.video_a();
+  if v.vertical_id is null or v.horizontal_id is null then
+    raise exception 'FAILED: the a-side pair did not persist';
+  end if;
+end $$;
+
+do $$
+declare ok boolean := false; st text;
+begin
+  -- The axis of a bucket a video is filed under cannot be flipped beneath it.
+  begin
+    update public.buckets set axis = 'vertical'
+     where id = fx.bucket(fx.channel('a-side'), 'horizontal', 'review');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then
+    raise exception 'FAILED: a referenced horizontal bucket became a vertical one';
+  end if;
+  if st <> '23503' then raise exception 'FAILED: expected 23503, got %', st; end if;
+end $$;
+
+do $$
+declare ok boolean := false; st text;
+begin
+  -- Nor can the bucket be moved to another channel out from under it.
+  begin
+    update public.buckets set channel_id = fx.channel('a-main')
+     where id = fx.bucket(fx.channel('a-side'), 'vertical', 'gear');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then
+    raise exception 'FAILED: a referenced bucket moved channel';
+  end if;
+  if st <> '23503' then raise exception 'FAILED: expected 23503, got %', st; end if;
+end $$;
+
+do $$
+declare v public.videos;
+begin
+  -- Neither refusal left anything behind: both slots and both pinned axis
+  -- columns are as they were.
+  select * into v from public.videos where id = fx.video_a();
+  if v.vertical_id <> fx.bucket(fx.channel('a-side'), 'vertical', 'gear') then
+    raise exception 'FAILED: a refused bucket update changed the vertical slot';
+  end if;
+  if v.horizontal_id <> fx.bucket(fx.channel('a-side'), 'horizontal', 'review') then
+    raise exception 'FAILED: a refused bucket update changed the horizontal slot';
+  end if;
+  if v.vertical_axis <> 'vertical' or v.horizontal_axis <> 'horizontal' then
+    raise exception 'FAILED: a refused bucket update rewrote an axis column';
+  end if;
+end $$;
+
+-- And the intent, stated where a migration can be checked against it: neither
+-- key carries an ON UPDATE action, so both are `no action` and the refusals
+-- above are structural rather than incidental.
+do $$
+declare n int;
+begin
+  select count(*) into n
+    from pg_constraint
+   where conrelid = 'public.videos'::regclass
+     and contype = 'f'
+     and confrelid = 'public.buckets'::regclass
+     and confupdtype <> 'a';
+  if n <> 0 then
+    raise exception 'FAILED: % bucket key(s) carry an ON UPDATE action; both must be NO ACTION', n;
+  end if;
+end $$;
+
 rollback;

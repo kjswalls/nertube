@@ -117,3 +117,30 @@ export function ideaBankHref(
   const query = ideaFilterQuery({ ...NO_IDEA_FILTERS, ...filters });
   return query === "" ? `/c/${slug}/ideas` : `/c/${slug}/ideas?${query}`;
 }
+
+/**
+ * The bank's filters as they arrived, verbatim — for a page that is not the
+ * bank and cannot check them.
+ *
+ * The matrix branch of `/c/[slug]/ideas` renders the view switch, and after the
+ * M5 review that switch carries the filters through the grid and back. It has
+ * no bucket list at that point (the grid's own read has not happened yet, and
+ * it is a different query), so it cannot do what `readIdeaFilters` does and
+ * resolve the two ids. It does not need to: the bank re-resolves every id on
+ * arrival and drops the ones that no longer exist, which is exactly what a
+ * pasted link already gets. This only guarantees that a round trip is not a
+ * reset.
+ *
+ * `view` and `cell` are deliberately not among them: which view you are looking
+ * at is the switch's own business.
+ */
+export function carryIdeaQuery(get: ParamLookup): string {
+  const params = new URLSearchParams();
+  for (const key of Object.values(IDEA_PARAM)) {
+    const value = get(key);
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, value);
+    }
+  }
+  return params.toString();
+}

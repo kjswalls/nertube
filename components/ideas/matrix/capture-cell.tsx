@@ -51,8 +51,64 @@ export function CaptureCell({
 }) {
   const [open, setOpen] = useState(false);
   const returnFocus = useRef<HTMLElement | null>(null);
+  /** Did this dialog write something? Decides where focus goes when it closes. */
+  const captured = useRef(false);
   const router = useRouter();
   const toast = useToast();
+
+  /**
+   * Put focus on the cell that replaced this one.
+   *
+   * `Modal` returns focus to its opener, and guards that with
+   * `document.contains(previous)` — which is exactly the case here: a
+   * successful capture calls `router.refresh()`, the cell stops being empty,
+   * and this `<a>` is replaced by the populated cell's `<Link>`. The guard then
+   * finds a detached node, does nothing, and focus lands on `<body>` precisely
+   * when something *did* happen. `Modal` documents that hazard and provides
+   * `onClosed` for it (the swap dialog already uses it); this is that callback.
+   *
+   * The replacement is the same intersection, which is where the reading
+   * position belongs — the grid has one fewer hole and this is it. The refresh
+   * is a server round trip, so this waits for the node rather than assuming it
+   * is already there, and gives up the moment anything else takes focus.
+   */
+  function focusReplacement(): void {
+    const selector =
+      `[data-testid="matrix-cell"][data-empty="false"]` +
+      `[data-vertical="${CSS.escape(vertical.name)}"]` +
+      `[data-horizontal="${CSS.escape(horizontal.name)}"]`;
+    const deadline = Date.now() + 2000;
+    const tick = () => {
+      const active = document.activeElement as HTMLElement | null;
+      /*
+        Whose focus is it right now?
+
+        Three answers mean "nobody has taken it from us": `<body>` (the case
+        this exists for), a node that has already been detached, and the opener
+        itself — `Modal` returns focus to it synchronously, and whether that
+        lands depends on whether `router.refresh()` has replaced it yet. In that
+        last case the wait continues, because the element focus is sitting on is
+        about to be thrown away. Anything else is a real choice somebody made,
+        and moving focus out from under them would be worse than the problem.
+      */
+      const stillOurs =
+        active === null ||
+        active === document.body ||
+        !active.isConnected ||
+        (active.dataset.testid === "matrix-cell" &&
+          active.dataset.vertical === vertical.name &&
+          active.dataset.horizontal === horizontal.name);
+      if (!stillOurs) return;
+
+      const target = document.querySelector<HTMLElement>(selector);
+      if (target) {
+        if (target !== active) target.focus();
+        return;
+      }
+      if (Date.now() < deadline) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
 
   // What the cell is *for*, in words — the accessible name of the control and
   // the tooltip, so the invitation is not carried by a dashed border alone.
@@ -112,6 +168,11 @@ export function CaptureCell({
           testId="matrix-capture"
           returnFocusRef={returnFocus}
           onClose={() => setOpen(false)}
+          onClosed={() => {
+            if (!captured.current) return;
+            captured.current = false;
+            focusReplacement();
+          }}
         >
           <CaptureForm
             channels={[channel]}
@@ -125,6 +186,7 @@ export function CaptureCell({
               horizontalName: horizontal.name,
             }}
             onSaved={(saved) => {
+              captured.current = true;
               setOpen(false);
               toast.push({
                 message: `Captured “${saved.title}” as ${vertical.name} · ${horizontal.name}.`,

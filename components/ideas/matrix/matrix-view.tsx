@@ -8,6 +8,7 @@ import {
   type MatrixBucket,
   type MatrixVideo,
 } from "./tally";
+import { readPaged } from "@/lib/paged";
 import type { createClient } from "@/lib/supabase/server";
 
 /**
@@ -114,22 +115,32 @@ export async function MatrixView({
   const ideaStageId =
     stageRows.find((stage) => stage.kind === "idea")?.id ?? null;
 
-  const { data: videoRows, error: videosError } = await supabase
-    .from("videos")
-    // One literal on one line: supabase-js types the result from the select
-    // string, and a concatenation stops being a literal type to read.
-    // prettier-ignore
-    .select("id, title, stage_id, vertical_id, horizontal_id, target_publish_date, published_at, created_at")
-    .eq("channel_id", channel.id)
-    .is("archived_at", null)
-    .order("created_at", { ascending: false })
-    .limit(2000);
+  /*
+    Paged, not `.limit(n)`.
 
-  if (videosError) {
-    throw new Error(
-      `Could not load the videos for ${channel.slug}: ${videosError.message}`,
-    );
-  }
+    A `.limit(2000)` here read as a bound and was not one: PostgREST caps every
+    read at `db-max-rows` (1000, pinned identically by the dev stack), silently
+    — a 200, a thousand rows, `content-range: 0-999/*`. Every cell count, every
+    row and column total, the weight bars and the quota meters are counts over
+    these rows, so a truncated read would draw a whole grid of numbers that are
+    each the truth about the newest thousand videos while claiming to be the
+    truth about the channel. `lib/paged.ts` reads all of them.
+  */
+  const videoRows = await readPaged(`videos for ${channel.slug}`, (from, to) =>
+    supabase
+      .from("videos")
+      // One literal on one line: supabase-js types the result from the select
+      // string, and a concatenation stops being a literal type to read.
+      // prettier-ignore
+      .select("id, title, stage_id, vertical_id, horizontal_id, target_publish_date, published_at, created_at")
+      .eq("channel_id", channel.id)
+      .is("archived_at", null)
+      // Newest first, with `id` as the tiebreak: paging over an order that is
+      // not total can repeat one row and skip another.
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
   const videos: MatrixVideo[] = videoRows.map((video) => ({
     id: video.id,

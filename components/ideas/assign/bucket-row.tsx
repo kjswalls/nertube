@@ -39,6 +39,7 @@ export function BucketRow({
   choices,
   verticalId,
   horizontalId,
+  inBank,
 }: {
   videoId: string;
   /** This video's channel's buckets, already split by axis. */
@@ -46,6 +47,8 @@ export function BucketRow({
   /** `videos.vertical_id` / `horizontal_id` as the server render read them. */
   verticalId: string | null;
   horizontalId: string | null;
+  /** Whether this video is still in the Idea stage — see the idle line below. */
+  inBank: boolean;
 }) {
   const version = useVideoVersion();
 
@@ -110,9 +113,21 @@ export function BucketRow({
       <SaveStatus
         state={state}
         testId="bucket-row-status"
+        /*
+          What being unfiled costs, and only what it costs *this* video.
+
+          The bank at `/c/[slug]/ideas` lists the Idea stage alone, so "it shows
+          up in the bank" is true of an idea and false of everything past it —
+          which was the one place in M5 where the milestone's own rule (an idea
+          is a video in the Idea stage) was contradicted in copy somebody reads.
+          The second half is true either way: a video with no pillar or no
+          format sits in no cell of the matrix.
+        */
         idle={
           shown.verticalId === "" && shown.horizontalId === ""
-            ? "Not filed yet — it shows up in the bank, but in no cell of the matrix."
+            ? inBank
+              ? "Not filed yet — it shows up in the bank, but in no cell of the matrix."
+              : "Not filed yet — it sits in no cell of the matrix."
             : ""
         }
         onRetry={send}

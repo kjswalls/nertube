@@ -3533,6 +3533,20 @@ was started with a short access-token TTL; `npm run e2e:refresh` runs it.
 
 ## M5 — The content-bucket matrix
 
+> **Read this first: the matrix cannot be exercised by a user in this build.**
+> `lib/defaults.ts` seeds eight formats and **no** topic pillars, and nothing in
+> the product can create a bucket — `app/actions/buckets.ts` is a read, and
+> `captureVideo`/`updateVideo` only *reference* ids that already exist. So every
+> channel made through `/c/new` opens this page on the "No topic pillars yet"
+> panel, and every pillar in every e2e fixture here is written in SQL. PLAN.md
+> puts the bucket editor in **M7** and this milestone did not move it, so the
+> larger half of M5 ships dormant: the grid, the weight bars, the quota meters
+> and the empty-cell capture are all real and all tested, and none of them can
+> be reached without a `psql` session. The M5 review filed this as a finding and
+> it is recorded rather than fixed — see the review log at the end of this
+> section. The panel itself now says the same thing on screen, in a paragraph
+> under the control rather than in a tooltip.
+
 ### What this slice delivers
 
 - **`/c/[slug]/ideas?view=matrix`** — pillars down, formats across, every
@@ -3560,7 +3574,12 @@ was started with a short access-token TTL; `npm run e2e:refresh` runs it.
   mark for how many have been published. A legend says what all three mean,
   including that an absent dot is the "never published here" signal.
 - **The drill-down.** `?cell=<verticalId>:<horizontalId>` opens the list of
-  exactly those videos under the grid, each with the stage it is sitting in.
+  exactly those videos under the grid, each with the stage it is sitting in —
+  the first ten of them, with the rest counted and linked, the way the board's
+  Idea column already caps itself (*capped by the M5 review; it listed every
+  one, which only looked bounded because the read behind it was truncated*).
+  The cell's href ends in `#cell`, so activating it takes the reading position
+  to the panel instead of leaving it a grid away in the tab order.
 - **`components/ideas/matrix/tally.ts`** — the arithmetic, pure and unit-tested
   (`tally.test.ts`, 15 cases): the UTC month window, what falls inside it, the
   per-cell and per-bucket counts, and the two bar widths.
@@ -3912,9 +3931,13 @@ channel's bucket, the wrong axis and another tenant's bucket.
 - **Still no way to create, rename or delete a bucket in the product** — that is
   M7, and a channel's pillars are still empty until someone writes them. The
   vertical picker says so in place rather than rendering an empty menu.
-- **The tag vocabulary is one query over the channel's videos** (`select tags …
-  limit 2000`), counted in memory. That is right for PLAN.md's sizing — one
-  user, hundreds of rows — and would want a `group by` over an `unnest` if a
+- **The tag vocabulary is one paged read over the channel's videos**
+  (`select tags`, `lib/paged.ts`), counted in memory. *Corrected by the M5
+  review.* It shipped as `select tags … limit 2000`, which is not a bound: a
+  `.limit()` above PostgREST's `db-max-rows` does not raise the ceiling, and the
+  ceiling is 1000 — so the read was silently truncated and read as a deliberate
+  guard. It pages now. Counting in memory is still right for PLAN.md's sizing —
+  one user, hundreds of rows — and would want a `group by` over an `unnest` if a
   channel ever held tens of thousands.
 - **A tag added here appears in this page's suggestion row immediately** (the
   tag editor grows its own copy of the vocabulary from what each save confirms)
@@ -4046,7 +4069,10 @@ M3's reviewers filed the sidebar's Ideas row as *unreachable by keyboard and
 explained only by a tooltip*. The interim fix was `aria-disabled` plus the
 milestone drawn on the row, which made the row reachable and still dead. It is a
 link now, to `/c/<first channel>/ideas`, marked `aria-current="page"` when you
-are on it; the only remaining `SidebarDisabled` user is Calendar (M6). The
+are on it; the only remaining *section* row using `SidebarDisabled` is Calendar
+(M6) — Board and Ideas keep it as their no-channel fallback, which is a
+different situation and is called one in that file's comment since the M5
+review. The
 board's `+{K} more in Ideas` had the same shape — a caption with a tooltip
 apologising for being one — and is now an anchor to the same route, keeping its
 `idea-overflow` test id so M1's cap assertion still reads.
@@ -4064,9 +4090,15 @@ apologising for being one — and is now an anchor to the same route, keeping it
   restored by the back button. PLAN.md asks for `?view=matrix` on this route and
   nothing else; adding four more parameters here would also mean agreeing with
   the matrix slice about their names.
-- **No pagination.** The page reads up to 2000 rows and narrows them in memory,
-  which is PLAN.md's own sizing (*one user, hundreds of rows*) and the same
-  bound the board uses.
+- **Every row is read, in pages of 500, and narrowed in memory.** *Corrected by
+  the M5 review.* This shipped as "the page reads up to 2000 rows", which was
+  wrong in exactly the direction the M3 review had already corrected once:
+  `.limit(2000)` against a `db-max-rows` of 1000 is not a bound at all, and
+  PostgREST truncates silently — a 200, a thousand rows, `content-range:
+  0-999/*`. The page's summary, the filter-option counts and the sidebar's
+  badge (a `count: "exact"`, which is *not* capped) would then have disagreed in
+  the same chrome. `lib/paged.ts` is the shared reader; `e2e/ideas.spec.ts` puts
+  1104 ideas behind it and checks all three numbers agree.
 - **Archive has no undo after a reload** — only Restore behind the toggle, which
   is a different, slower gesture. That is the trade for not keeping a
   client-side tombstone across navigations.
@@ -4227,7 +4259,12 @@ job.
 - `boardChannelOf` was extracted from `components/app-sidebar.tsx` and is now
   read by `AppShell` too, so the badge counts the bank the link opens rather
   than a second guess at "which channel is Board of".
-- `SidebarDisabled` now has exactly one user left: Calendar (M6).
+- `SidebarDisabled` is now the pattern for exactly one *section*: Calendar (M6).
+  It has three call sites, and the other two are Board and Ideas **with no
+  channel at all** — there is nothing to link to until one exists, and a row
+  that vanished would hide the shape of the product from the person who has
+  least idea of it. *The first draft of this line said "exactly one user left",
+  which the M5 review caught: one of the three was added by this milestone.*
 
 ### The acceptance walk
 
@@ -4250,7 +4287,10 @@ checked against the database rather than against the page's other half.
 
 ### Decisions taken without the user
 
-- **The filters go in the URL; the view switch does not carry them.** BRIEF.md
+- **The filters go in the URL; the view switch does not carry them.**
+  *Reversed by the M5 review — see the review log at the end of this file. Both
+  links carry them now, and the matrix passes them through.* The original
+  argument, kept because the reversal is only meaningful against it: BRIEF.md
   wants the bank and the matrix to be two ways of looking at one thing, and a
   narrowed bank you cannot send to yourself is a thing you re-narrow every time.
   The switch's List link is deliberately bare, because the matrix has no filters
@@ -4283,8 +4323,16 @@ checked against the database rather than against the page's other half.
 ### Honest limits, carried forward
 
 - **Back does not undo a filter change** (see `replaceState` above).
-- **No pagination.** Both views read up to 2000 rows in one go, which is
-  PLAN.md's own sizing and the bound the board already uses.
+- **Both views read every row, paged.** *Corrected by the M5 review.* The
+  claim here was "both views read up to 2000 rows in one go, which is PLAN.md's
+  own sizing and the bound the board already uses" — three things wrong at once:
+  the effective ceiling is PostgREST's `db-max-rows` of 1000, the truncation is
+  silent, and the board carried the same false bound. All four reads (the bank,
+  the matrix, the video page's tag vocabulary and the board) now go through
+  `readPaged` in `lib/paged.ts`, which asks for 500 at a time — under the
+  ceiling, so a short page is always the end — over a total order. There is no
+  UI pagination and there is not meant to be: what there is, is a page that
+  draws every row it counts.
 - **Nothing in the product can create a bucket.** The seed ships eight
   horizontals and no verticals on purpose, so a new channel's vertical select
   reads "none yet" and the matrix draws its "no pillars" panel until the bucket
@@ -4355,6 +4403,14 @@ is the useful thing an integration pass does.
 | `npm run test` | 14 files, 257 tests passed (7 of them the new `agreement.test.ts`) |
 | `npm run e2e` | **154 passed, 1 skipped, 0 failed** (10.1m) — and again, **154 passed, 1 skipped, 0 failed** (10.7m) |
 
+*The e2e figure above did not describe the committed tree, and the M5 review
+caught it:* three "wip" commits had added five reviewer scratch specs
+(`e2e/zz-adversarial`, `zz-adv2`…`zz-adv5` — 16 tests) which were still at HEAD
+and are not mentioned anywhere in this file, so `npm run e2e` at HEAD would have
+collected 171 tests in 26 files rather than the 155 in 21 this run describes.
+The five are deleted in the review commit; the table at the very end of this
+file is the authoritative one, run against the tree that is actually committed.
+
 Two consecutive clean full runs, on the default ports and the default database,
 with nothing else holding this directory's one `next dev`. The skipped case is
 `e2e/session-refresh.spec.ts:60`, which only runs under `npm run e2e:refresh`
@@ -4370,3 +4426,185 @@ three were the same test-side hydration-window class, in the three cases the
 filing slice had already named, and are fixed in the specs with the retry the
 suite already had a helper for. `npx playwright test m5-integration` on its own
 is 4 passed.
+
+---
+
+## M5 — adversarial review, applied
+
+Twenty-six findings came back against the M5 tree: two blockers, seven majors
+and seventeen minors, across five reviewers (counts, principles, tenant-sql,
+browser-a11y, scope-quality). Every one was reproduced or refuted against the
+code before anything was changed. What follows is what happened to each, and
+the two that were argued down or handed on say why.
+
+### The two blockers
+
+**1. Both M5 reads asked for 2000 rows against a 1000-row ceiling.**
+Reproduced. `app/c/[slug]/ideas/page.tsx` and
+`components/ideas/matrix/matrix-view.tsx` both ended `.limit(2000)`, and so did
+the video page's tag vocabulary. PostgREST's `db-max-rows` is 1000 — hosted, and
+pinned to the same number by `scripts/dev-stack/postgrest.mts:42` on purpose —
+and it caps a larger `limit` **silently**: HTTP 200, `content-range: 0-999/*`,
+no error field. So none of those `.limit()`s was a bound; each was a line that
+read like a deliberate guard while the read underneath it was truncated.
+
+That matters here more than almost anywhere, because everything M5 draws is a
+*count*: the bank's summary, the filter-option counts, every cell of the matrix,
+the row and column totals, the weight bars, the quota meters, and the cell
+drill-down's "N are still in the idea bank". Next to all of them sits the
+sidebar's badge, which is a `count: "exact", head: true` — and PostgREST does
+**not** cap a count. The badge was right and the page it links to was wrong, in
+the same chrome, with nothing to say which.
+
+This is also the second time: `lib/now-data.ts` was rewritten in M3 to page
+around exactly this, and `docs/MILESTONES.md:2243` already carried the
+correction ("wrong in the dangerous direction"). M5 re-entered the corrected
+claim as a new honest limit. So the fix is not only the reads:
+
+- `lib/paged.ts` is new and holds `readPaged`, `PAGE_SIZE = 500` and
+  `MAX_PAGES`, lifted out of `lib/now-data.ts` — which now imports them, so
+  there is one implementation of "all of them".
+- The bank, the matrix, the tag vocabulary **and the board** read through it.
+  The board was not in the finding; it carried the same `.limit(2000)` and the
+  same false claim about it, and correcting the document while leaving the code
+  would have been the same mistake in the other direction.
+- Each paged read carries a **total** order (`created_at desc, id asc`, or
+  `id asc`), because paging over a non-unique order can repeat one row and skip
+  another.
+- `e2e/ideas.spec.ts` puts 1104 live ideas in one channel and asserts the
+  summary, the rendered rows and the sidebar badge are all 1104, and that the
+  matrix reaches the same total through its off-grid line. Before the fix that
+  test reads 1000 / 1000 / 1104.
+
+**4 and 22. A prefilled capture silently wrote an unfiled idea.**
+Reproduced, and it is the same defect filed twice. `CaptureForm` posts
+`new FormData(event.currentTarget)`. The two bucket ids rode as hidden inputs
+**only while the disclosure was closed**; opening it unmounted them and handed
+the two names to the `<select>`s in `capture-buckets.tsx`, which are
+`disabled={loading}` until `listBuckets` returns (and disabled again when an
+axis has no options). A disabled control contributes nothing to `FormData`. So
+between Shift+Enter and the round trip landing, Enter wrote the idea with no
+buckets at all — while the form's own state still rendered "Filing it under
+Health · interview". No error, no toast, and the cell stayed drawn as a hole.
+That is the exact interaction M5 exists for.
+
+Fixed by not letting the pair depend on a control's enabled-ness: the submit
+handler now does `data.set("verticalId", verticalId)` and the same for the
+horizontal, from the form's own state — which is the same state the "Filing it
+under …" line is derived from, so the sentence and the write cannot disagree.
+The hidden inputs stay for the no-JavaScript path, where the disclosure cannot
+be open without a click that also runs the handler. `e2e/matrix.spec.ts` holds
+every POST for two seconds, opens the disclosure with Shift+Enter, asserts the
+picker is provably still `loading` and disabled, presses Enter, and then reads
+both bucket ids back from Postgres.
+
+### Fixed
+
+| # | Finding | What changed |
+|---|---|---|
+| 1 | Both M5 reads truncated at `db-max-rows` | `lib/paged.ts`; four reads paged; 1104-row e2e |
+| 2 | MILESTONES repeated the corrected "2000 rows" claim in three places | All three rewritten to the real bound and the real behaviour, each marked as a correction |
+| 3 | The cell drill-down rendered every video with no cap | Ten listed and the rest counted, the board's own convention, with a link into the filtered bank |
+| 4 / 22 | Prefilled capture dropped both buckets while the pickers loaded | `data.set` from form state at submit; spec that proves the window |
+| 5 (half) | The matrix is unreachable without SQL | Not built (see *Deferred*), but stated at the top of the M5 matrix section and on the panel itself |
+| 6 | A Packaging video told it "shows up in the bank" | `FilingBlock` takes `inBank`; the sentence is stage-aware |
+| 7 | Promote's refusal was a tooltip on a `disabled` button | `aria-disabled` + live handler; the reason printed once above the list; same treatment for Archive/Restore and for "Name your pillars" |
+| 8 | Two vocabularies for the two axes | `AXIS_LABEL` in the filter bar, the row chips and `explainEmpty` |
+| 9 | "Nothing captured yet" for a bank that was worked through | The route counts videos past the Idea stage; two sentences |
+| 10 | The view switch dropped the bank's filters | Both links carry them; the bank renders the switch so they are live |
+| 11 | Capture reported a raw Postgres constraint name | `describeBucketRefusal` in `captureVideo`'s follow-up UPDATE |
+| 12 | The SQL suite pinned the delete side of the bucket keys, not the update side | A new section 7 in `55_bucket_assignment.test.sql`: both refusals (`axis` flipped, `channel_id` moved) expected to raise 23503, a read-back proving neither slot nor axis column moved, and a catalogue assertion that neither key carries an `ON UPDATE` action |
+| 13 | `j`/`k` were silent and moved no focus | A live region and `tabIndex={-1}` rows; selection, focus and the announcement are one thing |
+| 14 | One in-flight write disabled other rows in behaviour only; a hung write never ended | `locked` on every row, an answered refusal, and a 12s deadline that ends in a message |
+| 15 | Nothing announced the filtered count or the empty state | `describeScope` in `filtering.ts`, unit-tested, announced on a 400ms debounce |
+| 16 | The `#cell` anchor was never in an href | It is now, plus `FocusPanel`, which moves focus only when focus is on a cell |
+| 17 | Capture into a cell dropped focus to `<body>` | `onClosed` focuses the populated cell that replaced the opener |
+| 18 | The open cell was colour-only under forced colors | It carries `data-selected`, and the unlayered rule covers `aria-current` too |
+| 19 | The bank skipped from h1 to h3 | Row titles are `<h2>` |
+| 20 | The view switch gave no sign it heard the click | `useLinkStatus` on both links |
+| 21 | Every bar vanished under forced colors | `data-bar` on both meters and explicit system colours for track and fill |
+| 23 | Five reviewer scratch specs at HEAD | Deleted; the e2e totals below are the tree that is committed |
+| 24 | MILESTONES claimed `SidebarDisabled` had one user | Both lines and the component's comment now say which one is the section row and what the other two are |
+| 26 | The filter-option counts read the bucket columns raw | `bucketOn`, so the counts, the row filter and the matrix tally answer through one function |
+
+### Rejected
+
+Nothing was rejected outright as wrong. Two findings were **partly** declined,
+and the part that was declined is stated here rather than quietly dropped:
+
+- **5 — "ship the smallest possible pillar-naming affordance inside M5."** The
+  diagnosis is right and is now the first thing the M5 matrix section says. The
+  remedy is not M5's: PLAN.md puts bucket creation in **M7 — Settings**
+  ("buckets + quotas"), a server action that inserts `buckets` rows is a bucket
+  editor however small the dialog around it, and this pass was scoped to M5
+  only. Deferred, below, rather than rejected.
+- **25 — make `p` fall through to the next enabled stage, like the board's
+  `]`.** Declined in favour of the finding's own second option: the divergence
+  is deliberate and is now recorded under *Decisions taken without the user*.
+  Promote is not "move forward one"; it is "put this idea into Packaging",
+  which is where a title, a thumbnail concept and a hook get decided. A channel
+  that has switched Packaging off has switched off the thing Promote means, and
+  silently landing the idea in Scripting would skip the gate BRIEF.md's first
+  principle is about. `]` is a different question — "the next stage there is" —
+  and answers it correctly.
+
+### Deferred to a named milestone
+
+- **A way to create a bucket (finding 5) → M7.** With it, the matrix stops being
+  dormant and the M5 acceptance walk becomes possible without `psql`. Until
+  then the page says so on screen and this document says so at the top.
+- **Nothing else.** Every other finding is either fixed above or, in the case of
+  25, a recorded decision.
+
+### Decisions taken without the user
+
+- **`p` is literal about Packaging; `]` is about the next enabled stage.** They
+  are asked different questions and give different answers for a channel with
+  Packaging switched off: Promote refuses and says why, on the page; `]` moves
+  the card to Scripting. *Alternative:* make Promote fall through using the
+  board's `compareKinds` ordering, which is one rule in both places and which
+  quietly skips the packaging gate for a channel that has turned the column off.
+- **The view switch now carries the bank's filters in both directions.** This
+  reverses the decision recorded in the integration section ("the switch's List
+  link is deliberately bare"): the review showed what it costs — arriving from a
+  cell's drill-down, which sets both bucket filters, glancing at the grid and
+  coming back landed on an unfiltered list with nothing to say so. The matrix
+  ignores the query and passes it through. *Alternative:* the bare link, plus
+  some on-screen notice that filters were dropped, which is a second thing to
+  explain rather than one thing that behaves.
+- **The bank renders the view switch; the matrix branch of the route renders
+  it.** Only the bank knows what its filters currently are — they live in
+  `IdeaList` and are written to the address bar from it — so a server-rendered
+  switch above the list would carry the query the page was *requested* with and
+  be stale the moment anything was typed. *Alternative:* `useSearchParams` in
+  the switch, which this codebase avoids (`components/video-sections/video-sections.tsx`
+  states why) and which would be a second parse of the same parameters.
+- **A hung write is given up on after 12 seconds, not cancelled.** The request
+  is left alone — a `move_video` that does land should land — and what ends is
+  the page's waiting for it, with "The server has not answered. Reload to see
+  whether it moved." *Alternative:* an `AbortController`, which would make the
+  message certain ("nothing moved") at the cost of killing a write that was
+  probably about to succeed.
+- **The cell drill-down lists ten.** The board's Idea column already caps at ten
+  and links the rest; two lists in one product capping at different numbers is a
+  decision nobody made. *Alternative:* list everything, which is what the
+  truncated read was accidentally doing and which puts four hundred anchors
+  under a grid the page expects to keep reading.
+- **`aria-disabled` everywhere a control is present but will not act** — the
+  bank's three row buttons, and "Name your pillars". One consequence worth
+  writing down: Playwright's actionability check treats `aria-disabled` as
+  disabled, so the specs that press one pass `force: true`. A browser does not,
+  which is the whole reason the control is focusable and still wired to a
+  handler. *Alternative:* `disabled`, which is what the M3 review filed against
+  the sidebar.
+
+### What the review got right that the code did not have to change
+
+- The composite foreign keys, the `on delete set null` column-list form and the
+  pinned axis columns were re-read and left exactly as they were. Finding 12
+  asked for **tests**, not a migration, and that is what it got: no migration
+  was added in this pass.
+- `describeBucketRefusal`, `bucketOn`/`inBucket`, `lib/storage.ts`,
+  `components/autosave.tsx`, `components/modal.tsx` and `lib/shortcuts.ts` are
+  all still the single path for what they own. Nothing in this pass added a
+  second one.

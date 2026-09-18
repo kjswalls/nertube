@@ -11,6 +11,7 @@ import {
   type NowVideo,
 } from "@/lib/next-action";
 import type { ExpectationSource } from "@/lib/metrics";
+import { readPaged } from "@/lib/paged";
 import { readHooks } from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -74,49 +75,15 @@ import { requireUser } from "@/lib/supabase/require-user";
  * feeds *is* the answer, so it pages instead and reads every row.
  *
  * `videos`, `checklist_items` and `thumbnail_swaps` therefore go through
- * `readPaged` below. The `in (...)` lists are chunked as well, because a URL
- * carrying two thousand uuids is its own kind of silent failure.
+ * `readPaged` — which lives in `lib/paged.ts` since the M5 review, because the
+ * idea bank, the matrix and the video page's tag vocabulary needed the same
+ * thing and had each written `.limit(2000)` instead. The `in (...)` lists are
+ * chunked as well, because a URL carrying two thousand uuids is its own kind of
+ * silent failure.
  */
-
-/**
- * One page of a paged read.
- *
- * Deliberately under `db-max-rows`: a page that asked for exactly the ceiling
- * could not tell "there are exactly this many" from "you have been truncated".
- * Asking for fewer than the ceiling means a short page is always the end.
- */
-const PAGE_SIZE = 500;
 
 /** How many uuids go into one `in (...)` list, so the URL stays a URL. */
 const ID_CHUNK = 200;
-
-/**
- * A stop, so a read that never terminates fails loudly instead of hanging.
- * PLAN.md sizes the account at one user and hundreds of rows; this is 50,000.
- */
-const MAX_PAGES = 100;
-
-/** Every row of a read, one page at a time. Throws rather than answering short. */
-async function readPaged<Row>(
-  what: string,
-  page: (
-    from: number,
-    to: number,
-  ) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>,
-): Promise<Row[]> {
-  const rows: Row[] = [];
-  for (let index = 0; index < MAX_PAGES; index += 1) {
-    const from = index * PAGE_SIZE;
-    const { data, error } = await page(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(`Could not load the ${what}: ${error.message}`);
-    const batch = data ?? [];
-    rows.push(...batch);
-    if (batch.length < PAGE_SIZE) return rows;
-  }
-  throw new Error(
-    `Could not load the ${what}: more than ${MAX_PAGES * PAGE_SIZE} rows, which is past anything this app is designed for.`,
-  );
-}
 
 /** `ids` in groups small enough for one `in (...)` list. */
 function chunked(ids: readonly string[]): string[][] {
@@ -126,6 +93,7 @@ function chunked(ids: readonly string[]): string[][] {
   }
   return out;
 }
+
 export interface NowInputs {
   readonly channels: readonly NowChannel[];
   readonly videos: readonly NowVideo[];

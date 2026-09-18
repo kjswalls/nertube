@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeFilterCount,
+  describeScope,
   explainEmpty,
   matchesFilters,
   visibleIdeas,
@@ -173,7 +174,7 @@ describe("explainEmpty", () => {
     const active = filters({ tag: "money", horizontalId: "h-review" });
     expect(visibleIdeas(BANK, active)).toEqual([]);
     expect(explainEmpty(BANK, active, LABELS)).toBe(
-      'Each filter finds something on its own, but no idea has the tag “money” and the horizontal “review” together.',
+      'Each filter finds something on its own, but no idea has the tag “money” and the format “review” together.',
     );
   });
 
@@ -205,7 +206,39 @@ describe("explainEmpty", () => {
   it("counts a bucket that no longer exists without pretending to name it", () => {
     const active = filters({ verticalId: "v-gone" });
     expect(explainEmpty(BANK, active, LABELS)).toBe(
-      'No idea in this bank is in the vertical “that bucket”.',
+      'No idea in this bank is in the topic pillar “that bucket”.',
+    );
+  });
+});
+
+/*
+  `describeScope` is what a screen reader hears when a filter changes, and the
+  M5 review found that nothing was announced at all. The sentence has to name
+  every filter that is on — naming one of two would send the reader to turn off
+  the innocent one — and it has to say "no ideas match" rather than going quiet.
+*/
+describe("describeScope", () => {
+  it("counts without naming a filter when none is on", () => {
+    expect(describeScope(5, 5, filters(), LABELS)).toBe("5 of 5 ideas.");
+  });
+
+  it("names every filter that is on", () => {
+    const active = filters({ verticalId: "v-craft", horizontalId: "h-tutorial" });
+    expect(describeScope(1, 5, active, LABELS)).toBe(
+      "1 of 5 ideas, filtered by the topic pillar “Craft” and the format “tutorial”.",
+    );
+  });
+
+  it("says the list is empty, and under which filters", () => {
+    expect(describeScope(0, 5, filters({ search: "zzz" }), LABELS)).toBe(
+      "No ideas match “zzz”.",
+    );
+    expect(describeScope(0, 0, filters(), LABELS)).toBe("No ideas in the bank.");
+  });
+
+  it("mentions the archived scope, which is not a filter", () => {
+    expect(describeScope(5, 5, filters({ includeArchived: true }), LABELS)).toBe(
+      "5 of 5 ideas, archived included.",
     );
   });
 });

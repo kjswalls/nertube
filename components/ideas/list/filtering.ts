@@ -1,4 +1,4 @@
-import { inBucket } from "@/lib/buckets";
+import { AXIS_LABEL, inBucket } from "@/lib/buckets";
 
 import type { Idea, IdeaBucket, IdeaFilters } from "./types";
 
@@ -105,19 +105,21 @@ const CRITERIA: readonly Criterion[] = [
     // decides the same thing about the same rows, and the two must not be able
     // to drift. See `lib/buckets.ts` and `components/ideas/agreement.test.ts`.
     test: (idea, filters) => inBucket(idea, "vertical", filters.verticalId),
+    // `AXIS_LABEL`, lower-cased: one word per axis everywhere a person reads
+    // one. "vertical" and "horizontal" stay in the URL and in the code.
     predicate: (filters, labels) =>
-      `is in the vertical ${quoted(nameOf(labels.verticals, filters.verticalId))}`,
+      `is in the ${AXIS_LABEL.vertical.toLowerCase()} ${quoted(nameOf(labels.verticals, filters.verticalId))}`,
     noun: (filters, labels) =>
-      `the vertical ${quoted(nameOf(labels.verticals, filters.verticalId))}`,
+      `the ${AXIS_LABEL.vertical.toLowerCase()} ${quoted(nameOf(labels.verticals, filters.verticalId))}`,
   },
   {
     kind: "horizontal",
     active: (filters) => filters.horizontalId !== null,
     test: (idea, filters) => inBucket(idea, "horizontal", filters.horizontalId),
     predicate: (filters, labels) =>
-      `is in the horizontal ${quoted(nameOf(labels.horizontals, filters.horizontalId))}`,
+      `is in the ${AXIS_LABEL.horizontal.toLowerCase()} ${quoted(nameOf(labels.horizontals, filters.horizontalId))}`,
     noun: (filters, labels) =>
-      `the horizontal ${quoted(nameOf(labels.horizontals, filters.horizontalId))}`,
+      `the ${AXIS_LABEL.horizontal.toLowerCase()} ${quoted(nameOf(labels.horizontals, filters.horizontalId))}`,
   },
 ];
 
@@ -223,4 +225,49 @@ export function explainEmpty(
   // Reason 2: each filter has matches, but no idea has all of them.
   const nouns = active.map((criterion) => criterion.noun(filters, labels));
   return `Each filter finds something on its own, but no idea has ${conjoin(nouns, "and")} together.${archivedClause}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* What the filters are doing, for the eye and for the ear                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The bank's scope in one sentence: how many rows, out of how many, under
+ * which filters.
+ *
+ * This exists because of an M5 review finding: every piece of feedback the
+ * filter bar produced was a plain paragraph. Changing a select, typing in the
+ * search box or toggling "Show archived" silently rewrote the count and
+ * silently swapped the list for an explanation, so a screen-reader user got no
+ * confirmation that a filter had taken and no notice that the list was now
+ * empty. `components/ideas/list/idea-list.tsx` announces this string in a live
+ * region, debounced, and it is a function here for the same reason
+ * `explainEmpty` is: it is arithmetic about which filters are on, and that is a
+ * thing to unit-test rather than to eyeball.
+ *
+ * `shown` and `total` are live (non-archived) counts — the two numbers the
+ * heading already prints — so the sentence heard is the sentence read, with the
+ * filters that produced it named.
+ */
+export function describeScope(
+  shown: number,
+  total: number,
+  filters: IdeaFilters,
+  labels: FilterLabels,
+): string {
+  const nouns = CRITERIA.filter((criterion) => criterion.active(filters)).map(
+    (criterion) => criterion.noun(filters, labels),
+  );
+  const archived = filters.includeArchived ? ", archived included" : "";
+
+  if (shown === 0) {
+    return nouns.length === 0
+      ? `No ideas in the bank${archived}.`
+      : `No ideas match ${conjoin(nouns, "and")}${archived}.`;
+  }
+
+  const of = `${shown} of ${total} ${total === 1 ? "idea" : "ideas"}`;
+  return nouns.length === 0
+    ? `${of}${archived}.`
+    : `${of}, filtered by ${conjoin(nouns, "and")}${archived}.`;
 }

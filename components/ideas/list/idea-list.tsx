@@ -5,13 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
 import { updateVideo } from "@/app/actions/videos";
+import { IdeasViewSwitch } from "@/components/ideas/matrix/view-switch";
 import { useToast } from "@/components/toast";
+import { bucketOn } from "@/lib/buckets";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { IdeaFilterBar } from "./idea-filters";
 import { IdeaRow } from "./idea-row";
 import {
   activeFilterCount,
+  describeScope,
   explainEmpty,
   inScope,
   matchesFilters,
@@ -19,6 +22,37 @@ import {
 } from "./filtering";
 import { ideaFilterQuery } from "./url";
 import { NO_IDEA_FILTERS, type Idea, type IdeaBucket, type IdeaFilters } from "./types";
+
+/**
+ * How long a write on this page may take before it is reported as unreachable.
+ *
+ * A server action that never resolves left the row pulsing, both its buttons
+ * inert and the whole page's write path locked, with no way out but a reload —
+ * an M5 review finding, reproduced by hanging the POST. The request is not
+ * cancelled (a `move_video` that does land should land); what ends is this
+ * page's waiting for it, which is the part the person is stuck in. Generous on
+ * purpose: this is the "it is never coming" case, not the "it is slow" one.
+ */
+const WRITE_DEADLINE_MS = 12_000;
+
+/** What the deadline rejects with, so the two callers can tell it apart. */
+const DEADLINE = "deadline";
+
+/** Was this the deadline above, rather than a request that failed outright? */
+function timedOut(error: unknown): boolean {
+  return error instanceof Error && error.message === DEADLINE;
+}
+
+/** The value, or a rejection once `WRITE_DEADLINE_MS` has passed. */
+function withDeadline<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(DEADLINE)), WRITE_DEADLINE_MS);
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
 
 /**
  * The idea bank: every idea in one channel, newest first, with the four filters
@@ -59,6 +93,23 @@ import { NO_IDEA_FILTERS, type Idea, type IdeaBucket, type IdeaFilters } from ".
  * `lib/shortcuts.ts`, which is the application's only keyboard mechanism and
  * which already refuses to fire while the search box has focus.
  *
+ * Selection is three things at once, since the M5 review: `data-selected` on
+ * the row, **DOM focus** on it, and a sentence in the page's live region saying
+ * which idea it is and where it sits. Before that it was only the first, so a
+ * screen-reader user pressing `j` could not tell which idea `p` was about to
+ * promote — and `j` then `p` is PLAN.md's own M5 acceptance. The board had
+ * already solved this; this is the same pair, and the one live region carries
+ * the filters' own feedback too.
+ *
+ * ## One write at a time, and it says so
+ *
+ * `busyId` is the page's lock. Every row renders `locked` while any row is
+ * writing, so a control that will not act looks like it, and a press that gets
+ * through is answered with a toast rather than swallowed. Each write has a
+ * deadline (`WRITE_DEADLINE_MS`), because a server action that never resolves
+ * used to leave one row pulsing and the whole page's write path locked with no
+ * way out but a reload.
+ *
  * ## The filters are in the address bar
  *
  * They arrive as `initialFilters`, parsed from the query string by the route
@@ -82,6 +133,7 @@ export function IdeaList({
   verticals,
   horizontals,
   promoteStage,
+  elsewhere,
   initialFilters,
 }: {
   channelName: string;
@@ -96,6 +148,16 @@ export function IdeaList({
    * the button has to be able to say rather than a button that is missing.
    */
   promoteStage: { id: string; name: string } | { id: null; reason: string };
+  /**
+   * How many videos this channel holds **outside** the Idea stage.
+   *
+   * Only ever used to choose between two sentences for an empty bank. Promotion
+   * is the bank's success condition, so the most common way to empty one is to
+   * work through it — and the page used to answer that by denying anything had
+   * ever been captured. A channel with videos further down the pipeline gets
+   * "everything captured has moved on" instead.
+   */
+  elsewhere: number;
   /**
    * What the query string was asking for when this page was requested. Already
    * resolved against this channel's buckets by the route, so an id in here is
@@ -128,6 +190,17 @@ export function IdeaList({
 
   /** Archived here, so kept on screen with an undo even though it is archived. */
   const [lingering, setLingering] = useState<ReadonlySet<string>>(new Set());
+
+  /**
+   * The one sentence the live region carries: what `j`/`k` just selected, or
+   * what the filters just did.
+   *
+   * One region and one string, the way `components/board/board.tsx` does it. A
+   * second region would mean two things talking over each other, and the two
+   * events here cannot happen in the same moment anyway — a keystroke that
+   * moves the selection does not change the filters.
+   */
+  const [announcement, setAnnouncement] = useState("");
 
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLDivElement>(null);
@@ -189,10 +262,58 @@ export function IdeaList({
     [visible],
   );
 
+  /** Every live idea in the bank, whatever the filters say. The denominator. */
+  const live = useMemo(
+    () => all.filter((idea) => idea.archivedAt === null).length,
+    [all],
+  );
+
   const archivedCount = useMemo(
     () => all.filter((idea) => idea.archivedAt !== null).length,
     [all],
   );
+
+  /*
+    The filters, announced.
+
+    Every piece of feedback the filter bar produces is a plain paragraph: the
+    count beside the heading, and the explanation that replaces the list. Both
+    are rewritten silently, so a screen-reader user got no confirmation that a
+    select had taken and no notice that the list was now empty. This says the
+    same thing the eye reads, through the page's one live region.
+
+    Debounced, and skipped on mount: the search box fires this on every
+    keystroke, and announcing the page's own opening state would be a page that
+    talks when nothing has happened.
+  */
+  const lastScope = useRef<string | null>(null);
+  useEffect(() => {
+    const scope = describeScope(liveCount, live, filters, {
+      verticals,
+      horizontals,
+    });
+    /*
+      Compared by *value*, not by "is this the first run".
+
+      A run counter would be wrong twice over: React's strict mode mounts an
+      effect, unmounts it and mounts it again in development, so the second
+      mount would announce the page's own opening state; and a `router.refresh()`
+      hands down new `verticals`/`horizontals` arrays whose contents have not
+      changed, which would announce a scope nobody touched. Remembering the
+      sentence means it is announced exactly when it is different.
+    */
+    if (lastScope.current === null) {
+      lastScope.current = scope;
+      return;
+    }
+    if (lastScope.current === scope) return;
+
+    const timer = setTimeout(() => {
+      lastScope.current = scope;
+      setAnnouncement(scope);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [filters, liveCount, live, verticals, horizontals]);
 
   /* ---------------------------------------------------------------------- */
   /* Filter options                                                          */
@@ -220,22 +341,27 @@ export function IdeaList({
       }
     }
 
+    /*
+      `bucketOn`, not `idea.verticalId`.
+
+      These are the numbers printed beside each option, and they have to be the
+      numbers the filter would then produce — which `filtering.ts` decides with
+      `inBucket`, and the matrix's cells with `bucketOn`. Reading the column
+      directly here was the one place left where a change to how "which bucket
+      is this in" is answered would not have reached the counts on screen.
+    */
     const verticalCounts = new Map<string, number>();
     for (const idea of against({ ...filters, verticalId: null })) {
-      if (idea.verticalId === null) continue;
-      verticalCounts.set(
-        idea.verticalId,
-        (verticalCounts.get(idea.verticalId) ?? 0) + 1,
-      );
+      const id = bucketOn(idea, "vertical");
+      if (id === null) continue;
+      verticalCounts.set(id, (verticalCounts.get(id) ?? 0) + 1);
     }
 
     const horizontalCounts = new Map<string, number>();
     for (const idea of against({ ...filters, horizontalId: null })) {
-      if (idea.horizontalId === null) continue;
-      horizontalCounts.set(
-        idea.horizontalId,
-        (horizontalCounts.get(idea.horizontalId) ?? 0) + 1,
-      );
+      const id = bucketOn(idea, "horizontal");
+      if (id === null) continue;
+      horizontalCounts.set(id, (horizontalCounts.get(id) ?? 0) + 1);
     }
 
     return {
@@ -271,9 +397,23 @@ export function IdeaList({
           : Math.min(visible.length - 1, Math.max(0, index + delta));
       const idea = visible[next];
       setSelectedId(idea.id);
-      rowRefs.current
-        .get(idea.id)
-        ?.scrollIntoView({ block: "nearest", behavior: "auto" });
+      /*
+        Focus follows the selection, and the selection is announced.
+
+        Before the M5 review this only scrolled: `data-selected` changed, DOM
+        focus stayed wherever it was and nothing was announced, so a
+        screen-reader user pressing `j` could not tell which idea `p` was about
+        to promote — and `j` then `p` is PLAN.md's own M5 acceptance. The board
+        already solved this (`components/board/board.tsx` focuses the card and
+        writes its live region); this is the same pair. The row carries
+        `tabIndex={-1}`, which is what lets a `<li>` take focus without becoming
+        a tab stop.
+      */
+      const row = rowRefs.current.get(idea.id);
+      row?.scrollIntoView({ block: "nearest", behavior: "auto" });
+      row?.focus({ preventScroll: true });
+      const title = idea.title.trim() === "" ? "Untitled" : idea.title;
+      setAnnouncement(`${title}, ${next + 1} of ${visible.length} in the bank.`);
     },
     [selectedId, visible],
   );
@@ -304,7 +444,21 @@ export function IdeaList({
 
   const promote = useCallback(
     async (idea: Idea) => {
-      if (busyId !== null) return;
+      /*
+        One write at a time, and it says so.
+
+        The page takes a single write because two moves of the same row would
+        race; what it used to do with the others was nothing at all — no
+        request, no message — while every other row's buttons stayed enabled and
+        pressable. They are marked inert now (`locked` on the row), and a press
+        that gets here anyway is answered rather than swallowed.
+      */
+      if (busyId !== null) {
+        toast.push({
+          message: "One write at a time — wait for the one in flight to finish.",
+        });
+        return;
+      }
 
       if (promoteStage.id === null) {
         toast.push({ message: promoteStage.reason, tone: "error" });
@@ -320,11 +474,13 @@ export function IdeaList({
 
       setBusyId(idea.id);
       try {
-        const moved = await moveVideo({
-          videoId: idea.id,
-          stageId: promoteStage.id,
-          slug: channelSlug,
-        });
+        const moved = await withDeadline(
+          moveVideo({
+            videoId: idea.id,
+            stageId: promoteStage.id,
+            slug: channelSlug,
+          }),
+        );
 
         if (!moved.ok) {
           /*
@@ -346,9 +502,11 @@ export function IdeaList({
         if (moved.notice) toast.push({ message: moved.notice });
         // The server list is now wrong by one row; so is the board.
         router.refresh();
-      } catch {
+      } catch (error) {
         toast.push({
-          message: "Could not reach the server — nothing moved. Try again.",
+          message: timedOut(error)
+            ? "The server has not answered. Reload to see whether it moved."
+            : "Could not reach the server — nothing moved. Try again.",
           tone: "error",
         });
       } finally {
@@ -360,10 +518,17 @@ export function IdeaList({
 
   const setArchived = useCallback(
     async (idea: Idea, archived: boolean) => {
-      if (busyId !== null) return;
+      if (busyId !== null) {
+        toast.push({
+          message: "One write at a time — wait for the one in flight to finish.",
+        });
+        return;
+      }
       setBusyId(idea.id);
       try {
-        const result = await updateVideo({ videoId: idea.id, archived });
+        const result = await withDeadline(
+          updateVideo({ videoId: idea.id, archived }),
+        );
         if (!result.ok) {
           toast.push({ message: result.error, tone: "error" });
           return;
@@ -384,9 +549,11 @@ export function IdeaList({
           });
           toast.push({ message: "Back in the bank." });
         }
-      } catch {
+      } catch (error) {
         toast.push({
-          message: "Could not reach the server — nothing was saved. Try again.",
+          message: timedOut(error)
+            ? "The server has not answered. Reload to see whether it saved."
+            : "Could not reach the server — nothing was saved. Try again.",
           tone: "error",
         });
       } finally {
@@ -453,6 +620,22 @@ export function IdeaList({
   const promoteRefusal =
     promoteStage.id === null ? promoteStage.reason : null;
 
+  /*
+    An empty bank has two quite different meanings.
+
+    Promotion is what the bank is *for*, so the commonest way to empty one is to
+    work through it — and answering that with "nothing captured yet" denies the
+    work. `elsewhere` is the channel's videos past the Idea stage, counted by
+    the route; `promoted` is the ones this session moved, which the server count
+    will not know about until the refresh lands.
+  */
+  const summary =
+    all.length > 0
+      ? `${liveCount} of ${live} in ${channelName}, newest first.`
+      : elsewhere > 0 || promoted.size > 0
+        ? `Nothing waiting in the bank — everything captured for ${channelName} has moved on.`
+        : `Nothing captured for ${channelName} yet.`;
+
   return (
     <div
       ref={listRef}
@@ -460,16 +643,47 @@ export function IdeaList({
       data-ready="false"
       className="flex flex-1 flex-col gap-4"
     >
+      {/*
+        The view switch, rendered here rather than by the route, so its List and
+        Matrix links carry the filters **as they now stand** — the bank's
+        filters live in this component and are written to the address bar from
+        it. A server-rendered switch could only ever carry the query the page
+        was requested with, which is stale the moment anything is typed. The
+        matrix branch of the route renders the same component with the query it
+        was given; there is still exactly one switch in the product.
+      */}
+      <IdeasViewSwitch
+        channelSlug={channelSlug}
+        current="list"
+        query={ideaFilterQuery(filters)}
+      />
+
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
           Ideas
         </h1>
         <p data-testid="idea-summary" className="text-[12px] text-muted">
-          {all.length === 0
-            ? `Nothing captured for ${channelName} yet.`
-            : `${liveCount} of ${all.filter((idea) => idea.archivedAt === null).length} in ${channelName}, newest first.`}
+          {summary}
         </p>
       </div>
+
+      {/*
+        Why Promote will refuse, once, above the list rather than in a tooltip
+        on every button.
+
+        It is the same sentence for every row — the channel's Packaging stage is
+        off, or there is none — and a tooltip on a control is not something a
+        keyboard or a touch user can summon. The buttons stay focusable and say
+        the same thing when pressed.
+      */}
+      {promoteRefusal ? (
+        <p
+          data-testid="idea-promote-refusal"
+          className="max-w-2xl rounded-card border border-border bg-surface px-card-x py-card-y text-[13px] text-attention"
+        >
+          {promoteRefusal}
+        </p>
+      ) : null}
 
       <IdeaFilterBar
         filters={filters}
@@ -511,6 +725,7 @@ export function IdeaList({
               idea={idea}
               selected={selected?.id === idea.id}
               busy={busyId === idea.id}
+              locked={busyId !== null && busyId !== idea.id}
               promoteRefusal={promoteRefusal}
               onSelect={() => setSelectedId(idea.id)}
               onPromote={() => void promote(idea)}
@@ -521,6 +736,23 @@ export function IdeaList({
           ))}
         </ul>
       )}
+
+      {/*
+        What just happened, for a reader who cannot see the list change.
+
+        `j`/`k` write the selection here (with the row's place in the list), and
+        the filters write the scope here after a pause — see the effect above.
+        `aria-atomic` so the whole sentence is read rather than the words that
+        changed, which is what `components/board/board.tsx` does with its own.
+      */}
+      <p
+        data-testid="idea-announcer"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </p>
     </div>
   );
 }

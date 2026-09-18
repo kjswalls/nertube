@@ -10,6 +10,7 @@ import {
 } from "@/components/board/types";
 import { isStageKind, type StageKind } from "@/lib/defaults";
 import { cacheBusted, signedUrlsFor } from "@/lib/storage";
+import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 
 export async function generateMetadata({
@@ -85,24 +86,30 @@ export default async function BoardPage({
     stages.map((stage) => [stage.id, stage.kind]),
   );
 
-  // One user, hundreds of rows (PLAN.md's own sizing), so the board reads the
-  // channel's non-archived videos in one go and does its grouping in memory.
-  // The bound is a guard against a runaway account, not a pagination scheme.
-  const { data: videoRows, error: videosError } = await supabase
-    .from("videos")
-    // One literal, on one line: supabase-js types the result from the select
-    // string, and a concatenation is no longer a literal type to read.
-    // prettier-ignore
-    .select("id, title, stage_id, stage_entered_at, created_at, updated_at, target_publish_date, thumbnail_concept_path, packaging_skipped_at, waiting_on, published_at")
-    .eq("channel_id", channel.id)
-    .is("archived_at", null)
-    .limit(2000);
+  /*
+    One user, hundreds of rows (PLAN.md's own sizing), so the board reads the
+    channel's non-archived videos and does its grouping in memory.
 
-  if (videosError) {
-    throw new Error(
-      `Could not load the videos for ${slug}: ${videosError.message}`,
-    );
-  }
+    This used to end `.limit(2000)` and to call that bound a guard. It was
+    neither: PostgREST caps every read at `db-max-rows` — 1000 — without saying
+    so, and the column counts in the headers (the bottleneck signal BRIEF.md
+    asks for) are counts over whatever came back. Corrected by the M5 review,
+    which found the same `.limit(2000)` copied into both of M5's reads;
+    `lib/paged.ts` now reads every row for all of them.
+  */
+  const videoRows = await readPaged(`videos for ${slug}`, (from, to) =>
+    supabase
+      .from("videos")
+      // One literal, on one line: supabase-js types the result from the select
+      // string, and a concatenation is no longer a literal type to read.
+      // prettier-ignore
+      .select("id, title, stage_id, stage_entered_at, created_at, updated_at, target_publish_date, thumbnail_concept_path, packaging_skipped_at, waiting_on, published_at")
+      .eq("channel_id", channel.id)
+      .is("archived_at", null)
+      // A total order, because paging without one can repeat and skip rows.
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
   // The board's clock. `react-hooks/purity` flags `Date.now()` in a component
   // because a client component that reads it re-renders into a different

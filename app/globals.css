@@ -233,9 +233,38 @@
 
   /* The board's selection (`j` / `k`) marks itself with `border-accent ring-1
      ring-accent`, and forced colors takes both the border colour and the ring,
-     so the selected card became indistinguishable from the rest. */
-  [data-selected="true"] {
+     so the selected card became indistinguishable from the rest.
+
+     The matrix's open cell carries the same attribute for the same reason —
+     the M5 review found it marked only with `aria-current` and a ring, which
+     left it drawn exactly like every other populated cell in this mode. Both
+     spellings are covered so a control that marks itself either way is safe. */
+  [data-selected="true"],
+  [aria-current="true"] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+
+  /* Meters: the matrix's weight bars and the quota bars.
+
+     Both are a track and a fill drawn purely as `background-color` on an empty
+     element, and this mode repaints every background with the system Canvas
+     colour — so the track, the fill and the card behind them became one
+     rectangle, while the legend under the grid went on explaining "the bar
+     under it is its weight against the busiest cell". `forced-color-adjust:
+     none` is what allows a colour to be set at all here, and the two colours
+     set are system keywords, so they are still whatever the user chose. */
+  [data-bar] {
+    forced-color-adjust: none;
+  }
+
+  [data-bar="track"] {
+    background-color: Canvas;
+    outline: 1px solid CanvasText;
+    outline-offset: 0;
+  }
+
+  [data-bar="fill"] {
+    background-color: CanvasText;
   }
 }

@@ -238,9 +238,27 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
       .eq("id", video.id);
 
     if (updateError) {
+      /*
+        A bucket refusal reads as a sentence here too.
+
+        The pre-check above runs before the row exists, so a bucket deleted or
+        renamed between it and this UPDATE — the stale-tab race the composite
+        foreign key is there for — lands in this branch. `updateVideo` already
+        routes its 23503 through `describeBucketRefusal` for exactly that
+        reason; without the same call here, capture handed the person
+        `videos_vertical_id_channel_id_vertical_axis_fkey`. The idea itself is
+        captured either way, and this says which half did not stick.
+      */
+      const refusal = describeBucketRefusal(
+        updateError.code,
+        `${updateError.message} ${updateError.details ?? ""} ${updateError.hint ?? ""}`,
+      );
       return {
         ok: false,
-        error: `Saved "${title}", but the extra fields did not stick: ${updateError.message}`,
+        error:
+          refusal === null
+            ? `Saved "${title}", but the extra fields did not stick: ${updateError.message}`
+            : `Saved "${title}", but it could not be filed. ${refusal}`,
       };
     }
   }

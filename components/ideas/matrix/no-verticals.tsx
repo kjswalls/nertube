@@ -74,18 +74,23 @@ export function NoVerticals({
 
         <div className="flex flex-wrap items-center gap-3">
           {/*
-            Present, and refusing to pretend. `disabled` rather than
-            `aria-disabled` because there is genuinely nothing to press — and
-            the milestone is on the control, in type, because a disabled button
-            is not focusable and a tooltip a keyboard user cannot summon is not
-            an explanation.
+            Present, and refusing to pretend.
+
+            `aria-disabled` rather than `disabled`, which is the rule
+            `components/app-sidebar.tsx` states for the same situation and which
+            the M5 review found this control breaking: a `disabled` button is
+            out of the tab order, so a keyboard user could not reach the one
+            affordance on this panel, and everything it had to say was in a
+            tooltip they could not summon. The milestone is on the control in
+            type for the same reason, and the sentence under it is a real
+            paragraph rather than a `title`.
           */}
           <button
             type="button"
-            disabled
+            aria-disabled="true"
+            aria-describedby={`${channelSlug}-add-buckets-note`}
             data-testid="add-buckets"
-            title="Naming pillars, renaming formats and setting monthly quotas all live in the channel's settings screen. Arrives in M7."
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] text-muted opacity-80"
+            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] text-muted opacity-80 outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span>Name your pillars</span>
             <span className="font-mono text-[11px] tracking-wide uppercase">
@@ -100,6 +105,18 @@ export function NoVerticals({
             Back to the idea bank
           </a>
         </div>
+
+        <p
+          id={`${channelSlug}-add-buckets-note`}
+          data-testid="add-buckets-note"
+          className="text-[12px] text-muted"
+        >
+          Naming pillars, renaming formats and setting monthly quotas all live
+          in the channel’s settings screen, which arrives in M7. Until then a
+          pillar can only be written straight into the database — which is why
+          this build cannot demonstrate the matrix on a channel made in the
+          product.
+        </p>
       </section>
 
       {/*

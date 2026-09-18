@@ -10,6 +10,7 @@ import {
   type ChecklistItem,
   type EvidenceFacts,
 } from "@/lib/checklist";
+import { readPaged } from "@/lib/paged";
 import { compareKinds } from "@/lib/defaults";
 import { GATE_ANCHOR, readHooks, readTitleCandidates } from "@/lib/packaging";
 import {
@@ -153,7 +154,7 @@ export default async function VideoDetailPage({
     { data: checklistRows },
     { data: swapRows },
     { data: bucketRows },
-    { data: tagRows },
+    tagRows,
     sketchUrls,
   ] = await Promise.all([
     supabase
@@ -230,11 +231,15 @@ export default async function VideoDetailPage({
       below rather than by a `group by`, because PostgREST has no `unnest` and a
       SQL function for a chip row would be a migration nobody needs.
     */
-    supabase
-      .from("videos")
-      .select("tags")
-      .eq("channel_id", video.channel_id)
-      .limit(2000),
+    readPaged("tag vocabulary", (from, to) =>
+      supabase
+        .from("videos")
+        .select("tags")
+        .eq("channel_id", video.channel_id)
+        // A total order, because paging without one can repeat and skip rows.
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
     // Four paths in one request: the concept sketch and the three variants.
     // `createSignedUrls` is batched for exactly this reason — see the helper.
     signedUrlsFor(supabase, [
@@ -356,7 +361,7 @@ export default async function VideoDetailPage({
     is most common, because that is the one the bank's filter chips draw.
   */
   const tagCounts = new Map<string, { label: string; count: number }>();
-  for (const row of tagRows ?? []) {
+  for (const row of tagRows) {
     for (const tag of row.tags ?? []) {
       const key = tag.toLocaleLowerCase();
       const seen = tagCounts.get(key);
@@ -608,6 +613,12 @@ export default async function VideoDetailPage({
                     choices={bucketChoices}
                     verticalId={video.vertical_id}
                     horizontalId={video.horizontal_id}
+                    /*
+                      The bank lists the Idea stage and nothing else, so only an
+                      idea can be told that an unfiled video "shows up in the
+                      bank". Same value the stage select and the tabs read.
+                    */
+                    inBank={sectionFacts.stageKind === "idea"}
                     tags={video.tags ?? []}
                     vocabulary={tagVocabulary}
                   />

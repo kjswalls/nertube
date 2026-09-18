@@ -3,10 +3,15 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { IdeaList } from "@/components/ideas/list/idea-list";
 import type { Idea, IdeaBucket } from "@/components/ideas/list/types";
-import { lookupOf, readIdeaFilters } from "@/components/ideas/list/url";
+import {
+  carryIdeaQuery,
+  lookupOf,
+  readIdeaFilters,
+} from "@/components/ideas/list/url";
 import { MatrixView } from "@/components/ideas/matrix/matrix-view";
 import { IdeasViewSwitch } from "@/components/ideas/matrix/view-switch";
 import { formatAge } from "@/components/video-detail/age";
+import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 
 export async function generateMetadata({
@@ -21,10 +26,13 @@ export async function generateMetadata({
 /**
  * `/c/[slug]/ideas` — the idea bank for one channel.
  *
- * An idea IS a video in the Idea stage, so this page is one query against
- * `videos` with `stage_id` pinned to the channel's Idea stage. There is no
- * separate table, no join to fake one, and nothing here can show a row the
- * board would not also call an idea.
+ * An idea IS a video in the Idea stage, so this page is one read of `videos`
+ * with `stage_id` pinned to the channel's Idea stage. There is no separate
+ * table, no join to fake one, and nothing here can show a row the board would
+ * not also call an idea. The read is paged (`lib/paged.ts`) rather than
+ * `.limit()`ed, for the reason spelled out where it happens: a `.limit()` above
+ * PostgREST's `db-max-rows` is not a bound, and every number this page prints
+ * is a count over these rows.
  *
  * ## What the server does and what the browser does
  *
@@ -91,10 +99,20 @@ export default async function IdeasPage({
   }
 
   if (view === "matrix") {
+    /*
+      The bank's filters, carried across the grid and back — see
+      `carryIdeaQuery`. The matrix ignores them; the bank re-resolves them.
+    */
+    const carried = carryIdeaQuery(get);
+
     return (
       <AppShell currentSlug={slug} section="ideas" gutter="reading">
         <div className="flex flex-col gap-4">
-          <IdeasViewSwitch channelSlug={channel.slug} current="matrix" />
+          <IdeasViewSwitch
+            channelSlug={channel.slug}
+            current="matrix"
+            query={carried}
+          />
           <MatrixView supabase={supabase} channel={channel} cell={cell ?? null} />
         </div>
       </AppShell>
@@ -168,23 +186,55 @@ export default async function IdeasPage({
 
   let ideas: Idea[] = [];
 
-  if (ideaStage) {
-    const { data: videoRows, error: videosError } = await supabase
-      .from("videos")
-      // One literal on one line: supabase-js types the result from the select
-      // string, and a concatenation stops being a literal type to read.
-      // prettier-ignore
-      .select("id, title, one_line_hook, tags, vertical_id, horizontal_id, created_at, stage_entered_at, archived_at")
-      .eq("channel_id", channel.id)
-      .eq("stage_id", ideaStage.id)
-      .order("created_at", { ascending: false })
-      .limit(2000);
+  /*
+    How many of this channel's videos are past the Idea stage.
 
-    if (videosError) {
-      throw new Error(
-        `Could not load the ideas for ${slug}: ${videosError.message}`,
-      );
-    }
+    One `count: "exact", head: true` — no rows in the body, which is the
+    cheapest honest form of the question, and PostgREST does not cap a count the
+    way it caps a read. It decides exactly one sentence: an empty bank in a
+    channel that has videos further down the pipeline has been *worked through*,
+    and telling that person "nothing captured yet" denies the work. `0` when the
+    count fails, because the fallback sentence is the older and more cautious of
+    the two.
+  */
+  let elsewhere = 0;
+  if (ideaStage) {
+    const { count } = await supabase
+      .from("videos")
+      .select("id", { count: "exact", head: true })
+      .eq("channel_id", channel.id)
+      .neq("stage_id", ideaStage.id);
+    elsewhere = count ?? 0;
+  }
+
+  if (ideaStage) {
+    /*
+      Paged, not `.limit(n)`.
+
+      PostgREST caps any read at `db-max-rows` — 1000, both on a hosted project
+      and on the dev stack, which pins the same number on purpose. A `.limit()`
+      above that does not raise the ceiling: the response is a 200 with a
+      thousand rows and `content-range: 0-999/*`, and nothing in it says the
+      rows were cut. Every number this page prints is a count over these rows,
+      and the sidebar's badge next to it is a `count: "exact"` — which PostgREST
+      does *not* cap — so a truncated read here shows as two different totals in
+      the same chrome. `lib/paged.ts` reads all of them.
+    */
+    const videoRows = await readPaged(`ideas for ${slug}`, (from, to) =>
+      supabase
+        .from("videos")
+        // One literal on one line: supabase-js types the result from the select
+        // string, and a concatenation stops being a literal type to read.
+        // prettier-ignore
+        .select("id, title, one_line_hook, tags, vertical_id, horizontal_id, created_at, stage_entered_at, archived_at")
+        .eq("channel_id", channel.id)
+        .eq("stage_id", ideaStage.id)
+        // Newest captured first, with `id` as the tiebreak: paging over an
+        // order that is not total can repeat one row and skip another.
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
 
     /*
       The page's one clock read. This is an async Server Component on a dynamic
@@ -218,9 +268,10 @@ export default async function IdeasPage({
 
   return (
     <AppShell currentSlug={slug} section="ideas" gutter="reading">
-      <div className="mb-4">
-        <IdeasViewSwitch channelSlug={channel.slug} current="list" />
-      </div>
+      {/* The switch is rendered by `IdeaList`: only it knows what the filters
+          are once they have been changed in the browser, and a switch that
+          carried the query the page was requested with would be stale the
+          moment anything was typed. */}
       <IdeaList
         channelName={channel.name}
         channelSlug={channel.slug}
@@ -228,12 +279,13 @@ export default async function IdeasPage({
         verticals={verticals}
         horizontals={horizontals}
         promoteStage={promoteStage}
+        elsewhere={elsewhere}
         /*
           Resolved here rather than in the browser, so a pasted link is checked
           against this channel's buckets before it becomes a filter: an id that
           no longer exists (or belongs to another channel) is dropped and the
           bank opens unfiltered, instead of rendering "no idea is in the
-          vertical “that bucket”".
+          topic pillar “that bucket”".
         */
         initialFilters={readIdeaFilters(get, { verticals, horizontals })}
       />

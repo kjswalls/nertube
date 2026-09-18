@@ -62,8 +62,19 @@ export function MatrixCell({
 
   return (
     <Link
-      href={`/c/${channel.slug}/ideas?view=matrix&cell=${encodeURIComponent(key)}`}
-      scroll={false}
+      /*
+        `#cell` is the drill-down panel, and it is in the href on purpose.
+
+        This link used to carry `scroll={false}` and no fragment, and
+        `cell-panel.tsx` carried a comment claiming the id was where the link
+        pointed — it was inert. Activating a cell therefore left focus on the
+        cell, moved the page not at all, and put the newly revealed content two
+        dozen tab stops away (a three-pillar channel; BRIEF.md allows five by
+        twelve). The fragment is what scrolls the panel into view; Next's client
+        router does not also focus the target, so `components/ideas/matrix/focus-panel.tsx`
+        does that half, and the panel carries `tabIndex={-1}` so focusing it takes.
+      */
+      href={`/c/${channel.slug}/ideas?view=matrix&cell=${encodeURIComponent(key)}#cell`}
       data-testid="matrix-cell"
       data-empty="false"
       data-vertical={vertical.name}
@@ -71,6 +82,14 @@ export function MatrixCell({
       data-count={cell.count}
       data-published={cell.published}
       aria-current={open ? "true" : undefined}
+      /*
+        The same attribute the board's selected card carries, so one rule in
+        `app/globals.css` covers both under `forced-colors: active` — where
+        `box-shadow` is forced to `none` and every border is repainted in the
+        system text colour, which used to leave the open cell drawn exactly like
+        every other populated one.
+      */
+      data-selected={open ? "true" : "false"}
       title={describe(cell, vertical, horizontal)}
       className={[
         "flex h-full min-h-[58px] w-full flex-col justify-between rounded-card border bg-surface px-2 py-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
@@ -94,9 +113,20 @@ export function MatrixCell({
       </span>
 
       {/* The weight bar. `aria-hidden` because it is the count again, in a
-          second form, for the eye rather than for the reader. */}
-      <span aria-hidden="true" className="mt-1.5 block h-[3px] w-full rounded-full bg-border">
+          second form, for the eye rather than for the reader.
+
+          `data-bar` is for forced-colors mode: both halves of a bar are a bare
+          `background-color` on an empty span, and that mode repaints both with
+          the system Canvas colour — so track and fill became one invisible
+          rectangle while the legend under the grid went on explaining them.
+          `app/globals.css` gives these two attributes explicit system colours. */}
+      <span
+        aria-hidden="true"
+        data-bar="track"
+        className="mt-1.5 block h-[3px] w-full rounded-full bg-border"
+      >
         <span
+          data-bar="fill"
           className="block h-full rounded-full bg-muted"
           style={{ width: `${percent}%` }}
         />

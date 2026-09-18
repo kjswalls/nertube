@@ -2,6 +2,8 @@
 
 import { useId } from "react";
 
+import { AXIS_LABEL } from "@/lib/buckets";
+
 import type { IdeaBucket, IdeaFilters } from "./types";
 
 /**
@@ -20,6 +22,14 @@ import type { IdeaBucket, IdeaFilters } from "./types";
  *
  * Each control carries its own count — `tutorial (4)` — so the list narrows
  * predictably: an option that would empty the list says so before it is picked.
+ *
+ * The two axis labels come from `AXIS_LABEL` in `lib/buckets.ts`, which exists
+ * so that one word is used per axis: the capture disclosure and the video
+ * page's pickers already read it, the matrix says "topic pillars down, formats
+ * across", and this bar used to say "Vertical" and "Horizontal" — two
+ * vocabularies for the same two axes on adjacent screens. The words `vertical`
+ * and `horizontal` survive in the URL parameters and in the code, where they
+ * are names rather than prose.
  */
 export function IdeaFilterBar({
   filters,
@@ -97,7 +107,7 @@ export function IdeaFilterBar({
 
       <div className="flex items-center gap-1.5">
         <label className={labelClass} htmlFor={verticalId}>
-          Vertical
+          {AXIS_LABEL.vertical}
           <select
             id={verticalId}
             data-testid="idea-vertical-filter"
@@ -121,12 +131,12 @@ export function IdeaFilterBar({
             own topic pillars. Saying so beats an empty menu.
 
             Outside the <label>, because a label's text content IS the control's
-            accessible name: inside, this select would announce as "Vertical
+            accessible name: inside, this select would announce as "Topic pillar
             none yet".
           */
           <span
             data-testid="no-verticals"
-            title="A new channel has no verticals: they are your 3–5 topic pillars, and settings (M7) is where they get named."
+            title="A new channel has no topic pillars: they are your own 3–5, and settings (M7) is where they get named."
             className="font-mono text-[10px] text-muted"
           >
             none yet
@@ -135,7 +145,7 @@ export function IdeaFilterBar({
       </div>
 
       <label className={labelClass} htmlFor={horizontalId}>
-        Horizontal
+        {AXIS_LABEL.horizontal}
         <select
           id={horizontalId}
           data-testid="idea-horizontal-filter"

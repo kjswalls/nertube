@@ -59,9 +59,14 @@ export function QuotaMeter({
           sentence that gives them their units is below. */}
       <div
         aria-hidden="true"
+        // `data-bar`: see `cell.tsx` and the forced-colors block in
+        // `app/globals.css` — a bare background on an empty span disappears in
+        // that mode, and this meter is the one the legend names in words.
+        data-bar="track"
         className="h-[3px] w-full overflow-hidden rounded-full bg-border"
       >
         <div
+          data-bar="fill"
           className={met ? "h-full rounded-full bg-ready" : "h-full rounded-full bg-muted"}
           style={{ width: `${percent}%` }}
         />

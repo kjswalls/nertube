@@ -2,7 +2,18 @@ import Link from "next/link";
 
 import { ideaBankHref } from "@/components/ideas/list/url";
 
+import { FocusPanel } from "./focus-panel";
+
 import type { CellTally, MatrixBucket } from "./tally";
+
+/**
+ * How many of a cell's videos the panel lists before it starts counting.
+ *
+ * Ten, because that is what the board's Idea column shows before
+ * "+{overflow} more in Ideas" (`components/board/board.tsx`), and two lists in
+ * one product that cap at different numbers is a decision nobody made.
+ */
+const CELL_VIDEO_CAP = 10;
 
 /**
  * The videos behind one cell, listed under the grid.
@@ -13,10 +24,12 @@ import type { CellTally, MatrixBucket } from "./tally";
  * the same read the count came from (so the two cannot disagree), and it costs
  * the grid no client JavaScript at all.
  *
- * The count in the cell and the number of rows here are the same number by
+ * The count in the cell and the number of videos here are the same number by
  * construction — `buildTally` puts each video into exactly one cell and this
  * renders that cell's array. That is the property `e2e/matrix.spec.ts` checks
- * against the database rather than against itself.
+ * against the database rather than against itself. The *list* stops at ten and
+ * counts the rest, the way the board's Idea column does; the count above it is
+ * always the whole cell.
  *
  * ## The link back into the bank
  *
@@ -40,19 +53,35 @@ export function CellPanel({
   horizontal: MatrixBucket;
   cell: CellTally;
 }) {
+  const shown = cell.videos.slice(0, CELL_VIDEO_CAP);
+  const overflow = cell.videos.length - shown.length;
+
   return (
     <section
-      // The anchor the cell links to, so the panel is in view on arrival
-      // without the page jumping — `scroll={false}` on the link plus a real id
-      // is the pair that lets a person choose to go there.
+      /*
+        The anchor the cell links to.
+
+        The cell's href really does end in `#cell` now — until the M5 review it
+        did not, and this id was inert while a comment here claimed it was the
+        arrival point. The fragment is what scrolls the panel into view. Focus
+        is the half that matters and Next's client router does not move it, so
+        `FocusPanel` below does; `tabIndex={-1}` is what makes `focus()` take on
+        a section. Without the pair, the newly revealed content was an entire
+        grid away in the tab order — 24 tab stops on a three-pillar channel, and
+        BRIEF.md allows five pillars by twelve formats.
+      */
       id="cell"
+      tabIndex={-1}
       data-testid="matrix-cell-panel"
       data-vertical={vertical.name}
       data-horizontal={horizontal.name}
       data-count={cell.count}
       aria-labelledby="cell-heading"
-      className="flex flex-col gap-3 rounded-card border border-border bg-surface px-4 py-3"
+      className="flex flex-col gap-3 rounded-card border border-border bg-surface px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
+      {/* The reading position, when a cell was just activated. See the file. */}
+      <FocusPanel cellKey={`${vertical.id}:${horizontal.id}`} />
+
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id="cell-heading" className="font-display text-[16px] leading-tight font-semibold">
           {vertical.name} · {horizontal.name}
@@ -91,7 +120,7 @@ export function CellPanel({
       </p>
 
       <ul data-testid="cell-videos" className="flex flex-col">
-        {cell.videos.map((video) => (
+        {shown.map((video) => (
           <li
             key={video.id}
             data-testid="cell-video"
@@ -114,6 +143,47 @@ export function CellPanel({
           </li>
         ))}
       </ul>
+
+      {/*
+        The cap's way out, drawn the way the board's Idea column draws it.
+
+        Every list in this product is capped on purpose — the board shows ten
+        cards and links the rest — and this panel was the exception only because
+        the read behind it was silently truncated at a thousand rows, which is
+        not a cap, it is a bug (now fixed in `lib/paged.ts`). A cell can hold
+        every video in a channel, and an intersection that holds four hundred is
+        exactly the over-investment the matrix is for: it should say four
+        hundred and show ten, not draw four hundred anchors under a grid.
+
+        The link is the bank with both bucket filters on, which is the same
+        address the sentence above offers and is built by the same function —
+        and it is offered only when the bank actually holds some of them, since
+        the bank lists the Idea stage and this panel counts every stage.
+      */}
+      {overflow > 0 ? (
+        <p
+          data-testid="cell-overflow"
+          data-count={overflow}
+          className="text-[12px] text-muted"
+        >
+          <span className="font-mono">+{overflow}</span> more at this
+          intersection, not listed here.{" "}
+          {cell.inBank > 0 ? (
+            <Link
+              href={ideaBankHref(channelSlug, {
+                verticalId: vertical.id,
+                horizontalId: horizontal.id,
+              })}
+              data-testid="cell-overflow-link"
+              className="rounded-button underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Open the ones still in the bank
+            </Link>
+          ) : (
+            <>Open one from the board to see the rest.</>
+          )}
+        </p>
+      ) : null}
     </section>
   );
 }

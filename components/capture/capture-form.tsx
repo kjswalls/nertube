@@ -331,6 +331,28 @@ export function CaptureForm({
         // `formAction` exactly as it did before.
         event.preventDefault();
         const data = new FormData(event.currentTarget);
+        /*
+          The two buckets, taken from this form's own state rather than from
+          whatever the DOM happened to post.
+
+          `FormData` skips a **disabled** control, and both pickers are disabled
+          while `listBuckets` is in flight and while an axis has no options at
+          all — which is exactly the window a matrix capture opens in, because
+          `CaptureBuckets` mounts (and only then fetches) when the disclosure
+          does. Before this, opening the disclosure unmounted the hidden inputs
+          below and handed the two names to controls that were not going to
+          post, so an Enter during that window wrote the idea **unfiled** while
+          the "Filing it under X · Y" line was still on screen. Silently: the
+          capture succeeded, and the cell stayed drawn as a hole.
+
+          Setting them here makes the posted pair and the sentence one thing —
+          `verticalId`/`horizontalId` are the same state the line is derived
+          from. `""` is what the empty option holds and what the action reads as
+          "not sent"; `data.set` replaces the select's entry rather than adding
+          a second one, so there is still exactly one value per name.
+        */
+        data.set("verticalId", verticalId);
+        data.set("horizontalId", horizontalId);
         setSubmitting(true);
         void captureVideoAction(null, data)
           .then((result) => setClientResult(result))
@@ -422,6 +444,13 @@ export function CaptureForm({
         earlier. The value is the same state either way, so opening the
         disclosure shows the cell's pair already selected rather than replacing
         it.
+
+        With JavaScript running none of this decides anything: the submit
+        handler above overwrites both names from state, precisely because a
+        picker that is momentarily `disabled` posts nothing and this pair must
+        not depend on a control's enabled-ness. This is the no-JavaScript path,
+        where the disclosure cannot be open without a click that also runs the
+        handler.
       */}
       {!more && (verticalId !== "" || horizontalId !== "") ? (
         <>

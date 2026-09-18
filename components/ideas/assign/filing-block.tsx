@@ -43,6 +43,7 @@ export function FilingBlock({
   choices,
   verticalId,
   horizontalId,
+  inBank,
   tags,
   vocabulary,
 }: {
@@ -51,6 +52,15 @@ export function FilingBlock({
   choices: BucketChoices;
   verticalId: string | null;
   horizontalId: string | null;
+  /**
+   * Is this video in the idea bank — i.e. is its stage the Idea one?
+   *
+   * The bucket row's idle line says what being unfiled *costs*, and the answer
+   * is not the same for an idea and for a video in Packaging: the bank pins
+   * `stage_id` to the channel's `kind = 'idea'` stage, so a Packaging video is
+   * not in it and must not be told that it is.
+   */
+  inBank: boolean;
   tags: readonly string[];
   /** The tags this channel's videos already use, most-used first. */
   vocabulary: readonly string[];
@@ -77,6 +87,7 @@ export function FilingBlock({
         choices={choices}
         verticalId={verticalId}
         horizontalId={horizontalId}
+        inBank={inBank}
       />
 
       <TagEditor videoId={videoId} initial={tags} vocabulary={vocabulary} />

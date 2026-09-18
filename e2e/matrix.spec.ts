@@ -566,12 +566,169 @@ test('a channel with no pillars says so instead of drawing an empty grid', async
 
   // It names the way to add them, and refuses to pretend it can: the bucket
   // editor is M7, and the control says so on itself rather than in a tooltip.
+  // `aria-disabled` and not `disabled`, so a keyboard can reach the control and
+  // hear why it does nothing — the rule the sidebar already follows.
   const add = page.getByTestId('add-buckets');
   await expect(add).toBeVisible();
-  await expect(add).toBeDisabled();
+  await expect(add).toHaveAttribute('aria-disabled', 'true');
   await expect(add).toContainText('M7');
+  await add.focus();
+  await expect(add).toBeFocused();
+  await expect(page.getByTestId('add-buckets-note')).toContainText('M7');
 
   // The axis it does have is still shown, and is not called a matrix.
   await expect(page.getByTestId('format-chip')).toHaveCount(8);
   await expect(page.getByTestId('format-strip')).toContainText('tutorial');
+});
+
+/* -------------------------------------------------------------------------- */
+/* The M5 review's findings                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The blocker, findings 4 and 22: the two bucket ids rode as hidden inputs only
+ * while the disclosure was **closed**. Opening it unmounted them and handed the
+ * two names to `<select>`s that are `disabled` until `listBuckets` answers —
+ * and a disabled control contributes nothing to `FormData`. So an Enter during
+ * that window wrote the idea unfiled, silently, with "Filing it under X · Y"
+ * still on screen. The form now takes both values from its own state at submit
+ * time, which is the same state that sentence is derived from.
+ *
+ * Shift+Enter is the product's own way of opening the disclosure, and every
+ * POST is held long enough that the pickers are provably still loading when the
+ * capture is sent.
+ */
+test('a prefilled capture keeps both buckets even with the pickers still loading', async ({
+  page,
+}) => {
+  await openMatrix(page, CHANNEL.slug);
+  await hydrated(page);
+
+  // Hold every write and every server action for a beat, so the window this is
+  // about is wide enough to act inside deliberately rather than by luck.
+  await page.route(`**/c/${CHANNEL.slug}/ideas**`, async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.continue();
+  });
+
+  const empty = cell(page, 'focus', 'interview');
+  await expect(empty).toHaveAttribute('data-empty', 'true');
+  await empty.click();
+
+  const dialog = page.getByTestId('matrix-capture');
+  await expect(dialog).toBeVisible();
+
+  const title = 'Filed while the pickers were still loading';
+  await dialog.getByLabel('Idea').fill(title);
+  // Shift+Enter opens the disclosure, which is what mounts the pickers and
+  // sends them off to fetch this channel's buckets.
+  await dialog.getByLabel('Idea').press('Shift+Enter');
+
+  // Proof that the window is open: the status line says loading and the
+  // vertical picker is disabled, so it will post nothing.
+  await expect(dialog.getByTestId('capture-buckets-status')).toHaveAttribute(
+    'data-status',
+    'loading',
+  );
+  await expect(dialog.getByTestId('capture-vertical')).toBeDisabled();
+  // And the form is still claiming, on screen, that it is filing the idea.
+  await expect(dialog.getByTestId('capture-prefill')).toContainText('focus');
+
+  await dialog.getByLabel('Idea').press('Enter');
+
+  const vertical = await bucketId(channel.id, 'vertical', 'focus');
+  const horizontal = await bucketId(channel.id, 'horizontal', 'interview');
+
+  await expect(async () => {
+    const written = await db.query<{
+      vertical_id: string | null;
+      horizontal_id: string | null;
+    }>(
+      `select vertical_id, horizontal_id from public.videos
+        where channel_id = $1 and title = $2`,
+      [channel.id, title],
+    );
+    expect(written.rowCount).toBe(1);
+    expect(written.rows[0].vertical_id).toBe(vertical);
+    expect(written.rows[0].horizontal_id).toBe(horizontal);
+  }).toPass({ timeout: 20_000 });
+
+  await page.unroute(`**/c/${CHANNEL.slug}/ideas**`);
+});
+
+/**
+ * Finding 17: after a capture from an empty cell, `router.refresh()` replaces
+ * the opener, so `Modal`'s return-focus guard finds a detached node and focus
+ * lands on `<body>` exactly when something did happen.
+ */
+test('capturing into a cell leaves focus on the cell that replaced it', async ({
+  page,
+}) => {
+  await openMatrix(page, CHANNEL.slug);
+  await hydrated(page);
+
+  const empty = cell(page, 'craft', 'vlog');
+  await expect(empty).toHaveAttribute('data-empty', 'true');
+  await empty.focus();
+  await page.keyboard.press('Enter');
+
+  const dialog = page.getByTestId('matrix-capture');
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Idea').fill('Keyboard capture probe');
+  await dialog.getByLabel('Idea').press('Enter');
+
+  await expect(dialog).toHaveCount(0);
+  // The same intersection, now populated — and holding the reading position.
+  const filled = cell(page, 'craft', 'vlog');
+  await expect(filled).toHaveAttribute('data-count', '1', { timeout: 20_000 });
+  await expect(filled).toBeFocused();
+});
+
+/**
+ * Finding 16: the panel's `id="cell"` was inert — no href in the product ever
+ * carried the fragment — so activating a cell moved neither focus nor the
+ * reading position, leaving the revealed content an entire grid away in the tab
+ * order. Finding 3: the panel listed every video in the cell with no cap.
+ */
+test('the drill-down takes the reading position, and caps its list at ten', async ({
+  page,
+}) => {
+  // Twelve at one intersection, so the cap has something to do.
+  await seedVideos(
+    channel,
+    Array.from({ length: 12 }, (_, index) => ({
+      title: `Focus tutorial ${index + 1}`,
+      vertical: 'focus',
+      horizontal: 'tutorial',
+    })),
+  );
+
+  await openMatrix(page, CHANNEL.slug);
+  await hydrated(page);
+
+  const target = cell(page, 'focus', 'tutorial');
+  await expect(target).toHaveAttribute('data-count', '12');
+  // The fragment is in the href, which is what makes the browser move.
+  expect(await target.getAttribute('href')).toContain('#cell');
+
+  await target.focus();
+  await page.keyboard.press('Enter');
+
+  const panel = page.getByTestId('matrix-cell-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute('data-count', '12');
+
+  // Ten listed, two counted — the board's Idea column's own convention.
+  await expect(panel.getByTestId('cell-video')).toHaveCount(10);
+  await expect(panel.getByTestId('cell-overflow')).toHaveAttribute(
+    'data-count',
+    '2',
+  );
+
+  // And the reading position is in the panel rather than back up the grid.
+  await expect(panel).toBeFocused();
 });

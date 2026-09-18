@@ -272,6 +272,17 @@ test.beforeEach(async ({ page }) => {
 
   await signIn(page);
   if ((await channelRow()) === null) await createChannel(page);
+
+  // Every stage back on. One test switches Packaging off, and a failure before
+  // its own cleanup would otherwise leave every later test in this file looking
+  // at a channel with nowhere to promote to.
+  await db.query(
+    `update public.stages set is_enabled = true
+      where channel_id in (select id from public.channels where slug = $1)
+        and is_enabled = false`,
+    [CHANNEL.slug],
+  );
+
   ids = await seedBank();
 });
 
@@ -311,9 +322,9 @@ test('the bank lists this channel’s Idea-stage videos, newest first', async ({
     'Tag: #gear',
     'Tag: #desk',
   ]);
-  await expect(desk.getByTestId('idea-vertical')).toHaveText('Vertical: Craft');
+  await expect(desk.getByTestId('idea-vertical')).toHaveText('Topic pillar: Craft');
   await expect(desk.getByTestId('idea-horizontal')).toHaveText(
-    'Horizontal: review',
+    'Format: review',
   );
   await expect(desk.getByTestId('idea-age')).toHaveText('10 days in the bank');
 
@@ -323,7 +334,7 @@ test('the bank lists this channel’s Idea-stage videos, newest first', async ({
   await expect(balance.getByTestId('idea-hook')).toHaveCount(0);
   await expect(balance.getByTestId('idea-horizontal')).toHaveCount(0);
   await expect(balance.getByTestId('idea-vertical')).toHaveText(
-    'Vertical: Money',
+    'Topic pillar: Money',
   );
 
   // And nothing from another channel leaks in: the seed's own two channels have
@@ -426,7 +437,7 @@ test('an empty result says which filter emptied it', async ({ page }) => {
   await page.getByTestId('idea-horizontal-filter').selectOption(reviewId);
   await expect(rows(page)).toHaveCount(0);
   await expect(page.getByTestId('idea-empty')).toContainText(
-    'Each filter finds something on its own, but no idea has the tag “money” and the horizontal “review” together.',
+    'Each filter finds something on its own, but no idea has the tag “money” and the format “review” together.',
   );
 
   // And the way out is on the message itself.
@@ -622,4 +633,273 @@ test('the board’s "+K more in Ideas" reaches the bank, and the bank has all of
   await expect(
     sidebar.getByRole('link', { name: 'Ideas', exact: true }),
   ).toHaveAttribute('aria-current', 'page');
+});
+
+/* -------------------------------------------------------------------------- */
+/* The M5 review's findings                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Finding 1, the blocker: both of M5's reads ended `.limit(2000)` against a
+ * PostgREST ceiling of 1000 (`db-max-rows`, pinned by the dev stack to match
+ * Supabase's default). The truncation is silent — a 200, a thousand rows,
+ * `content-range: 0-999/*` — so the page's count, the matrix's cells and the
+ * sidebar's badge (a `count: "exact"`, which is *not* capped) disagreed in the
+ * same chrome. The reads are paged now (`lib/paged.ts`), and the only way to
+ * see that from a browser is to put more than a thousand rows behind them.
+ */
+test('the bank reads past PostgREST’s 1000-row ceiling, and the badge agrees', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+
+  // 1100 more, in one statement. With the four from the fixture that is 1104
+  // live ideas — comfortably past the ceiling and past a second page.
+  await db.query(
+    `insert into public.videos (user_id, channel_id, stage_id, title, created_at, stage_entered_at)
+     select $1, $2, $3, 'Bulk idea ' || g, now() - (g || ' minutes')::interval,
+            now() - (g || ' minutes')::interval
+       from generate_series(1, 1100) as g`,
+    [channel.user_id, channel.id, await stageIdFor(channel.id, 'idea')],
+  );
+
+  const truth = await db.query<{ count: string }>(
+    `select count(*) from public.videos v
+       join public.stages s on s.id = v.stage_id
+      where v.channel_id = $1 and s.kind = 'idea' and v.archived_at is null`,
+    [channel.id],
+  );
+  expect(truth.rows[0].count).toBe('1104');
+
+  await openBank(page);
+
+  // The page's own summary, the rows it drew, and the sidebar's independent
+  // `count: "exact"` all say the same number.
+  await expect(page.getByTestId('idea-summary')).toContainText('1104 of 1104');
+  await expect(rows(page)).toHaveCount(1104);
+  await expect(
+    page.getByRole('navigation', { name: 'Main' }).getByTestId('sidebar-ideas-count'),
+  ).toHaveAttribute('data-count', '1104');
+
+  // The matrix reads the same rows and reaches the same total: its off-grid
+  // line counts the videos carrying fewer than two buckets, which is all 1100
+  // of the bulk rows plus the fixture's two unfiled ones.
+  await page.goto(`/c/${CHANNEL.slug}/ideas?view=matrix`);
+  await expect(page.getByTestId('matrix-off-grid')).toHaveAttribute(
+    'data-count',
+    '1103',
+  );
+});
+
+/**
+ * Finding 13: `j`/`k` changed `data-selected` and scrolled, and did nothing
+ * else — no focus, no announcement — so a screen-reader user could not tell
+ * which idea `p` was about to promote. Finding 15: the filters rewrote the
+ * count and the empty state silently.
+ */
+test('j/k move focus and say what is selected; the filters say what they did', async ({
+  page,
+}) => {
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+  const craft = await bucketIdFor(channel.id, 'vertical', 'Craft');
+
+  await openBank(page);
+
+  const announcer = page.getByTestId('idea-announcer');
+  await expect(announcer).toHaveText('');
+
+  await page.getByRole('heading', { name: 'Ideas', exact: true }).click();
+  await page.keyboard.press('j');
+
+  // The selection is announced, with its place in the list...
+  await expect(announcer).toHaveText(`${TITLES.buildLog}, 1 of 4 in the bank.`);
+  // ...and DOM focus is on the row that is selected, not left behind.
+  await expect(rowFor(page, TITLES.buildLog)).toBeFocused();
+
+  await page.keyboard.press('j');
+  await expect(announcer).toHaveText(`${TITLES.balance}, 2 of 4 in the bank.`);
+  await expect(rowFor(page, TITLES.balance)).toBeFocused();
+
+  // A filter change is announced too, naming the filters that produced it.
+  await page.getByTestId('idea-vertical-filter').selectOption(craft);
+  await expect(announcer).toHaveText(
+    '1 of 4 ideas, filtered by the topic pillar “Craft”.',
+  );
+
+  // Including the case where it empties the list, which used to be a silent
+  // swap of the <ul> for a paragraph.
+  await page.getByTestId('idea-search').fill('zzzz-no-such-idea');
+  await expect(rows(page)).toHaveCount(0);
+  await expect(announcer).toHaveText(
+    'No ideas match “zzzz-no-such-idea” and the topic pillar “Craft”.',
+  );
+});
+
+/**
+ * Finding 9: an emptied bank is usually a bank that was worked through, and the
+ * page answered that by denying anything had ever been captured.
+ */
+test('an emptied bank says whether anything was ever captured', async ({
+  page,
+}) => {
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+
+  // Nothing at all in the channel: the original sentence is still the right one.
+  await db.query('delete from public.videos where channel_id = $1', [channel.id]);
+  await openBank(page);
+  await expect(page.getByTestId('idea-summary')).toHaveText(
+    `Nothing captured for ${CHANNEL.name} yet.`,
+  );
+
+  // One video, past the bank. Nothing is waiting, but something was captured.
+  await seedIdea(channel, {
+    title: TITLES.packaged,
+    kind: 'packaging',
+    ago: '3 days 1 hour',
+  });
+  await openBank(page);
+  await expect(page.getByTestId('idea-summary')).toHaveText(
+    `Nothing waiting in the bank — everything captured for ${CHANNEL.name} has moved on.`,
+  );
+});
+
+/**
+ * Finding 7: Promote's refusal lived in a `title` on a `disabled` button, which
+ * a keyboard or touch user can neither focus nor summon. The reason is on the
+ * page now, once, and the control stays focusable and answers when pressed.
+ */
+test('a channel with Packaging switched off explains Promote on the page', async ({
+  page,
+}) => {
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+
+  await db.query(
+    `update public.stages set is_enabled = false
+      where channel_id = $1 and kind = 'packaging'`,
+    [channel.id],
+  );
+
+  await openBank(page);
+
+  const refusal = page.getByTestId('idea-promote-refusal');
+  await expect(refusal).toContainText('switched off for this channel');
+
+  const promote = rowFor(page, TITLES.balance).getByTestId('idea-promote');
+  await expect(promote).toHaveAttribute('aria-disabled', 'true');
+  // Focusable — the whole point of `aria-disabled` over `disabled`.
+  await promote.focus();
+  await expect(promote).toBeFocused();
+
+  // And pressing it says why rather than doing nothing at all. `force` because
+  // Playwright's actionability check treats `aria-disabled` as disabled — a
+  // browser does not, which is the whole reason the control is focusable and
+  // still wired to a handler.
+  await promote.click({ force: true });
+  await expect(page.getByTestId('toast')).toContainText(
+    'switched off for this channel',
+  );
+  expect(await kindOf(ids.balance)).toBe('idea');
+});
+
+/**
+ * Finding 14: one in-flight write disabled every other row in behaviour but not
+ * in the DOM — the other rows stayed enabled, focusable and pressable, and did
+ * nothing at all — and a request that never answered left the row pulsing for
+ * ever with the page's write path locked.
+ */
+test('one write at a time is visible, and a hung write ends in a message', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  await openBank(page);
+
+  // Hang every write this page makes. Server actions POST to the route's own
+  // URL, so this catches the promote without touching the page's reads.
+  let held = true;
+  await page.route(`**/c/${CHANNEL.slug}/ideas**`, async (route) => {
+    if (route.request().method() !== 'POST' || !held) {
+      await route.continue();
+      return;
+    }
+    // Never fulfilled: this is the "it is never coming" case.
+    await new Promise(() => {});
+  });
+
+  const first = rowFor(page, TITLES.buildLog);
+  const second = rowFor(page, TITLES.balance);
+  await first.getByTestId('idea-promote').click();
+
+  // The row that is writing says so...
+  await expect(first).toHaveAttribute('aria-busy', 'true');
+  // ...and every other row is visibly inert, rather than looking pressable and
+  // silently doing nothing.
+  await expect(second.getByTestId('idea-promote')).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await expect(second.getByTestId('idea-archive')).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await second.getByTestId('idea-archive').click({ force: true });
+  await expect(page.getByTestId('toast')).toContainText('One write at a time');
+
+  // The deadline ends the wait with a sentence instead of a permanent pulse.
+  await expect(page.getByTestId('toast')).toContainText(
+    'The server has not answered',
+    { timeout: 30_000 },
+  );
+  await expect(first).not.toHaveAttribute('aria-busy', 'true');
+  await expect(second.getByTestId('idea-promote')).not.toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+
+  held = false;
+  await page.unroute(`**/c/${CHANNEL.slug}/ideas**`);
+});
+
+/**
+ * Finding 10: the view switch's List link was bare, so a round trip through the
+ * grid silently dropped whatever the bank was filtered by.
+ */
+test('the view switch keeps the bank’s filters across the grid and back', async ({
+  page,
+}) => {
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+  const money = await bucketIdFor(channel.id, 'vertical', 'Money');
+
+  await page.goto(`/c/${CHANNEL.slug}/ideas?vertical=${money}`);
+  await expect(page.getByTestId('idea-bank')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
+  await expect(rows(page)).toHaveCount(2);
+
+  const switcher = page.getByTestId('ideas-view-switch');
+  await switcher.getByRole('link', { name: 'Matrix' }).click();
+  await page.waitForURL(/view=matrix/);
+  expect(page.url()).toContain(`vertical=${money}`);
+
+  await page
+    .getByTestId('ideas-view-switch')
+    .getByRole('link', { name: 'List' })
+    .click();
+  await expect(page.getByTestId('idea-bank')).toHaveAttribute(
+    'data-ready',
+    'true',
+  );
+
+  // Back where it was: still filtered, and the address still says so.
+  expect(page.url()).toContain(`vertical=${money}`);
+  await expect(rows(page)).toHaveCount(2);
+  await expect(page.getByTestId('idea-vertical-filter')).toHaveValue(money);
 });
