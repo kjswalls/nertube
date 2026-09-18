@@ -5708,12 +5708,38 @@ in `supabase/migrations/` was touched.
 | `npm run build` | compiled; 10 routes, `/calendar` among them |
 | `./scripts/verify-db.sh m6_final` | OK — migrations applied, 14 SQL test files passed, **no migration added** |
 | `npm test` | 18 files, 325 tests passed |
-| `npm run e2e` (first run) | **198 passed, 1 skipped, 0 failed** (11.8m) |
-| `npm run e2e` (second run) | GATE_E2E2 |
+| `npm run e2e` (first run) | **197 passed, 1 failed, 1 skipped** (12.3m) |
+| `npm run e2e` (second run) | **198 passed, 0 failed, 1 skipped** (11.8m) |
 
-Two full runs, reported because an intermittent failure is a finding rather than
-noise. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`
-— by design, and unchanged since M0. The suite is six specs longer than it was:
-two in `e2e/filming-days.spec.ts` for the blocker, four in `e2e/calendar.spec.ts`
-for the `?day=` window, the tab title, booking with nothing waiting, and the
-missed-shoot tone.
+Both runs are reported, in full, because an intermittent failure is a finding
+rather than noise. The skip is `session-refresh`, which only runs under
+`npm run e2e:refresh` — by design, and unchanged since M0. The suite is six
+cases longer than it was: two in `e2e/filming-days.spec.ts` for the blocker,
+four in `e2e/calendar.spec.ts` for the `?day=` window, the tab title, booking
+with nothing waiting, and the missed-shoot tone.
+
+### The one failure, named rather than rounded off
+
+Run 1 lost `e2e/m2-review.spec.ts:476` — *picking a target date saves it without
+waiting for a blur*. The status line stayed on its idle sentence through 21
+retries over 20 seconds, which means the value never reached React state at all:
+`/videos/[id]` had not hydrated.
+
+**It is the flake this file already has on record, not a regression.** The M4
+section names this exact test, in these words: *"run 2 lost neither of those and
+instead timed out on `m2-review.spec.ts:476` (a target date saved without a
+blur). Re-running both files alone passes all 29 of their cases … the hydration
+window under full-suite load."* Three things say the same here:
+
+- the second full run, on the identical tree, passed it;
+- `npx playwright test m2-review` on its own passed **three times in a row**,
+  13 cases each (53.1s, 54.6s, 54.5s);
+- nothing in this review touches that page's hydration. The only `/videos/[id]`
+  changes are `dueToConfirm` (a server-side comparison) and `skip-packaging.tsx`,
+  which *removes* a hydration mismatch rather than adding one — and the whole-
+  suite run taken immediately before these two also passed this case, 198/198.
+
+The remedy the M4 section named still applies and is still not taken here:
+**fewer components in that page's hydration pass, not a longer wait in the
+test.** That is a change to `/videos/[id]`'s composition, which is not this
+review's scope; it is left where M4 filed it, with one more data point on it.
