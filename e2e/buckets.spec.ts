@@ -389,8 +389,10 @@ test('capture’s fast path is one field, and the buckets live behind the disclo
   // server for them: the pickers are not merely hidden, they are unmounted.
   await expect(page.getByTestId('capture-buckets')).toHaveCount(0);
 
-  await page.getByLabel('Idea').fill(fast);
-  await page.getByLabel('Idea').press('Enter');
+  // Scoped to the dialog: the board behind it has a column called Idea too.
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(fast);
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
   await expect(page.getByRole('dialog')).toBeHidden();
 
   await expect
@@ -422,8 +424,9 @@ test('capture’s fast path is one field, and the buckets live behind the disclo
     () => expect(page.getByRole('dialog')).toBeVisible(),
   );
 
-  await page.getByLabel('Idea').fill(filedTitle);
-  await page.getByLabel('Idea').press('Shift+Enter');
+  const reopened = page.getByRole('dialog');
+  await reopened.getByRole('textbox', { name: 'Idea' }).fill(filedTitle);
+  await reopened.getByRole('textbox', { name: 'Idea' }).press('Shift+Enter');
 
   await expect(page.getByTestId('capture-buckets')).toBeVisible();
   // The options arrive from the server after the fields do; the status line
@@ -444,7 +447,7 @@ test('capture’s fast path is one field, and the buckets live behind the disclo
 
   await page.getByTestId('capture-vertical').selectOption({ label: 'focus' });
   await page.getByTestId('capture-horizontal').selectOption({ label: 'listicle' });
-  await page.getByRole('button', { name: 'Capture' }).click();
+  await reopened.getByRole('button', { name: 'Capture', exact: true }).click();
 
   await expect(page.getByRole('dialog')).toBeHidden();
 

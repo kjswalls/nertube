@@ -3865,3 +3865,148 @@ channel's bucket, the wrong axis and another tenant's bucket.
   their own queue and their own line, as every other pair of controls on this
   page does. They share the page's one version token, so a save in one does not
   make the other report a conflict.
+
+---
+
+## M5 — The idea bank list: filters, promote, and the Ideas entry that finally goes somewhere
+
+BRIEF.md puts the bank at the front of the pipeline: *quick capture … promote-to-video
+moves an idea onto the pipeline board*, and PLAN.md's M5 line asks for
+`/c/[slug]/ideas` with a list, tag and bucket filters, and `p` to promote. This
+slice is the list half of that. The matrix (`?view=matrix`) is a sibling slice
+and owns `components/ideas/matrix/**`; this one owns `app/c/[slug]/ideas/**`
+and `components/ideas/list/**`.
+
+### What it delivers
+
+- **`/c/[slug]/ideas`** — every video in the channel's Idea stage, newest
+  captured first, each row carrying the title, the one-line hook, the tags, the
+  two buckets when set, and how long it has been sitting.
+- **Four filters that combine**: a text search over title and one-line hook, a
+  tag, a vertical and a horizontal. Each select carries the count it would
+  leave, so an option that empties the list says so before it is picked.
+- **An empty result that names the culprit.** Three different sentences for
+  three different reasons — see below.
+- **Promote**, as a button and as `p`, through `moveVideo` → the `move_video`
+  RPC. No new write path.
+- **Archive and restore**, through `updateVideo({ archived })`. No new concept
+  and no second flag.
+- **`j` / `k` / `p` / `Enter`**, through `lib/shortcuts.ts`. No second keyboard
+  mechanism.
+- **The sidebar's Ideas row is a link**, and the board's "+K more in Ideas" is
+  the link it should always have been.
+
+No migration. Everything this page needs was already in the schema: `buckets`,
+`videos.vertical_id` / `horizontal_id` behind their three-column composite FKs,
+`videos.tags`, `videos.archived_at`. The one fixture row the specs write by hand
+is a *vertical* bucket, because `lib/defaults.ts` deliberately seeds none.
+
+### The empty state is arithmetic, not a sentence
+
+*"An empty result says which filter emptied it"* sounds like wording and is not.
+With four filters ANDed there are three genuinely different reasons a list can
+be empty, and they want three different answers:
+
+1. **One filter matches nothing on its own.** Nothing here is tagged "gear",
+   whatever else is switched on — so that one is named and the innocent ones
+   beside it are not.
+2. **Every filter matches something, but never the same idea.** There are
+   tutorials and there are money ideas and no money tutorial. Naming one filter
+   here would be a lie: *any* of them would restore results, so the sentence
+   names the combination.
+3. **The bank is empty before any filter ran.** Not a filter problem, and the
+   answer is "press c", not "turn a filter off".
+
+Telling those apart means running each criterion alone against the pool, which
+is a loop with an off-by-one in it. So it is a pure function,
+`components/ideas/list/filtering.ts`, with twelve unit tests over it, and the
+page renders whatever it returns. There is a fourth clause it adds when it
+applies: *"1 archived idea does — turn on Show archived to see it"*, because
+"nothing matches" is actively misleading when the match is one toggle away.
+
+### Two clocks, deliberately
+
+The order is `created_at` — newest **captured** first, which is what a bank
+looks like. The age is `stage_entered_at`, which is what *"how long it has been
+sitting"* means. For a captured idea the two stamps are the same moment; for a
+video that was pushed back down to Idea, the second is the honest age while the
+first is still the right sort key. Both are on the row: the age reads on the
+chip, the capture date is its tooltip.
+
+### The age carries no colour
+
+A board card turns amber when it is stale, because a stalled video is a problem.
+An old idea is not: the bank is a bank, and an idea that waited a year for its
+moment is the system working. So the age is mono and muted like any other
+measured number, and the only colour on a row is the accent on the selected one
+— which is an interaction, not a warning.
+
+### Decisions taken without the user
+
+- **"Archive and delete" was built as archive only, with Show archived and
+  Restore.** The instruction that follows the heading is *"archiving already
+  exists on videos; reuse it rather than inventing a second concept"*, and a
+  destructive delete is a second concept with no undo — it is also the one
+  operation in this application that can lose something a person wrote.
+  Archiving writes `archived_at`, which every board query already filters on, so
+  one write takes the idea out of the bank and off the board at once; the list
+  reads archived rows anyway so the toggle can bring them back without a round
+  trip, and a row archived in this session stays on screen, greyed, with Restore
+  on it, until the page is reloaded. *The alternative* — a permanent `delete
+  from videos` behind a confirm dialog — is one server action away if the owner
+  finds the bank filling with junk captures that archiving does not settle.
+- **The filters are single-value, not multi-select.** "Filters combine" is read
+  as combining *across* the four axes (a tag and a vertical and a search), which
+  is the combination the matrix thinking implies. Two tags at once would need a
+  second combinator (and, or?) for a bank of a few hundred rows. *The
+  alternative* is multi-select chips per axis, which is a bigger control and a
+  harder empty-state sentence.
+- **Selects, not chips, for tag / vertical / horizontal.** `/now` filters by
+  channel — two or three values, all worth seeing. A bank filters by tag (dozens,
+  growing with every capture) and by horizontal (eight seeded). Twenty-five
+  chips above thirty rows costs more screen than the thing it filters, so the
+  shape of the bar stays fixed and each option carries its count. *The
+  alternative* is `/now`'s chip row, which is the right control for a small
+  fixed set and the wrong one here.
+- **Archived ideas are read by the page, not excluded in SQL.** The query
+  deliberately does not end in `.is("archived_at", null)`; scope is decided in
+  the pure function. *The alternative* — filter in SQL and refetch when the
+  toggle flips — is a round trip for a set that is already small.
+- **The bank shows the Idea stage even when that stage is disabled.** A channel
+  that switched its Idea column off still has a bank, and a bank that emptied
+  itself because of a display setting is the worst possible way to discover the
+  setting.
+
+### The M3 review finding this closes
+
+M3's reviewers filed the sidebar's Ideas row as *unreachable by keyboard and
+explained only by a tooltip*. The interim fix was `aria-disabled` plus the
+milestone drawn on the row, which made the row reachable and still dead. It is a
+link now, to `/c/<first channel>/ideas`, marked `aria-current="page"` when you
+are on it; the only remaining `SidebarDisabled` user is Calendar (M6). The
+board's `+{K} more in Ideas` had the same shape — a caption with a tooltip
+apologising for being one — and is now an anchor to the same route, keeping its
+`idea-overflow` test id so M1's cap assertion still reads.
+
+### Honest limits
+
+- **The bucket filters only pay off once buckets are set, and this slice sets
+  none.** Filing is the sibling slice above ("Filing an idea"), which put bucket
+  pickers in capture's disclosure and on the video page, and the matrix's empty
+  cell prefills a capture with both ids. This page's own specs set the columns
+  in the fixture. What none of the three can do yet is *create* a vertical: the
+  seed ships none on purpose, so the vertical select reads "none yet" until the
+  bucket editor lands in **M7**.
+- **Filter state is not in the URL.** A filtered bank cannot be linked or
+  restored by the back button. PLAN.md asks for `?view=matrix` on this route and
+  nothing else; adding four more parameters here would also mean agreeing with
+  the matrix slice about their names.
+- **No pagination.** The page reads up to 2000 rows and narrows them in memory,
+  which is PLAN.md's own sizing (*one user, hundreds of rows*) and the same
+  bound the board uses.
+- **Archive has no undo after a reload** — only Restore behind the toggle, which
+  is a different, slower gesture. That is the trade for not keeping a
+  client-side tombstone across navigations.
+- **The matrix is not here.** `?view=matrix` is the sibling slice's — see "M5 —
+  The content-bucket matrix" above, which owns the branch in the route file and
+  everything past it. This section documents the list only.
