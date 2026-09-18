@@ -1,0 +1,105 @@
+import Link from "next/link";
+
+import { calendarHref } from "@/components/calendar/grid/url";
+import { formatMonth, monthKey, parseMonthKey } from "@/lib/calendar-dates";
+
+/** The nearest month either side that actually has something in it. */
+export interface NearestMonth {
+  /** `YYYY-MM`. */
+  readonly month: string;
+  /** How many videos are targeted at it. */
+  readonly count: number;
+}
+
+/**
+ * A month with nothing in it, said out loud.
+ *
+ * An empty calendar is the most common state this page will ever be in — a new
+ * account has no target dates at all, and a month three ahead of the plan never
+ * does — and the failure mode is a grey grid that looks identical to a broken
+ * one. So the empty month says three things a grid cannot:
+ *
+ * 1. **Which month is empty**, by name, so it is clear the page is answering
+ *    the question that was asked and not failing to load.
+ * 2. **Whether anything exists anywhere.** A month with nothing either side is
+ *    a different situation from one sitting between two busy months, and the
+ *    sentence is different: the first tells you how a date gets set, the second
+ *    points at the work that is already scheduled.
+ * 3. **The nearest month that has something**, as a link, because the honest
+ *    next action when December is empty is usually to go and look at November.
+ */
+export function EmptyMonth({
+  month,
+  previous,
+  next,
+  boardHref,
+}: {
+  month: string;
+  previous: NearestMonth | null;
+  next: NearestMonth | null;
+  /** Where target dates get set from. Null when there is no channel yet. */
+  boardHref: string | null;
+}) {
+  const parsed = parseMonthKey(month);
+  const label = parsed === null ? month : formatMonth(parsed);
+  const nothingAnywhere = previous === null && next === null;
+
+  return (
+    <div
+      data-testid="calendar-empty"
+      data-scope={nothingAnywhere ? "nothing-anywhere" : "empty-month"}
+      className="rounded-card border border-border bg-surface px-4 py-3"
+    >
+      <p className="font-display text-[15px]">
+        Nothing is going out in {label}, and no filming day is booked.
+      </p>
+
+      {nothingAnywhere ? (
+        <p className="mt-1 text-[13px] text-muted">
+          No video anywhere has a target publish date yet. A date set on a
+          video&rsquo;s page — or on a card from{" "}
+          {boardHref ? (
+            <Link
+              href={boardHref}
+              className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              the board
+            </Link>
+          ) : (
+            "the board"
+          )}{" "}
+          — is what puts it here. Publishing is a rhythm; this is where it
+          becomes visible.
+        </p>
+      ) : (
+        <p className="mt-1 text-[13px] text-muted">
+          The nearest month with anything in it is{" "}
+          {[previous, next]
+            .filter((entry): entry is NearestMonth => entry !== null)
+            .map((entry, index, list) => (
+              <span key={entry.month}>
+                <Link
+                  href={calendarHref({ month: entry.month })}
+                  data-testid="calendar-nearest"
+                  data-month={entry.month}
+                  className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {formatMonth(
+                    parseMonthKey(entry.month) ?? { year: 1970, month: 1 },
+                  )}
+                </Link>{" "}
+                <span className="font-mono text-[11px]">({entry.count})</span>
+                {index < list.length - 1 ? ", or " : "."}
+              </span>
+            ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** `YYYY-MM` for a date column, through the helper. */
+export function monthOfDate(date: string): string {
+  const parsed = parseMonthKey(date);
+  return parsed === null ? date : monthKey(parsed);
+}
