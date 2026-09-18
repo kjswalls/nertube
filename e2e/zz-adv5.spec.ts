@@ -83,3 +83,46 @@ test('M: capture through the disclosure while the bucket options are still loadi
   console.log('WRITTEN ROW:', JSON.stringify(rows.rows));
   await page.screenshot({ path: 'e2e/screenshots/adv-slowfetch.png', fullPage: true });
 });
+
+
+test('N: capture through the disclosure when the bucket fetch FAILS', async ({ page }) => {
+  await signIn(page);
+  const channel = await channelRow();
+  await db.query(`delete from public.videos where channel_id=$1 and title like 'Failfetch%'`, [channel.id]);
+
+  let aborted = 0;
+  await page.route('**/c/adv-review/ideas*', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.headers()['next-action'] && aborted === 0) {
+      aborted += 1;
+      await route.abort('failed');
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto(`/c/${CHANNEL.slug}/ideas?view=matrix`);
+  await page.waitForTimeout(1500);
+  const target = page.locator('[data-testid="matrix-cell"][data-vertical="Health"][data-horizontal="case study"]');
+  console.log('cell empty?', await target.getAttribute('data-empty'));
+  await target.click();
+  const modal = page.getByTestId('matrix-capture');
+  await expect(modal).toBeVisible();
+  const title = page.getByRole('textbox', { name: 'Idea' });
+  await title.fill('Failfetch idea');
+  await title.press('Shift+Enter');
+  await page.waitForTimeout(2000);
+  console.log('buckets status:', await page.getByTestId('capture-buckets-status').getAttribute('data-status'));
+  console.log('status text:', await page.getByTestId('capture-buckets-status').innerText());
+  console.log('prefill line still shown:', await page.getByTestId('capture-prefill').isVisible().catch(() => false));
+  console.log('prefill text:', await page.getByTestId('capture-prefill').innerText().catch(() => 'none'));
+  console.log('vertical select disabled:', await page.getByTestId('capture-vertical').isDisabled());
+  console.log('vertical select value:', await page.getByTestId('capture-vertical').inputValue());
+  await page.getByRole('button', { name: 'Capture' }).click();
+  await page.waitForTimeout(4000);
+  const rows = await db.query(
+    `select title, vertical_id, horizontal_id from public.videos where title='Failfetch idea'`,
+  );
+  console.log('WRITTEN ROW:', JSON.stringify(rows.rows));
+  await page.screenshot({ path: 'e2e/screenshots/adv-failfetch.png', fullPage: true });
+});
