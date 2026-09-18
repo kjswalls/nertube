@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useShortcuts } from "@/lib/shortcuts";
 
 import { CaptureForm, type CaptureChannel } from "./capture-form";
-import { CaptureModal } from "./capture-modal";
 
 /**
  * What makes `c` work anywhere: the global binding, the modal it opens, and the
@@ -97,7 +97,7 @@ export function CaptureHost({
       </button>
 
       {open ? (
-        <CaptureModal
+        <Modal
           title="Capture an idea"
           returnFocusRef={returnFocus}
           onClose={() => setOpen(false)}
@@ -118,7 +118,7 @@ export function CaptureHost({
               });
             }}
           />
-        </CaptureModal>
+        </Modal>
       ) : null}
     </>
   );

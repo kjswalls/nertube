@@ -13,16 +13,31 @@ import { createPortal } from "react-dom";
 import { useShortcuts } from "@/lib/shortcuts";
 
 /**
- * The dialog the `c` shortcut opens.
+ * The application's one modal.
  *
- * Not `<dialog>`: `showModal()` has to be called from an effect, which means
- * one frame where the content is in the DOM and not yet modal, and its
- * top-layer backdrop cannot be styled with the rest of the app. The behaviour
- * that actually matters is small enough to do properly by hand, and it is the
- * behaviour PLAN.md's keyboard-first workflow depends on:
+ * ## Why there is exactly one
+ *
+ * There were two. M1 built this for the `c` capture box; M4's thumbnails slice
+ * built a second one, a native `<dialog>` with `showModal()`, for the swap
+ * reason. Two modals is not a style disagreement — the second one had a bug the
+ * first one had already fixed. `useShortcuts` (`lib/shortcuts.ts`) has a single
+ * `keydown` listener on `document`, and the *only* thing that silences the page
+ * underneath a dialog is an `exclusive` registration. A native `<dialog>` is
+ * inert to clicks and focus but its key events still bubble to `document`, so
+ * pressing `c` with focus on the swap dialog's Cancel button opened the capture
+ * box on top of it. The fix is not to teach the second modal about the
+ * registry; it is to have one modal that already knows.
+ *
+ * ## Why not `<dialog>` for the one either
+ *
+ * `showModal()` has to be called from an effect, which means one frame where
+ * the content is in the DOM and not yet modal, and its top-layer backdrop
+ * cannot be styled with the rest of the app. The behaviour that actually
+ * matters is small enough to do properly by hand, and it is the behaviour
+ * PLAN.md's keyboard-first workflow depends on:
  *
  * - `role="dialog"` + `aria-modal="true"` + `aria-labelledby` — a screen reader
- *   announces the capture box by name when it opens;
+ *   announces the box by name when it opens;
  * - focus moves **into** the dialog on open (to the first field, so `c` really
  *   is "type the idea");
  * - focus is **trapped** while it is open: Tab from the last control goes to
@@ -42,10 +57,11 @@ import { useShortcuts } from "@/lib/shortcuts";
  * host to own every sibling of the dialog, and this one is mounted inside a
  * header. `aria-modal` plus the trap is the standard fallback.
  */
-export function CaptureModal({
+export function Modal({
   title,
   returnFocusRef,
   onClose,
+  testId,
   children,
 }: {
   title: string;
@@ -57,6 +73,8 @@ export function CaptureModal({
    */
   returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
+  /** A handle for the specs, on the dialog itself rather than on its content. */
+  testId?: string;
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -134,6 +152,7 @@ export function CaptureModal({
     >
       <div
         ref={dialogRef}
+        data-testid={testId}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}

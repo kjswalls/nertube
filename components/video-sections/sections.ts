@@ -223,12 +223,27 @@ export function sectionReadiness(
     "Decided" is `swap_dismissed_at` **or** a swap logged since the numbers
     were: keeping the thumbnail and changing it are both answers to the same
     question.
+
+    **The lock lifts at Scheduled, not at Published.** Before this milestone it
+    keyed on `published_at` alone, which made the tab read "nothing to do here"
+    on exactly the video whose single most actionable control it was holding:
+    `/now`'s rule 5 ranks "Confirm live + record URL" as Ready, and that button
+    is in this section. A tab cannot say *locked* over the thing the rest of the
+    app is asking the user to press. Once a video is Scheduled the section has
+    something real in it, so the lock comes off and the tab says nothing until
+    there is a number to count — the same treatment an inert stage gets, for the
+    same reason: no claim is better than a wrong one.
   */
   const publish: SectionReadiness = !facts.published
-    ? {
-        kind: "locked",
-        why: "Not live yet — the first twenty-four hours start when it is.",
-      }
+    ? !reached(facts.stageKind, "scheduled")
+      ? {
+          kind: "locked",
+          why: "Not live yet — the first twenty-four hours start when it is.",
+        }
+      : {
+          kind: "quiet",
+          why: "Scheduled, not live yet — confirming it live and recording the URL happens here.",
+        }
     : !facts.metricsLogged
       ? {
           kind: "ratio",

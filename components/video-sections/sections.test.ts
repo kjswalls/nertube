@@ -114,9 +114,9 @@ describe("sectionReadiness", () => {
   });
 
   it("walks Publish through the two steps of the post-publish loop", () => {
-    // Not live: a genuine lock. There is nothing to record about a video that
-    // has not gone out, and a tab claiming otherwise would be asking for
-    // numbers that do not exist.
+    // Not live and not scheduled: a genuine lock. There is nothing to record
+    // about a video that has not gone out, and a tab claiming otherwise would
+    // be asking for numbers that do not exist.
     expect(sectionReadiness(FRESH).publish.kind).toBe("locked");
 
     const live = { ...FRESH, stageKind: "published", published: true } as const;
@@ -140,6 +140,34 @@ describe("sectionReadiness", () => {
       sectionReadiness({ ...live, metricsLogged: true, swapDecided: true })
         .publish.kind,
     ).toBe("done");
+  });
+
+  it("does not lock Publish on a scheduled video — the confirm is in there", () => {
+    // `/now` rule 5 ranks "Confirm live + record URL" as Ready, and the control
+    // it names lives in this section. A locked tab over it would be the page
+    // contradicting the list.
+    const scheduled = sectionReadiness({ ...FRESH, stageKind: "scheduled" }).publish;
+    expect(scheduled.kind).not.toBe("locked");
+    expect(scheduled.why).toContain("recording the URL");
+
+    // And it stays unlocked on the way past, rather than snapping shut again on
+    // a video that is somehow in Published with no date stamped.
+    expect(
+      sectionReadiness({ ...FRESH, stageKind: "published" }).publish.kind,
+    ).not.toBe("locked");
+
+    // An inert stage says nothing, here as everywhere else.
+    expect(sectionReadiness({ ...FRESH, stageKind: null }).publish.kind).not.toBe(
+      "locked",
+    );
+
+    // But everything before Scheduled still locks: there is genuinely nothing
+    // in the section for a video that has not been queued up yet.
+    for (const kind of ["idea", "packaging", "editing", "publish_prep"] as const) {
+      expect(sectionReadiness({ ...FRESH, stageKind: kind }).publish.kind).toBe(
+        "locked",
+      );
+    }
   });
 
   it("counts the thumbnail variants, and ticks only once one is live", () => {

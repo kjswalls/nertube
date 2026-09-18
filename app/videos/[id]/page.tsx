@@ -456,54 +456,52 @@ export default async function VideoDetailPage({
                  goes in as a slot, next to the written concept it illustrates;
                  so do the warning and the three inert assists. */
               packaging: (
-                <>
-                  <PackagingBlock
-                    videoId={video.id}
-                    initial={{
-                      title: video.title,
-                      thumbnailConcept: video.thumbnail_concept,
-                      titleCandidates: video.title_candidates,
-                      hooks: video.hooks,
-                      packagingSkippedAt: video.packaging_skipped_at,
-                      packagingSkipReason: video.packaging_skip_reason,
-                    }}
-                    sketch={
-                      <ConceptSketch
-                        videoId={video.id}
-                        userId={user.id}
-                        title={video.title}
-                        url={sketchUrl}
-                        hasSketch={video.thumbnail_concept_path !== null}
+                <PackagingBlock
+                  videoId={video.id}
+                  initial={{
+                    title: video.title,
+                    thumbnailConcept: video.thumbnail_concept,
+                    titleCandidates: video.title_candidates,
+                    hooks: video.hooks,
+                    packagingSkippedAt: video.packaging_skipped_at,
+                    packagingSkipReason: video.packaging_skip_reason,
+                  }}
+                  sketch={
+                    <ConceptSketch
+                      videoId={video.id}
+                      userId={user.id}
+                      title={video.title}
+                      url={sketchUrl}
+                      hasSketch={video.thumbnail_concept_path !== null}
+                    />
+                  }
+                  titleWarning={
+                    <TitleTruncationWarning
+                      savedTitle={video.title}
+                      savedCandidates={candidates}
+                    />
+                  }
+                  assist={{
+                    candidates: (
+                      <AssistPill
+                        verb="Generate 20"
+                        what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
                       />
-                    }
-                    titleWarning={
-                      <TitleTruncationWarning
-                        savedTitle={video.title}
-                        savedCandidates={candidates}
+                    ),
+                    concept: (
+                      <AssistPill
+                        verb="Suggest concepts"
+                        what="Proposes thumbnail concepts for the chosen title."
                       />
-                    }
-                    assist={{
-                      candidates: (
-                        <AssistPill
-                          verb="Generate 20"
-                          what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
-                        />
-                      ),
-                      concept: (
-                        <AssistPill
-                          verb="Suggest concepts"
-                          what="Proposes thumbnail concepts for the chosen title."
-                        />
-                      ),
-                      hooks: (
-                        <AssistPill
-                          verb="Draft a third"
-                          what="Writes the hooks you have not written yet, up to three."
-                        />
-                      ),
-                    }}
-                  />
-                </>
+                    ),
+                    hooks: (
+                      <AssistPill
+                        verb="Draft a third"
+                        what="Writes the hooks you have not written yet, up to three."
+                      />
+                    ),
+                  }}
+                />
               ),
 
               script: (
