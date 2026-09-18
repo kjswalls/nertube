@@ -131,13 +131,36 @@ export function NowRowItem({
           {row.stageName}
         </span>
         {row.needsABlock ? (
-          <span
-            data-testid="needs-a-block"
-            title="Filming and editing need a real block of time, not ten spare minutes."
-            className="rounded-full border border-border px-1.5 py-0.5"
-          >
-            needs a block
-          </span>
+          /*
+            M6: for a video sitting in Filming this is not just a label, it is a
+            pointer. `/now`'s quick filter hides these rows because ten spare
+            minutes will not shoot anything, and the calendar is where the block
+            actually gets booked — so the two views agree about the set that is
+            waiting, and each says where the other is. Editing needs a block too
+            but not a *camera day*, so only the filming rows link: a chip
+            offering to schedule an edit onto a shoot would be a promise the
+            product does not keep.
+          */
+          row.stageKind === "filming" ? (
+            <Link
+              href="/calendar"
+              data-testid="needs-a-block"
+              data-stage-kind={row.stageKind}
+              title="Filming needs a real block of time, not ten spare minutes. Book a batch day on the calendar."
+              className="rounded-full border border-border px-1.5 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              needs a block
+            </Link>
+          ) : (
+            <span
+              data-testid="needs-a-block"
+              data-stage-kind={row.stageKind}
+              title="Filming and editing need a real block of time, not ten spare minutes."
+              className="rounded-full border border-border px-1.5 py-0.5"
+            >
+              needs a block
+            </span>
+          )
         ) : row.payload.input === "tick" ? (
           /*
             The mono face is for *measured* values, and only a checklist row has

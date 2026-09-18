@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { FilmingDayPanel } from "@/components/calendar/filming/filming-day-panel";
+import type { FilmingDay } from "@/components/calendar/filming/types";
 import { stripeClass } from "@/components/calendar/grid/channels";
 import { calendarHref } from "@/components/calendar/grid/url";
 import type {
@@ -12,18 +14,6 @@ import {
   relativeDayLabel,
   type DateColumn,
 } from "@/lib/calendar-dates";
-
-/** A filming day with the videos currently linked to it. */
-export interface FilmingDayDetail {
-  readonly filmingDayId: string;
-  readonly notes: string | null;
-  readonly videos: readonly {
-    readonly id: string;
-    readonly title: string;
-    readonly channelId: string;
-    readonly stageName: string | null;
-  }[];
-}
 
 /**
  * One day, in full — where the cell's "+N more" goes, and where a filming day
@@ -55,8 +45,11 @@ export function DayPanel({
   /** Everything on this date, already ordered by `packDay`. */
   events: readonly CalendarEvent[];
   channels: readonly CalendarChannel[];
-  /** Keyed by `filming_days.id`. */
-  filming: ReadonlyMap<string, FilmingDayDetail>;
+  /**
+   * Keyed by `filming_days.id`, straight from `lib/filming-data.ts` — the same
+   * objects the board's dialog and `/videos/[id]` work with.
+   */
+  filming: ReadonlyMap<string, FilmingDay>;
   today: DateColumn;
 }) {
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
@@ -102,45 +95,35 @@ export function DayPanel({
         <ul className="mt-2 flex flex-col gap-2">
           {events.map((event) => {
             if (event.kind === "filming") {
-              const detail = filming.get(event.filmingDayId);
+              const day = filming.get(event.filmingDayId);
+              if (!day) return null;
               return (
                 <li
                   key={eventKey(event)}
                   data-testid="calendar-day-filming"
                   data-filming-day={event.filmingDayId}
-                  className="rounded-card border border-border border-dashed px-3 py-2"
+                  className="rounded-card border border-dashed border-border px-3 py-3"
                 >
-                  <p className="text-[13px] font-medium">
-                    Filming day
-                    <span className="ml-2 font-mono text-[11px] text-muted">
-                      {event.videoCount}
-                    </span>
-                  </p>
-                  {detail?.notes ? (
-                    <p className="mt-1 font-display text-[13px] text-muted">
-                      {detail.notes}
-                    </p>
-                  ) : null}
+                  {/*
+                    The real panel, not a read-only copy of it.
 
-                  {detail && detail.videos.length > 0 ? (
-                    <ul className="mt-2 flex flex-col gap-1">
-                      {detail.videos.map((video) => (
-                        <li key={video.id}>
-                          <VideoLine
-                            href={`/videos/${video.id}`}
-                            title={video.title}
-                            channel={channelById.get(video.channelId)}
-                            showTag={showTag}
-                            trailing={video.stageName}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-1 text-[12px] text-muted">
-                      No videos are linked to this day.
-                    </p>
-                  )}
+                    Until M6's integration this branch drew its own list of the
+                    day's videos, which meant a filming day could be *seen* on
+                    the calendar and only *changed* from the board's dialog —
+                    two renderings of one object, already disagreeing about
+                    archived videos. `FilmingDayPanel` is the one component, so
+                    detaching a video, writing shoot notes, moving the shoot or
+                    cancelling it all work from the day you are looking at.
+
+                    It is a client island inside this server-rendered panel; it
+                    is handed `day.label`, formatted on the server, because
+                    `Intl` output differs between Node and Chromium.
+                  */}
+                  <FilmingDayPanel
+                    day={day}
+                    today={today}
+                    testId="calendar-filming-day-panel"
+                  />
                 </li>
               );
             }

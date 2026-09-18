@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { parseDateColumn } from "./calendar-dates";
 import {
   HookListSchema,
   MAX_TITLE_LENGTH,
@@ -119,16 +120,15 @@ export const ThumbnailConceptSchema = NullableText.refine(
  * through `Date.UTC` is what rejects the days that do not exist.
  */
 function isCalendarDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  if (year < 1970 || year > 2999) return false;
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
+  // M6 note: the round trip used to be written out here as well as in
+  // `lib/calendar-dates.ts`, which made this the second answer to "is this a
+  // real day". It is now the *same* answer — `parseDateColumn` does the
+  // `Date.UTC` round trip that rejects 2026-02-30 — plus the one rule that is
+  // this schema's own business rather than the calendar's: a plausible year.
+  // A typo'd `0202-09-30` is a valid calendar day and still not a publish date.
+  const day = parseDateColumn(value);
+  if (day === null) return false;
+  return day.year >= 1970 && day.year <= 2999;
 }
 
 export const TargetPublishDateSchema = NullableText.refine(

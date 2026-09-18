@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { AppShell } from "@/components/app-shell";
 import { DayPanel } from "@/components/calendar/grid/day-panel";
 import { EmptyMonth, type NearestMonth } from "@/components/calendar/grid/empty-month";
@@ -5,8 +7,10 @@ import { MonthGrid } from "@/components/calendar/grid/month-grid";
 import { MonthNav } from "@/components/calendar/grid/month-nav";
 import { packDay } from "@/components/calendar/grid/density";
 import { dayFromQuery, monthFromQuery } from "@/components/calendar/grid/url";
+import { ScheduleFilmingDayButton } from "@/components/calendar/filming/schedule-day-button";
 import { nearestMonths, readCalendarMonth } from "@/lib/calendar-data";
 import { monthKey, monthOf, todayColumn } from "@/lib/calendar-dates";
+import { readFilmingVideos } from "@/lib/filming-data";
 
 export async function generateMetadata({
   searchParams,
@@ -30,10 +34,17 @@ export async function generateMetadata({
  * ## Everything on this page is in its URL
  *
  * `?month=YYYY-MM` is the month; `?day=YYYY-MM-DD` is the day whose full list
- * is open. Both are read here, both are rendered on the server, and there is no
- * client component anywhere under `components/calendar/grid/`. The consequence
- * that matters: a month can be linked, bookmarked and shared, which is the
- * requirement, and the page costs no hydration.
+ * is open. Both are read here, both are rendered on the server, and nothing
+ * under `components/calendar/grid/` is a client component. The consequence that
+ * matters: a month can be linked, bookmarked and shared, which is the
+ * requirement, and the grid itself costs no hydration.
+ *
+ * Two client islands sit *inside* that server-rendered page, and only two, both
+ * from `components/calendar/filming/`: the button that books a day, and the
+ * panel a filming day expands into. They are interactive by nature — they
+ * write — and they are the same components the board's badge and `/videos/[id]`
+ * use rather than calendar-flavoured copies of them. Navigation is still
+ * entirely links.
  *
  * A `?month=` that is not a month falls back to this month rather than 404ing —
  * there is nothing at `/calendar` that can be missing, and a link with a typo
@@ -71,6 +82,25 @@ export default async function CalendarPage({
     today,
   );
 
+  /*
+    What is waiting for a block of time.
+
+    This is the same read the board's badge uses — `readFilmingVideos()` in
+    `lib/filming-data.ts`, the one definition of "in Filming" — narrowed to the
+    videos that are not on a day yet. It is here because of the disagreement
+    M6's brief names: `/now` deliberately hides the filming and editing kinds
+    behind its "10 minutes or less" filter, on the grounds that they need a real
+    block, and the calendar is where a block gets booked. A creator who filters
+    `/now` down to what they can do right now should be able to find the rest
+    *here*, rather than nowhere.
+
+    It is cross-channel and unscoped by month on purpose: a video waiting for a
+    camera is not waiting in September, it is just waiting.
+  */
+  const waitingForADay = (await readFilmingVideos()).filter(
+    (video) => video.filmingDayId === null,
+  );
+
   const isEmpty = events.length === 0;
   let nearest: { previous: NearestMonth | null; next: NearestMonth | null } = {
     previous: null,
@@ -94,6 +124,44 @@ export default async function CalendarPage({
           currentMonth={currentMonth}
           summary={summarise(counts, channels.length)}
         />
+
+        {/*
+          Booking a day from the calendar. The same control the board's badge
+          became, in its `plain` tone: on the board it is a signal that has
+          fired (three or more waiting) and it carries the attention colour; here
+          it is an affordance on the page whose job is scheduling, so it is
+          quiet furniture. One component, two tones — not a second dialog.
+        */}
+        {waitingForADay.length > 0 ? (
+          <div
+            data-testid="calendar-waiting-for-a-day"
+            data-count={waitingForADay.length}
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3"
+          >
+            <p className="text-[13px] text-muted">
+              <span className="font-medium text-foreground">
+                {waitingForADay.length === 1
+                  ? "1 video is"
+                  : `${waitingForADay.length} videos are`}
+              </span>{" "}
+              waiting for a filming day. Filming needs a real block of time, so
+              it does not show up on{" "}
+              <Link
+                href="/now"
+                className="underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                What can I move right now?
+              </Link>
+              .
+            </p>
+            <ScheduleFilmingDayButton
+              candidates={waitingForADay}
+              today={today}
+              label="Schedule a filming day"
+              title="Book a batch day and put these videos on it."
+            />
+          </div>
+        ) : null}
 
         {isEmpty ? (
           <EmptyMonth

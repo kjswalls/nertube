@@ -307,6 +307,8 @@ export function Board({
       stageName: filming?.stage.name ?? "Filming",
       archived: false,
       targetPublishDate: card.targetPublishDate,
+      targetPublishLabel: card.targetPublishLabel,
+      filmingDayId: card.filmingDayId,
     }));
     return [...here, ...filmingElsewhere];
   }, [columns, channelName, channelSlug, filmingElsewhere]);

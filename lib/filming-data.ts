@@ -6,7 +6,7 @@ import type {
 } from "@/components/calendar/filming/types";
 import type { StageKind } from "@/lib/defaults";
 import { isStageKind } from "@/lib/defaults";
-import { compareDateColumns } from "@/lib/calendar-dates";
+import { compareDateColumns, formatDateColumn } from "@/lib/calendar-dates";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -106,6 +106,7 @@ interface VideoRow {
   stage_id: string;
   archived_at: string | null;
   target_publish_date: string | null;
+  filming_day_id: string | null;
 }
 
 function dress(row: VideoRow, lookups: Lookups): FilmingVideo {
@@ -124,11 +125,16 @@ function dress(row: VideoRow, lookups: Lookups): FilmingVideo {
     stageName: stage?.name ?? "—",
     archived: row.archived_at !== null,
     targetPublishDate: row.target_publish_date,
+    // Formatted here, on the server, because a `FilmingVideo` is rendered by
+    // both a server component (`/calendar`'s day panel) and a client one (the
+    // schedule dialog). See `FilmingVideo.targetPublishLabel`.
+    targetPublishLabel: formatDateColumn(row.target_publish_date, "short"),
+    filmingDayId: row.filming_day_id,
   };
 }
 
 const VIDEO_COLUMNS =
-  "id, title, channel_id, stage_id, archived_at, target_publish_date";
+  "id, title, channel_id, stage_id, archived_at, target_publish_date, filming_day_id";
 
 /* -------------------------------------------------------------------------- */
 /* What is waiting for a block of time                                         */
@@ -222,12 +228,12 @@ export async function readFilmingDays(
 
   const lookups = await readLookups();
 
-  const rows = await readPaged<VideoRow & { filming_day_id: string | null }>(
+  const rows = await readPaged<VideoRow>(
     "videos on filming days",
     (start, end) =>
       supabase
         .from("videos")
-        .select(`${VIDEO_COLUMNS}, filming_day_id`)
+        .select(VIDEO_COLUMNS)
         .in(
           "filming_day_id",
           days.map((day) => day.id),
@@ -251,6 +257,7 @@ export async function readFilmingDays(
     .map((day) => ({
       id: day.id,
       onDate: day.on_date,
+      label: formatDateColumn(day.on_date, "full") ?? day.on_date,
       notes: day.notes,
       videos: (byDay.get(day.id) ?? []).sort((a, b) =>
         a.title.localeCompare(b.title, "en"),

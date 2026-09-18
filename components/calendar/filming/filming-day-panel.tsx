@@ -11,10 +11,7 @@ import {
 } from "@/app/actions/filming-days";
 import { SaveStatus, useAutosave } from "@/components/autosave";
 import { useToast } from "@/components/toast";
-import {
-  formatDateColumn,
-  relativeDayLabel,
-} from "@/lib/calendar-dates";
+import { relativeDayLabel } from "@/lib/calendar-dates";
 
 import { STATUS_LABEL, statusOf, summarise } from "./summary";
 import { MAX_FILMING_NOTES_LENGTH, type FilmingDay } from "./types";
@@ -64,6 +61,14 @@ export function FilmingDayPanel({
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
+  /*
+    Unique per *instance*, not per day. Since M6's integration the same day can
+    legitimately be on screen twice — expanded under the calendar grid, and
+    again inside the schedule dialog when somebody picks a date that is already
+    booked — and an id built from `day.id` would then be in the document twice,
+    pointing a `<label>` at whichever came first.
+  */
+  const panelId = useId();
 
   /*
     The props are authoritative; what is kept here is only the delta a write on
@@ -85,7 +90,17 @@ export function FilmingDayPanel({
   }
 
   const summary = summarise(day.videos, { onDate: day.onDate, today });
-  const dateLabel = formatDateColumn(day.onDate, "full") ?? day.onDate;
+  /*
+    Formatted on the server and carried on the day — not computed here. Since
+    M6's integration this panel is rendered inside `/calendar`'s server-rendered
+    day panel as well as inside the client-only schedule dialog, and
+    `Intl.DateTimeFormat` disagrees with itself across Node and Chromium ("Wed
+    30 Sept" against "Wed, 30 Sept"). Formatting during render would reintroduce
+    the exact hydration failure `video-filming-day.tsx` already had to fix.
+    `relativeDayLabel` is safe to call here: it is whole-day arithmetic over two
+    `YYYY-MM-DD` strings with no locale data in it at all.
+  */
+  const dateLabel = day.label;
   const relative = relativeDayLabel(day.onDate, today);
 
   function detach(videoId: string, title: string): void {
@@ -128,11 +143,7 @@ export function FilmingDayPanel({
       absorb(result.day);
       onChanged?.(result.day);
       setMoving(null);
-      toast.push({
-        message: `Moved the filming day to ${
-          formatDateColumn(result.day.onDate, "full") ?? result.day.onDate
-        }.`,
-      });
+      toast.push({ message: `Moved the filming day to ${result.day.label}.` });
       router.refresh();
     });
   }
@@ -228,11 +239,11 @@ export function FilmingDayPanel({
                       {video.stageName}
                       <span className="text-muted/80"> — {STATUS_LABEL[status]}</span>
                     </span>
-                    {video.targetPublishDate ? (
+                    {video.targetPublishLabel ? (
                       <>
                         <span aria-hidden="true">·</span>
                         <span className="font-mono">
-                          publishes {formatDateColumn(video.targetPublishDate, "short")}
+                          publishes {video.targetPublishLabel}
                         </span>
                       </>
                     ) : null}
@@ -285,11 +296,11 @@ export function FilmingDayPanel({
           </button>
         ) : (
           <>
-            <label htmlFor={`${day.id}-move`} className="sr-only">
+            <label htmlFor={`${panelId}-move`} className="sr-only">
               Move this filming day to
             </label>
             <input
-              id={`${day.id}-move`}
+              id={`${panelId}-move`}
               data-testid="move-day-date"
               type="date"
               value={moving}

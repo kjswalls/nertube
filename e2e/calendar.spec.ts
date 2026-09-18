@@ -542,11 +542,25 @@ test('a filming day is its own event type and expands to the videos linked to it
 
   const block = page.getByTestId('calendar-day-filming');
   await expect(block).toHaveCount(1);
-  await expect(block).toContainText('Two shirts, one afternoon');
   await expect(block).toContainText(TITLES.filmed);
   await expect(block).toContainText(TITLES.moved);
   // The one that moved on is listed with the stage it is in today.
   await expect(block).toContainText('Editing');
+
+  /*
+    Since M6's integration the day expands into the *real* filming-day panel —
+    the same component the board's schedule dialog and `/videos/[id]` use — not
+    a read-only copy of it. So the shoot notes are an editable field rather than
+    a paragraph, and the day can be changed from the day you are looking at.
+  */
+  const dayPanel = block.getByTestId('calendar-filming-day-panel');
+  await expect(dayPanel).toBeVisible();
+  await expect(dayPanel.getByTestId('filming-day-notes')).toHaveValue(
+    'Two shirts, one afternoon',
+  );
+  await expect(dayPanel.getByTestId('filming-day-video')).toHaveCount(2);
+  await expect(dayPanel.getByTestId('move-day')).toBeVisible();
+  await expect(dayPanel.getByTestId('cancel-day')).toBeVisible();
 });
 
 /* -------------------------------------------------------------------------- */

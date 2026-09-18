@@ -7,7 +7,7 @@ import {
   MAX_FILMING_NOTES_LENGTH,
   type FilmingDay,
 } from "@/components/calendar/filming/types";
-import { isDateColumn } from "@/lib/calendar-dates";
+import { formatDateColumn, isDateColumn } from "@/lib/calendar-dates";
 import { readFilmingDay } from "@/lib/filming-data";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -368,6 +368,7 @@ export async function createFilmingDay(
   const day = (await readFilmingDay(created.id)) ?? {
     id: created.id,
     onDate: created.on_date,
+    label: formatDateColumn(created.on_date, "full") ?? created.on_date,
     notes: created.notes,
     videos: [],
   };
@@ -550,6 +551,7 @@ export async function updateFilmingDay(
   const day = (await readFilmingDay(dayId)) ?? {
     id: data.id,
     onDate: data.on_date,
+    label: formatDateColumn(data.on_date, "full") ?? data.on_date,
     notes: data.notes,
     videos: [],
   };

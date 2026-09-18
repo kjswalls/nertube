@@ -1,6 +1,6 @@
 import { cache } from "react";
 
-import type { FilmingDayDetail } from "@/components/calendar/grid/day-panel";
+import type { FilmingDay } from "@/components/calendar/filming/types";
 import type { NearestMonth } from "@/components/calendar/grid/empty-month";
 import { publishStateOf } from "@/components/calendar/grid/density";
 import { tagsFor } from "@/components/calendar/grid/channels";
@@ -17,6 +17,7 @@ import {
   parseMonthKey,
   type DateColumn,
 } from "@/lib/calendar-dates";
+import { readFilmingDays } from "@/lib/filming-data";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -52,8 +53,18 @@ export interface CalendarMonthData {
   readonly channels: readonly CalendarChannel[];
   /** Publish and filming events, all inside the month. */
   readonly events: readonly CalendarEvent[];
-  /** Keyed by `filming_days.id`, for the day panel's expansion. */
-  readonly filming: ReadonlyMap<string, FilmingDayDetail>;
+  /**
+   * Keyed by `filming_days.id`, for the day panel's expansion.
+   *
+   * These are whole `FilmingDay` objects from `lib/filming-data.ts` — the same
+   * reader the board's badge, the schedule dialog and `/videos/[id]` use — and
+   * not a second, thinner shape read here. M6's integration collapsed the two:
+   * the calendar used to run its own filming-day queries, which quietly
+   * disagreed with the filming slice about archived videos (this file dropped
+   * them, that one kept them and labelled them). One reader means the chip's
+   * count and the panel's list are the same list, by construction.
+   */
+  readonly filming: ReadonlyMap<string, FilmingDay>;
   /** How many videos and how many filming days, for the heading. */
   readonly counts: { readonly videos: number; readonly filmingDays: number };
 }
@@ -143,78 +154,35 @@ export async function readCalendarMonth(
   /*
     Filming days: user-level and cross-channel by design (one creator, one
     camera), so this is not scoped by channel and must not be.
+
+    Read through `lib/filming-data.ts` rather than here. That module is the one
+    definition of "a filming day and what it covers" — the board's badge, the
+    schedule dialog, `/videos/[id]` and now this grid all get the same object,
+    including its server-formatted label and the videos that have since moved
+    on or been archived. Before M6's integration this file ran its own pair of
+    queries and dropped archived videos, so a day could draw "2" on the grid and
+    list three rows in the panel below it.
   */
-  const { data: filmingRows, error: filmingError } = await supabase
-    .from("filming_days")
-    .select("id, on_date, notes")
-    .gte("on_date", start)
-    .lte("on_date", end)
-    .order("on_date", { ascending: true });
+  const days = await readFilmingDays(start, end);
 
-  if (filmingError) {
-    throw new Error(`Could not load the filming days: ${filmingError.message}`);
-  }
+  const filming = new Map<string, FilmingDay>(days.map((day) => [day.id, day]));
 
-  const filming = new Map<string, FilmingDayDetail>();
-  const filmingDays = filmingRows ?? [];
-
-  if (filmingDays.length > 0) {
-    /*
-      The videos linked to those days, read by their *current* state.
-
-      A video that has moved on from Filming keeps its link — `filming_day_id`
-      is a fact about when it was shot, not about where it is now — so this
-      deliberately does not filter by stage. PLAN.md's own M6 review item is
-      "a filming day whose video left Filming still renders sanely": it renders
-      with the stage it is in today beside it.
-    */
-    const linked = await readPaged(`videos linked to a filming day`, (from, to) =>
-      supabase
-        .from("videos")
-        .select("id, title, channel_id, stage_id, filming_day_id")
-        .in(
-          "filming_day_id",
-          filmingDays.map((day) => day.id),
-        )
-        .is("archived_at", null)
-        .order("title", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
-
-    for (const day of filmingDays) {
-      filming.set(day.id, {
-        filmingDayId: day.id,
-        notes: day.notes,
-        videos: linked
-          .filter((video) => video.filming_day_id === day.id)
-          .map((video) => ({
-            id: video.id,
-            title: video.title.trim() === "" ? "Untitled" : video.title,
-            channelId: video.channel_id,
-            stageName: video.stage_id
-              ? (stages.get(video.stage_id)?.name ?? null)
-              : null,
-          })),
-      });
-    }
-
-    for (const day of filmingDays) {
-      events.push({
-        kind: "filming",
-        date: day.on_date,
-        filmingDayId: day.id,
-        notes: day.notes,
-        videoCount: filming.get(day.id)?.videos.length ?? 0,
-      });
-    }
+  for (const day of days) {
+    events.push({
+      kind: "filming",
+      date: day.onDate,
+      filmingDayId: day.id,
+      notes: day.notes,
+      // The same array the panel lists, so the two cannot disagree.
+      videoCount: day.videos.length,
+    });
   }
 
   return {
     channels,
     events,
     filming,
-    counts: { videos: videoRows.length, filmingDays: filmingDays.length },
+    counts: { videos: videoRows.length, filmingDays: days.length },
   };
 }
 

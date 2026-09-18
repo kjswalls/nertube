@@ -46,6 +46,29 @@ export interface FilmingVideo {
   readonly archived: boolean;
   /** `YYYY-MM-DD` or null. */
   readonly targetPublishDate: string | null;
+  /**
+   * `targetPublishDate` in words, **formatted on the server**, or null.
+   *
+   * Same rule, and same bug, as `LinkableDay.label` in `video-filming-day.tsx`:
+   * `Intl.DateTimeFormat` is one API with two implementations, and since M6's
+   * integration a `FilmingDay` is rendered by a *server* component on
+   * `/calendar` as well as by a client one in the dialog. A date formatted
+   * during render would be formatted once by Node and once by Chromium, and
+   * React would throw the subtree away. It is formatted once, where the row is
+   * read.
+   */
+  readonly targetPublishLabel: string | null;
+  /**
+   * The filming day this video is already on, or null when it is waiting for
+   * one.
+   *
+   * Carried on the video rather than counted separately because `/calendar` and
+   * `/now` have to agree about what "waiting for a block of time" means (M6's
+   * integration brief), and the honest version of that set is *in Filming and
+   * not yet on a day*. Deriving it from the row the badge already reads keeps
+   * it one query and one definition.
+   */
+  readonly filmingDayId: string | null;
 }
 
 /** A scheduled batch day, with everything it covers. */
@@ -53,6 +76,11 @@ export interface FilmingDay {
   readonly id: string;
   /** `YYYY-MM-DD`. A calendar day, never an instant. */
   readonly onDate: string;
+  /**
+   * `onDate` in words — "Saturday 3 October 2026" — formatted on the server.
+   * See `FilmingVideo.targetPublishLabel`; the reason is the same one.
+   */
+  readonly label: string;
   readonly notes: string | null;
   readonly videos: readonly FilmingVideo[];
 }

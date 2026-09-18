@@ -20,6 +20,13 @@
  */
 
 import { bucketOn } from "@/lib/buckets";
+import {
+  firstOfMonth,
+  formatMonth,
+  monthOf,
+  shiftMonth,
+  todayColumn,
+} from "@/lib/calendar-dates";
 
 /* -------------------------------------------------------------------------- */
 /* The month                                                                   */
@@ -53,25 +60,25 @@ export interface MonthWindow {
 }
 
 export function monthWindow(now: number): MonthWindow {
-  const at = new Date(now);
-  const year = at.getUTCFullYear();
-  const month = at.getUTCMonth();
+  // M6 note: this used to do its own `getUTC*` arithmetic and its own
+  // zero-padding, which made it the *second* interpretation of a date column in
+  // the codebase — correct, but independently correct, which is the state that
+  // decays. `lib/calendar-dates.ts` is the one interpretation now, and the
+  // month boundary M5's reviewers attacked is the helper's `shiftMonth`, tested
+  // there against year ends, leap Februaries and both clock-change months.
+  const month = monthOf(todayColumn(now));
 
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const start = `${year}-${pad(month + 1)}-01`;
-  // `Date.UTC(2026, 12, 1)` is January 2027 — the rollover is the constructor's
-  // job, not this function's.
-  const nextAt = new Date(Date.UTC(year, month + 1, 1));
-  const next = `${nextAt.getUTCFullYear()}-${pad(nextAt.getUTCMonth() + 1)}-01`;
+  // `todayColumn` cannot produce a day that `monthOf` rejects; the branch is
+  // here because the types say it can, and a matrix that renders the epoch is
+  // better than one that throws during a render.
+  if (month === null) {
+    return { start: "1970-01-01", next: "1970-02-01", label: "January 1970" };
+  }
 
   return {
-    start,
-    next,
-    label: new Intl.DateTimeFormat("en-GB", {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(Date.UTC(year, month, 1)),
+    start: firstOfMonth(month),
+    next: firstOfMonth(shiftMonth(month, 1)),
+    label: formatMonth(month),
   };
 }
 

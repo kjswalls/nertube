@@ -9,8 +9,9 @@ import {
   linkVideosToFilmingDay,
   unlinkVideoFromFilmingDay,
 } from "@/app/actions/filming-days";
+import { CALENDAR_PATH, calendarHref } from "@/components/calendar/grid/url";
 import { useToast } from "@/components/toast";
-import { formatDateColumn } from "@/lib/calendar-dates";
+import { formatDateColumn, monthKey, monthOf } from "@/lib/calendar-dates";
 
 import { nextSaturday } from "./schedule-day-button";
 
@@ -227,7 +228,7 @@ export function VideoFilmingDay({
 
         {currentDay ? (
           <Link
-            href={`/calendar?month=${currentDay.onDate.slice(0, 7)}&day=${currentDay.onDate}`}
+            href={calendarLinkTo(currentDay.onDate)}
             data-testid="filming-day-open"
             className="rounded-button px-2 py-1 text-[12px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
           >
@@ -298,4 +299,21 @@ export function VideoFilmingDay({
       </p>
     </div>
   );
+}
+
+/**
+ * The link to a filming day on the calendar.
+ *
+ * `onDate.slice(0, 7)` would work and was what this did. It is gone because
+ * slicing a month out of a date string is a *second* answer to "which month is
+ * this day in", and M6's whole discipline is that there is one — so the month
+ * comes from `monthOf`, the URL from the calendar's own `calendarHref`, and a
+ * day that somehow is not a date links to the month grid's fallback rather than
+ * to `/calendar?month=2026-1`.
+ */
+function calendarLinkTo(onDate: string): string {
+  const month = monthOf(onDate);
+  return month === null
+    ? CALENDAR_PATH
+    : calendarHref({ month: monthKey(month), day: onDate });
 }

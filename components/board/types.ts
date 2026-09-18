@@ -41,6 +41,14 @@ export interface BoardCard {
   /** The raw `YYYY-MM-DD`, which is what the sort compares. */
   readonly targetPublishDate: string | null;
   /**
+   * The filming day this video is already booked onto, or null.
+   *
+   * Only the Filming column's badge uses it, and only to hand the schedule
+   * dialog an honest `FilmingCandidate`: a card built here has to say whether
+   * it is already on a day, because `/calendar` counts the ones that are not.
+   */
+  readonly filmingDayId: string | null;
+  /**
    * Storage path of the concept sketch, or null. Not rendered directly — it is
    * a private object name — but it is what the board page signs, and what the
    * card's slot reads to tell "no sketch" from "a sketch whose URL failed".

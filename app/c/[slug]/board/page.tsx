@@ -8,7 +8,7 @@ import {
   type BoardCard,
   type BoardStage,
 } from "@/components/board/types";
-import { todayColumn } from "@/lib/calendar-dates";
+import { formatDateColumn, todayColumn } from "@/lib/calendar-dates";
 import { isStageKind, type StageKind } from "@/lib/defaults";
 import { readFilmingVideos } from "@/lib/filming-data";
 import { cacheBusted, signedUrlsFor } from "@/lib/storage";
@@ -105,7 +105,7 @@ export default async function BoardPage({
       // One literal, on one line: supabase-js types the result from the select
       // string, and a concatenation is no longer a literal type to read.
       // prettier-ignore
-      .select("id, title, stage_id, stage_entered_at, created_at, updated_at, target_publish_date, thumbnail_concept_path, packaging_skipped_at, waiting_on, published_at")
+      .select("id, title, stage_id, stage_entered_at, created_at, updated_at, target_publish_date, thumbnail_concept_path, packaging_skipped_at, waiting_on, published_at, filming_day_id")
       .eq("channel_id", channel.id)
       .is("archived_at", null)
       // A total order, because paging without one can repeat and skip rows.
@@ -164,6 +164,7 @@ export default async function BoardPage({
       daysInStage: wholeDaysSince(video.stage_entered_at, now),
       targetPublishDate: video.target_publish_date,
       targetPublishLabel: formatTargetDate(video.target_publish_date),
+      filmingDayId: video.filming_day_id,
       thumbnailConceptPath: video.thumbnail_concept_path,
       // `updated_at` versions the URL: the path is stable by design, so
       // without it a replaced sketch can be served from the browser cache.
@@ -268,13 +269,16 @@ function wholeDaysSince(iso: string, now: number): number {
  * and no zone. Formatted in UTC with a fixed locale so the server and the
  * browser cannot disagree about which day it is.
  */
+/**
+ * A target date as a card prints it: `3 Mar`.
+ *
+ * M6 note: this used to parse `${value}T00:00:00Z` and build its own
+ * `Intl.DateTimeFormat`, which made the board a third interpretation of a
+ * `date` column alongside the calendar and the matrix — same intent, same
+ * options, separately maintained. It is `formatDateColumn(_, "short")` now,
+ * which is that formatter, cached, with the invalid-day rejection the helper
+ * already does.
+ */
 function formatTargetDate(value: string | null): string | null {
-  if (!value) return null;
-  const parsed = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed)) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(parsed);
+  return formatDateColumn(value, "short");
 }
