@@ -171,14 +171,7 @@ export function SkipPackaging({
           {skipReason ?? "(no reason recorded)"}
         </p>
         <p className="text-xs text-muted">
-          Skipped{" "}
-          <time dateTime={skippedAt}>
-            {new Date(skippedAt).toLocaleDateString(undefined, {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
-          </time>
+          Skipped <time dateTime={skippedAt}>{formatSkippedAt(skippedAt)}</time>
           . This shows as a badge on the card, and the gate lets this video
           through until it is undone.
         </p>
@@ -319,4 +312,38 @@ export function SkipPackaging({
       ) : null}
     </div>
   );
+}
+
+/**
+ * When the gate was skipped, in words.
+ *
+ * `packaging_skipped_at` is a `timestamptz` — a real instant, unlike the
+ * `date` columns `lib/calendar-dates.ts` owns — so it is not that helper's
+ * business. What it *does* share with every other formatted date in this
+ * codebase is the rule the helper's header states: **fixed locale, fixed
+ * zone**. This is a `"use client"` component that `/videos/[id]` renders on
+ * the server, and `toLocaleDateString(undefined, …)` reads the machine's
+ * locale and zone — Node's on the server, the viewer's in the browser. A
+ * reviewer reproduced the consequence with a browser in `Pacific/Kiritimati`:
+ * the server wrote "3 Mar 2026", Chromium wrote "Mar 4, 2026", and React threw
+ * the subtree away on every load.
+ *
+ * `en-GB` + `UTC` is the same pair `components/thumbnails/thumbnails-section.tsx`
+ * pins its swap log with, and the same pair `FORMATS` in
+ * `lib/calendar-dates.ts` uses, so the whole product says "3 Mar 2026".
+ *
+ * Built per call rather than cached: one instance per rendered skip badge, and
+ * there is at most one on a page.
+ */
+function formatSkippedAt(iso: string): string {
+  const stamp = Date.parse(iso);
+  // An unparseable stamp is shown as it was stored rather than as
+  // "Invalid Date": the `<time dateTime>` beside it is that string anyway.
+  if (Number.isNaN(stamp)) return iso;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(stamp);
 }

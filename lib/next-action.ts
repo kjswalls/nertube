@@ -1,4 +1,10 @@
 import {
+  compareDateColumns,
+  formatDateColumn,
+  isDateColumn,
+  todayColumn,
+} from "./calendar-dates";
+import {
   DEFAULT_EST_MINUTES,
   estMinutesOf,
   nextItem,
@@ -380,20 +386,22 @@ export function nextStageAfter(
 }
 
 /**
- * A `YYYY-MM-DD` calendar date in words.
+ * A `YYYY-MM-DD` calendar date in words: `3 Mar`.
  *
- * Fixed locale, fixed zone: `target_publish_date` is a `date`, with no time and
- * no zone, and this string is rendered on the server and hydrated in the
- * browser. The board formats the same column the same way for the same reason.
+ * M6 review note: this used to parse `${value}T00:00:00Z` and construct its own
+ * `Intl.DateTimeFormat` per call — a fifth interpretation of a `date` column,
+ * with options byte-identical to `FORMATS.short` in `lib/calendar-dates.ts`.
+ * The integration folded four others in and missed this one, and it was the one
+ * that diverged: `Date.parse("2026-02-30T00:00:00Z")` rolls forward, so it
+ * printed `2 Mar` for a day that does not exist. The helper refuses it, and a
+ * refusal falls back to the stored string rather than to a wrong date.
+ *
+ * Kept as a named export rather than replaced at the three call sites because
+ * "the words `/now` and `/videos/[id]` print a target date in" is a decision
+ * this module already owns, and one line is cheaper than three imports.
  */
 export function formatPublishDate(value: string): string {
-  const parsed = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed)) return value;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(parsed);
+  return formatDateColumn(value, "short") ?? value;
 }
 
 /*
@@ -716,10 +724,11 @@ function swappedSince(lastSwapAt: string | null, metricsLoggedAt: string): boole
 /**
  * Is this calendar date still ahead of us?
  *
- * The comparison is against the **start** of the target day in UTC —
- * `now < Date.parse(date + "T00:00:00Z")` — so the day itself counts as
- * on/after and the row is Ready from midnight UTC on the target date. PLAN.md's
- * wording is *in the future → Waiting; on/after → Ready*.
+ * Whole calendar days, both sides: `todayColumn(now)` is the UTC day the clock
+ * is on, and the answer is whether the target day is strictly after it — so the
+ * day itself counts as on/after and the row is Ready from midnight UTC on the
+ * target date. PLAN.md's wording is *in the future → Waiting; on/after →
+ * Ready*.
  *
  * `now` is real UTC and `target_publish_date` is a zoneless `date`, which has a
  * consequence worth stating rather than discovering: a user east of UTC sees
@@ -729,9 +738,14 @@ function swappedSince(lastSwapAt: string | null, metricsLoggedAt: string): boole
  * arithmetic one.
  */
 function isFuture(date: string, now: number): boolean {
-  const start = Date.parse(`${date}T00:00:00Z`);
-  if (Number.isNaN(start)) return false;
-  return now < start;
+  // Whole calendar days through the one helper, rather than a second
+  // `Date.parse(date + "T00:00:00Z")`: `todayColumn` is the same UTC floor this
+  // used to compute by hand, and it cannot roll `2026-02-30` forward into
+  // March the way `Date.parse` does. A value that is not a calendar day at all
+  // keeps the old answer — not in the future, so the row is offered rather than
+  // held back over a column nobody can read.
+  if (!isDateColumn(date)) return false;
+  return compareDateColumns(date, todayColumn(now)) > 0;
 }
 
 /** Elapsed ms since an ISO stamp; never negative, 0 for an unparseable one. */

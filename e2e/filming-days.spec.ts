@@ -186,6 +186,16 @@ async function videosOn(dayId: string): Promise<string[]> {
   return result.rows.map((row) => row.id);
 }
 
+/** One of this file's fixture videos, by the title `seedWeek` gave it. */
+async function videoIdByTitle(title: string): Promise<string> {
+  const result = await db.query<{ id: string }>(
+    'select id from public.videos where title = $1',
+    [title],
+  );
+  if (!result.rows[0]) throw new Error(`no fixture video called ${title}`);
+  return result.rows[0].id;
+}
+
 async function dayOfVideo(videoId: string): Promise<string | null> {
   const result = await db.query<{ filming_day_id: string | null }>(
     'select filming_day_id from public.videos where id = $1',
@@ -832,4 +842,105 @@ test('the calendar draws a filming day as its own kind of event', async ({
   await expect(dayPanel).toBeVisible();
   await expect(dayPanel).toContainText(TITLES.kettle);
   await expect(dayPanel).toContainText(TITLES.desk);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8. The M6 review: a booking must never empty another booking                */
+/* -------------------------------------------------------------------------- */
+
+test('a video already on a day is listed unticked, and one press moves nothing', async ({
+  page,
+}) => {
+  /*
+    The blocker four reviewers found independently.
+
+    `link()` sets `filming_day_id` unconditionally, the dialog used to tick
+    every candidate, and the board's badge keeps counting videos that are
+    already booked — so the obvious next action after booking a Saturday was to
+    press the badge again, and doing so re-pointed those videos at a second
+    date and left the Saturday holding its shoot notes and nothing else.
+
+    The claim under test is about the rows, not the render: after a press with
+    the defaults, the first day still has exactly the videos it started with.
+  */
+  // `beforeEach` has already seeded the week; these are its rows.
+  const kettle = await videoIdByTitle(TITLES.kettle);
+  const desk = await videoIdByTitle(TITLES.desk);
+  const budget = await videoIdByTitle(TITLES.budget);
+  const first = await makeDay(SHOOT, 'Kitchen set, grey shirt');
+  await linkInDatabase(first, [kettle, desk]);
+
+  await openBoard(page);
+  await openScheduleDialog(page);
+
+  const booked = page.locator(
+    '[data-testid="filming-candidate"][data-booked="yes"]',
+  );
+  await expect(booked).toHaveCount(2);
+  for (const box of await booked.all()) await expect(box).not.toBeChecked();
+
+  // It is still listed — the badge counts the whole pile — and it says which
+  // day it is on, so ticking it is a decision rather than a surprise.
+  await expect(dialog(page).getByTestId('filming-candidate-booked')).toHaveCount(
+    2,
+  );
+  // The `short` style only: Node's CLDR and Chromium's disagree about the
+  // comma in `weekday` ("Sat 3 Oct" against "Sat, 3 Oct"), which the
+  // "already have a filming day" test above documents at length.
+  await expect(dialog(page)).toContainText(
+    formatDateColumn(SHOOT, 'short') as string,
+  );
+  await expect(page.getByTestId('filming-already-booked')).toContainText(
+    'already on a filming day',
+  );
+
+  // The default press, on a different date.
+  await pickDate(page, OTHER_SHOOT);
+  await page.getByTestId('schedule-day-submit').click();
+  await expect(panel(page)).toBeVisible();
+
+  // The first day is intact. This is the assertion the bug failed.
+  expect(await videosOn(first)).toHaveLength(2);
+  expect(await dayOfVideo(kettle)).toBe(first);
+  expect(await dayOfVideo(desk)).toBe(first);
+
+  const [second] = await daysOn(OTHER_SHOOT);
+  const moved = await videosOn(second.id);
+  expect(moved).not.toContain(kettle);
+  expect(moved).not.toContain(desk);
+  expect(moved).toContain(budget);
+});
+
+test('moving a booked video is possible, deliberate, and reported', async ({
+  page,
+}) => {
+  const kettle = await videoIdByTitle(TITLES.kettle);
+  const first = await makeDay(SHOOT, 'Kitchen set, grey shirt');
+  await linkInDatabase(first, [kettle]);
+
+  await openBoard(page);
+  await openScheduleDialog(page);
+
+  // Tick the booked one by hand — the only way it can move.
+  const booked = page.locator(
+    '[data-testid="filming-candidate"][data-booked="yes"]',
+  );
+  await expect(booked).toHaveCount(1);
+  await booked.click();
+
+  // The button says what the press will do before it is pressed.
+  await expect(page.getByTestId('schedule-day-submit')).toHaveText(
+    /moving 1 video/,
+  );
+
+  await pickDate(page, OTHER_SHOOT);
+  await page.getByTestId('schedule-day-submit').click();
+
+  // And the answer says it happened, rather than saying nothing at all.
+  await expect(page.getByTestId('filming-day-notice')).toContainText(
+    'already on another filming day',
+  );
+
+  expect(await dayOfVideo(kettle)).not.toBe(first);
+  expect(await videosOn(first)).toHaveLength(0);
 });

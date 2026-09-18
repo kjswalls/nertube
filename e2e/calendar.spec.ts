@@ -633,3 +633,163 @@ test('the sidebar Calendar entry is a link, counts this month, and is reachable 
     chipsIn(page, TODAY).filter({ hasText: TITLES.alpha }),
   ).toHaveCount(1);
 });
+
+/* -------------------------------------------------------------------------- */
+/* 7. The M6 review: URLs that tell the truth                                  */
+/* -------------------------------------------------------------------------- */
+
+test('a ?day= outside the month draws that day rather than denying it', async ({
+  page,
+}) => {
+  /*
+    `dayFromQuery` deliberately accepts any valid date, and `?day=` is the most
+    pasteable thing on this page — which is how the review reached it: a bare
+    `/calendar?day=…` falls back to *this* month, so the read window did not
+    contain the open day and the panel rendered a confident heading over the
+    words "Nothing is planned for this day". The month now follows the open day,
+    so the panel can only be filled from a window that contains it.
+  */
+  const day = `${BUSY_MONTH}-15`;
+  await seedVideo({ slug: CHANNELS.a.slug, title: TITLES.alpha, date: day });
+
+  // No `?month=` at all: the worst case, because the fallback is this month.
+  await page.goto(`/calendar?day=${day}`);
+
+  const panel = page.getByTestId('calendar-day-panel');
+  await expect(panel).toHaveAttribute('data-date', day);
+  await expect(panel).toHaveAttribute('data-count', '1');
+  await expect(panel).toContainText(TITLES.alpha);
+  // The grid above it is the month that day is in, not the current one.
+  await expect(page.getByTestId('calendar-heading')).toHaveAttribute(
+    'data-month',
+    BUSY_MONTH,
+  );
+  // And Close goes back to that month, not to the one in the URL.
+  await expect(page.getByTestId('calendar-day-close')).toHaveAttribute(
+    'href',
+    `/calendar?month=${BUSY_MONTH}`,
+  );
+
+  // The same day with a *contradicting* month is the same answer.
+  await page.goto(`/calendar?month=${LAST_MONTH}&day=${day}`);
+  await expect(page.getByTestId('calendar-day-panel')).toHaveAttribute(
+    'data-count',
+    '1',
+  );
+});
+
+test('the tab title names the month that is actually drawn', async ({ page }) => {
+  // The common case: no query at all. It used to be "calendar · calendar".
+  await openMonth(page);
+  const heading = await page
+    .getByTestId('calendar-heading')
+    .getAttribute('data-month');
+  expect(heading).toBe(THIS_MONTH);
+  await expect(page).toHaveTitle(/ · calendar · NerTube$/);
+  const current = await page.title();
+  expect(current).not.toContain('calendar · calendar');
+  expect(current).not.toContain(THIS_MONTH);
+
+  // A typo'd month renders this month, so the title must say this month too —
+  // it used to echo the typo while the grid below disagreed with it.
+  await page.goto('/calendar?month=not-a-month');
+  await expect(page.getByTestId('calendar-grid')).toBeVisible();
+  await expect(page).toHaveTitle(current);
+});
+
+test('a filming day can be booked from the calendar with nothing waiting', async ({
+  page,
+}) => {
+  /*
+    The ordinary planning direction for a batch shoot: book the Saturday first,
+    move videos into Filming as scripting finishes. The control used to live
+    inside the "N videos are waiting" block, so it vanished in exactly the state
+    a person plans from — and, worse, the block unmounted on success and took
+    the open dialog with it.
+  */
+  const parked = await db.query<{ id: string }>(
+    `update public.videos set archived_at = now()
+      where archived_at is null
+        and stage_id in (select s.id from public.stages s where s.kind = 'filming')
+      returning id`,
+  );
+
+  await openMonth(page, BUSY_MONTH);
+  await expect(page.getByTestId('calendar-waiting-for-a-day')).toHaveCount(0);
+  await expect(page.getByTestId('calendar-nothing-waiting')).toBeVisible();
+
+  const day = `${BUSY_MONTH}-21`;
+  await page.getByTestId('schedule-filming-day').click();
+  const dialog = page.getByTestId('schedule-day-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Nothing is in Filming right now');
+
+  await page.getByTestId('filming-day-date').fill(day);
+  await page.getByTestId('schedule-day-submit').click();
+
+  // The dialog stays on screen and becomes the day it just made — it does not
+  // get unmounted by the refresh half a second later.
+  await expect(dialog.getByTestId('filming-day-panel')).toBeVisible();
+  await page.waitForTimeout(2_000);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('filming-day-panel')).toBeVisible();
+
+  const rows = await db.query(
+    'select 1 from public.filming_days where on_date = $1::date',
+    [day],
+  );
+  expect(rows.rowCount).toBe(1);
+
+  // Exactly the rows this test parked, and no others: the suite shares one
+  // database and some videos are archived on purpose by the specs that own
+  // them.
+  await db.query(
+    'update public.videos set archived_at = null where id = any($1::uuid[])',
+    [parked.rows.map((row) => row.id)],
+  );
+});
+
+test('a filming day that has passed with videos still to shoot takes the colour', async ({
+  page,
+}) => {
+  /*
+    The one filming state the milestone reserved colour for. The grid never
+    asked until M6's review: `summarise()` computed it and only the day panel
+    rendered it, so a shoot that silently did not happen looked exactly like one
+    that did on the view whose job is showing a month of days.
+  */
+  const missed = `${LAST_MONTH}-10`;
+  const happened = `${LAST_MONTH}-17`;
+
+  const missedDay = await seedFilmingDay(missed, 'The one that slipped');
+  const happenedDay = await seedFilmingDay(happened, 'That one went fine');
+
+  await seedVideo({
+    slug: CHANNELS.a.slug,
+    title: TITLES.filmed,
+    date: null,
+    kind: 'filming',
+    filmingDayId: missedDay,
+  });
+  await seedVideo({
+    slug: CHANNELS.a.slug,
+    title: TITLES.moved,
+    date: null,
+    kind: 'editing',
+    filmingDayId: happenedDay,
+  });
+
+  await openMonth(page, LAST_MONTH);
+
+  const missedChip = cell(page, missed).locator(
+    '[data-testid="calendar-chip"][data-kind="filming"]',
+  );
+  await expect(missedChip).toHaveAttribute('data-tone', 'attention');
+  // The reason is in the accessible name, not only in the colour.
+  await expect(missedChip).toContainText('still to shoot');
+
+  const quietChip = cell(page, happened).locator(
+    '[data-testid="calendar-chip"][data-kind="filming"]',
+  );
+  await expect(quietChip).toHaveAttribute('data-tone', 'quiet');
+});

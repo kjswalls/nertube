@@ -32,6 +32,9 @@ function filmingDay(id = "f1", videoCount = 3): CalendarEvent {
     filmingDayId: id,
     notes: null,
     videoCount,
+    tone: "quiet",
+    headline: `${videoCount} videos to shoot.`,
+    pending: videoCount,
   };
 }
 

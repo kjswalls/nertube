@@ -164,7 +164,12 @@ export default async function BoardPage({
       daysInStage: wholeDaysSince(video.stage_entered_at, now),
       targetPublishDate: video.target_publish_date,
       targetPublishLabel: formatTargetDate(video.target_publish_date),
+      channelId: channel.id,
       filmingDayId: video.filming_day_id,
+      // Filled in below, for the same reason the checklist ratio is: the day
+      // labels are one grouped read over the whole set of cards, not one
+      // lookup per card.
+      filmingDayLabel: null,
       thumbnailConceptPath: video.thumbnail_concept_path,
       // `updated_at` versions the URL: the path is stable by design, so
       // without it a replaced sketch can be served from the browser cache.
@@ -199,6 +204,46 @@ export default async function BoardPage({
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index];
     cards[index] = { ...card, checklist: ratios.get(card.id) ?? null };
+  }
+
+  /*
+    Which filming day each card is already on, in words.
+
+    One small query over the distinct ids the cards carry, skipped entirely when
+    none of them is booked. It exists because the Filming badge's dialog has to
+    be able to say "already on Sat 1 May" beside a candidate rather than ticking
+    it — M6's review found that ticking it moved the video off the shoot it was
+    already on and emptied that day. Formatted here, on the server, for the rule
+    `FilmingVideo.filmingDayLabel` states.
+  */
+  const bookedDayIds = [
+    ...new Set(
+      cards
+        .map((card) => card.filmingDayId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  if (bookedDayIds.length > 0) {
+    const { data: bookedDays } = await supabase
+      .from("filming_days")
+      .select("id, on_date")
+      .in("id", bookedDayIds);
+
+    const dayLabels = new Map(
+      (bookedDays ?? []).map((day) => [
+        day.id,
+        formatDateColumn(day.on_date, "weekday") ?? day.on_date,
+      ]),
+    );
+
+    for (let index = 0; index < cards.length; index += 1) {
+      const card = cards[index];
+      if (card.filmingDayId === null) continue;
+      cards[index] = {
+        ...card,
+        filmingDayLabel: dayLabels.get(card.filmingDayId) ?? null,
+      };
+    }
   }
 
   /*
@@ -264,11 +309,6 @@ function wholeDaysSince(iso: string, now: number): number {
   return Math.max(0, Math.floor((now - entered) / 86_400_000));
 }
 
-/**
- * `target_publish_date` is a plain `YYYY-MM-DD` — a calendar date with no time
- * and no zone. Formatted in UTC with a fixed locale so the server and the
- * browser cannot disagree about which day it is.
- */
 /**
  * A target date as a card prints it: `3 Mar`.
  *

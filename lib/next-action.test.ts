@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { formatDateColumn } from "./calendar-dates";
 import { DEFAULT_EST_MINUTES, type ChecklistItem } from "./checklist";
 import { SEED_STAGES } from "./defaults";
 import {
@@ -538,6 +539,24 @@ describe("formatPublishDate", () => {
 
   it("hands back nonsense unchanged rather than printing 'Invalid Date'", () => {
     expect(formatPublishDate("not a date")).toBe("not a date");
+  });
+
+  /*
+    The divergence M6's review found. This function used to be its own
+    `Date.parse(`${value}T00:00:00Z`)`, which rolls an impossible day forward:
+    `2026-02-30` became the 2nd of March and was printed as "2 Mar", relabelling
+    a day that does not exist. It goes through `formatDateColumn` now, which
+    refuses it, so the stored string is shown instead of a wrong date.
+  */
+  it("refuses a day that does not exist rather than rolling it forward", () => {
+    expect(formatPublishDate("2026-02-30")).toBe("2026-02-30");
+    expect(formatPublishDate("2026-13-01")).toBe("2026-13-01");
+  });
+
+  it("is the calendar helper's `short` style, not a second copy of it", () => {
+    for (const value of ["2026-01-01", "2026-03-03", "2026-12-31"]) {
+      expect(formatPublishDate(value)).toBe(formatDateColumn(value, "short"));
+    }
   });
 });
 

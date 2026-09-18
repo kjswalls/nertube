@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 
 import {
   deleteFilmingDay,
@@ -41,6 +41,26 @@ import { MAX_FILMING_NOTES_LENGTH, type FilmingDay } from "./types";
  *   deleted*, which is the foreign key's `on delete set null` doing it rather
  *   than anything in this file. The count in the confirmation is read from the
  *   day, so it is the real number.
+ *
+ * ## Where focus goes, and why every write has to say
+ *
+ * Every control here is `disabled` while a write is in flight, and two of them
+ * are *replaced* by the control that comes next ("Move this day…" by the date
+ * box, "Cancel this day…" by the confirmation). Both of those drop focus on
+ * `<body>`, where M6's review found it staying: Tab then restarts at the top of
+ * the document, and the destructive path was the worst case — the confirmation
+ * was a plain `<p>`, so activating the delete control announced nothing at all.
+ *
+ * So each write names its own landing place, and the confirmation is a
+ * `role="status"` so it is spoken whether or not focus reaches it.
+ *
+ * ## A dropped connection changes nothing and says so
+ *
+ * Every action call is wrapped. Without the `catch`, an aborted POST escaped as
+ * an unhandled rejection and — the app has no `app/error.tsx` — Next replaced
+ * the whole route with its error page, taking the panel and anything composed
+ * around it with it. `DayNotes` below already degraded correctly, because
+ * `useAutosave` catches; this is the rest of the file brought up to it.
  */
 export function FilmingDayPanel({
   day: dayProp,
@@ -80,9 +100,10 @@ export function FilmingDayPanel({
   const propsVersion = `${dayProp.id}|${dayProp.onDate}|${dayProp.notes ?? ""}|${dayProp.videos
     .map((video) => video.id)
     .join(",")}`;
-  const [applied, setApplied] = useState<{ over: string; day: FilmingDay } | null>(
-    null,
-  );
+  const [applied, setApplied] = useState<{
+    over: string;
+    day: FilmingDay;
+  } | null>(null);
   const day = applied && applied.over === propsVersion ? applied.day : dayProp;
 
   function absorb(next: FilmingDay): void {
@@ -103,18 +124,31 @@ export function FilmingDayPanel({
   const dateLabel = day.label;
   const relative = relativeDayLabel(day.onDate, today);
 
-  function detach(videoId: string, title: string): void {
+  function detach(videoId: string, title: string, index: number): void {
     setError(null);
     startBusy(async () => {
-      const result = await unlinkVideoFromFilmingDay({ videoId, dayId: day.id });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await unlinkVideoFromFilmingDay({
+          videoId,
+          dayId: day.id,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          // The row is still there, so the button that was pressed is too.
+          wantFocus.current = { kind: "detach", index };
+          return;
+        }
+        if (result.day) absorb(result.day);
+        onChanged?.(result.day);
+        toast.push({ message: `Took “${title}” off ${dateLabel}.` });
+        // The row that has taken this one's place, or the last one left, or —
+        // when the list has just emptied — the first control below it.
+        wantFocus.current = { kind: "detach", index };
+        router.refresh();
+      } catch {
+        setError(UNREACHABLE);
+        wantFocus.current = { kind: "detach", index };
       }
-      if (result.day) absorb(result.day);
-      onChanged?.(result.day);
-      toast.push({ message: `Took “${title}” off ${dateLabel}.` });
-      router.refresh();
     });
   }
 
@@ -135,43 +169,101 @@ export function FilmingDayPanel({
     setError(null);
     const onDate = moving;
     startBusy(async () => {
-      const result = await updateFilmingDay({ dayId: day.id, onDate });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await updateFilmingDay({ dayId: day.id, onDate });
+        if (!result.ok) {
+          setError(result.error);
+          // The date box is still on screen and still holds what was typed.
+          wantFocus.current = { kind: "move-date" };
+          return;
+        }
+        absorb(result.day);
+        onChanged?.(result.day);
+        setMoving(null);
+        toast.push({
+          message: `Moved the filming day to ${result.day.label}.`,
+        });
+        // "Move it" has just been replaced by "Move this day…" again.
+        wantFocus.current = { kind: "move" };
+        router.refresh();
+      } catch {
+        setError(UNREACHABLE);
+        wantFocus.current = { kind: "move-date" };
       }
-      absorb(result.day);
-      onChanged?.(result.day);
-      setMoving(null);
-      toast.push({ message: `Moved the filming day to ${result.day.label}.` });
-      router.refresh();
     });
   }
 
   function cancelDay(): void {
     setError(null);
     startBusy(async () => {
-      const result = await deleteFilmingDay({ dayId: day.id });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await deleteFilmingDay({ dayId: day.id });
+        if (!result.ok) {
+          setError(result.error);
+          // The confirmation is still up; the button that was pressed is still
+          // the useful one.
+          wantFocus.current = { kind: "cancel-yes" };
+          return;
+        }
+        setConfirming(false);
+        onChanged?.(null);
+        toast.push({
+          message:
+            result.unlinked === 0
+              ? `Cancelled the filming day on ${dateLabel}.`
+              : `Cancelled ${dateLabel}. ${
+                  result.unlinked === 1
+                    ? "1 video is"
+                    : `${result.unlinked} videos are`
+                } no longer attached to a day — nothing was deleted.`,
+        });
+        router.refresh();
+      } catch {
+        setError(UNREACHABLE);
+        wantFocus.current = { kind: "cancel-yes" };
       }
-      setConfirming(false);
-      onChanged?.(null);
-      toast.push({
-        message:
-          result.unlinked === 0
-            ? `Cancelled the filming day on ${dateLabel}.`
-            : `Cancelled ${dateLabel}. ${
-                result.unlinked === 1 ? "1 video is" : `${result.unlinked} videos are`
-              } no longer attached to a day — nothing was deleted.`,
-      });
-      router.refresh();
     });
   }
 
+  /*
+    The landing place the last write asked for, applied once the transition has
+    committed and the node it names exists. The same shape `components/board`
+    uses to put focus back on a card that has just been re-created in another
+    column — a ref rather than state, because wanting focus is not something to
+    re-render over.
+  */
+  const wantFocus = useRef<FocusRequest | null>(null);
+  const rootRef = useRef<HTMLElement>(null);
+
+  /*
+    Declared here, above the effect, because every write to the ref has to be:
+    the React compiler's `react-hooks/immutability` rule refuses a mutation
+    that appears after the effect reading it, and the controls below are JSX.
+    One function, four callers, no second mechanism.
+  */
+  function requestFocus(next: FocusRequest): void {
+    wantFocus.current = next;
+  }
+  useEffect(() => {
+    if (busy) return;
+    const wanted = wantFocus.current;
+    if (!wanted) return;
+    wantFocus.current = null;
+    const root = rootRef.current;
+    if (!root) return;
+    // Something inside has kept focus — leave it there rather than taking the
+    // caret off whatever the person moved to while the write was in flight.
+    if (root.contains(document.activeElement)) return;
+    focusFor(root, wanted)?.focus();
+    // `moving` and `confirming` are here because two of the landing places are
+    // asked for by a *state* change rather than by a write: "Move this day…"
+    // and "Cancel this day…" replace themselves with the control that comes
+    // next, and neither touches `busy` or `day`.
+  }, [busy, day, moving, confirming]);
+
   return (
     <section
+      ref={rootRef}
       data-testid={testId}
       data-day-id={day.id}
       data-on-date={day.onDate}
@@ -183,10 +275,18 @@ export function FilmingDayPanel({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h3 className="font-display text-[17px] leading-tight font-semibold tracking-tight">
             {dateLabel}
+            {/*
+              A real separator inside the heading, not the flex gap. Accessible
+              names concatenate text nodes with nothing between them, so the
+              gap alone read as "Monday, 28 September 2026in 10 days".
+            */}
+            {relative ? (
+              <span className="font-mono text-[11px] font-normal text-muted">
+                {" · "}
+                {relative}
+              </span>
+            ) : null}
           </h3>
-          {relative ? (
-            <span className="font-mono text-[11px] text-muted">{relative}</span>
-          ) : null}
         </div>
 
         {/*
@@ -209,7 +309,7 @@ export function FilmingDayPanel({
 
       {day.videos.length > 0 ? (
         <ul data-testid="filming-day-videos" className="flex flex-col gap-1.5">
-          {day.videos.map((video) => {
+          {day.videos.map((video, index) => {
             const status = statusOf(video);
             return (
               <li
@@ -237,7 +337,10 @@ export function FilmingDayPanel({
                     */}
                     <span>
                       {video.stageName}
-                      <span className="text-muted/80"> — {STATUS_LABEL[status]}</span>
+                      <span className="text-muted/80">
+                        {" "}
+                        — {STATUS_LABEL[status]}
+                      </span>
                     </span>
                     {video.targetPublishLabel ? (
                       <>
@@ -254,7 +357,7 @@ export function FilmingDayPanel({
                   type="button"
                   data-testid="filming-day-detach"
                   disabled={busy}
-                  onClick={() => detach(video.id, video.title)}
+                  onClick={() => detach(video.id, video.title, index)}
                   title={`Take “${video.title}” off this filming day. The video itself is untouched.`}
                   className="shrink-0 rounded-button px-2 py-1 text-[11px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
                 >
@@ -289,7 +392,11 @@ export function FilmingDayPanel({
             type="button"
             data-testid="move-day"
             disabled={busy || confirming}
-            onClick={() => setMoving(day.onDate)}
+            onClick={() => {
+              setMoving(day.onDate);
+              // The date box replaces this button; focus follows it there.
+              requestFocus({ kind: "move-date" });
+            }}
             className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
           >
             Move this day…
@@ -320,7 +427,10 @@ export function FilmingDayPanel({
             <button
               type="button"
               disabled={busy}
-              onClick={() => setMoving(null)}
+              onClick={() => {
+                setMoving(null);
+                requestFocus({ kind: "move" });
+              }}
               className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               Keep the date
@@ -331,6 +441,12 @@ export function FilmingDayPanel({
         {confirming ? (
           <>
             <p
+              // Spoken whether or not focus reaches it. Activating "Cancel this
+              // day…" unmounts that button, so without this a screen-reader
+              // user heard nothing at all: the control vanished and the
+              // question — which names how many videos come loose — was a plain
+              // paragraph nobody was pointed at.
+              role="status"
               data-testid="cancel-day-confirm"
               className="text-[12px] text-muted"
             >
@@ -352,7 +468,10 @@ export function FilmingDayPanel({
             <button
               type="button"
               disabled={busy}
-              onClick={() => setConfirming(false)}
+              onClick={() => {
+                setConfirming(false);
+                requestFocus({ kind: "cancel" });
+              }}
               className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               Keep it
@@ -363,7 +482,12 @@ export function FilmingDayPanel({
             type="button"
             data-testid="cancel-day"
             disabled={busy || moving !== null}
-            onClick={() => setConfirming(true)}
+            onClick={() => {
+              setConfirming(true);
+              // The confirmation replaces this button. Focus goes to the
+              // answer, not to `<body>`.
+              requestFocus({ kind: "cancel-yes" });
+            }}
             className="rounded-button border border-border px-2.5 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
           >
             Cancel this day…
@@ -418,3 +542,60 @@ function DayNotes({
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Focus                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where the next commit should put the caret.
+ *
+ * A request rather than an element, because the element it names may not exist
+ * yet: the write that asks for it is the write that is about to re-create the
+ * list. `index` is the row the detach was pressed on — the row that takes its
+ * place is the one to land on, which is what a person expects after removing an
+ * item from a list.
+ */
+type FocusRequest =
+  | { kind: "detach"; index: number }
+  | { kind: "move" }
+  | { kind: "move-date" }
+  | { kind: "cancel" }
+  | { kind: "cancel-yes" };
+
+/** The element a request names, or the nearest honest substitute. */
+function focusFor(root: HTMLElement, wanted: FocusRequest): HTMLElement | null {
+  const pick = (testId: string): HTMLElement | null =>
+    root.querySelector<HTMLElement>(
+      `[data-testid="${testId}"]:not([disabled])`,
+    );
+
+  if (wanted.kind === "detach") {
+    const buttons = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        '[data-testid="filming-day-detach"]:not([disabled])',
+      ),
+    );
+    if (buttons.length > 0) {
+      return buttons[Math.min(wanted.index, buttons.length - 1)];
+    }
+    // The list has just emptied. The first control below it is the honest
+    // landing place — "Move this day…" — rather than `<body>`.
+    return pick("move-day") ?? pick("cancel-day");
+  }
+
+  if (wanted.kind === "move-date") return pick("move-day-date");
+  if (wanted.kind === "move") return pick("move-day");
+  if (wanted.kind === "cancel-yes") return pick("cancel-day-yes");
+  return pick("cancel-day");
+}
+
+/**
+ * What a dropped connection says here.
+ *
+ * Word for word the sentence `components/board/board.tsx` and
+ * `components/post-publish/confirm-live.tsx` use, because it is the same event:
+ * the POST never landed, so nothing changed and nothing typed is gone.
+ */
+const UNREACHABLE =
+  "Could not reach the server, so nothing was changed. Nothing you typed has been lost — try again.";

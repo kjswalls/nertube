@@ -7,8 +7,9 @@ import { calendarHref } from "@/components/calendar/grid/url";
 import type {
   CalendarChannel,
   CalendarEvent,
+  PublishState,
 } from "@/components/calendar/grid/types";
-import { eventKey } from "@/components/calendar/grid/types";
+import { STATE_WORDS, eventKey } from "@/components/calendar/grid/types";
 import {
   formatDateColumn,
   relativeDayLabel,
@@ -72,9 +73,18 @@ export function DayPanel({
         >
           {formatDateColumn(date, "full")}
           {relative ? (
-            <span className="ml-2 text-[12px] font-normal text-muted">
-              {relative}
-            </span>
+            <>
+              {/*
+                A real separator, not a margin. Accessible-name computation
+                concatenates text nodes with nothing between them, so `ml-2`
+                alone produced "Wednesday, 23 September 2026in 5 days" as this
+                region's label.
+              */}
+              {" · "}
+              <span className="text-[12px] font-normal text-muted">
+                {relative}
+              </span>
+            </>
           ) : null}
         </h2>
 
@@ -163,7 +173,7 @@ function VideoLine({
   showTag: boolean;
   trailing: string | null;
   late?: boolean;
-  state?: string;
+  state?: PublishState;
 }) {
   return (
     <Link
@@ -176,19 +186,39 @@ function VideoLine({
       ].join(" ")}
     >
       {channel && showTag ? (
-        <span className="shrink-0 font-mono text-[10px] tracking-wide text-muted">
+        // Hidden from assistive tech, exactly as `EventChip` hides it: the
+        // channel's full name is in the accessible name below, so reading the
+        // abbreviation as well says the same thing twice and the first time
+        // meaninglessly.
+        <span
+          aria-hidden="true"
+          className="shrink-0 font-mono text-[10px] tracking-wide text-muted"
+        >
           {channel.tag}
         </span>
       ) : null}
       <span className="min-w-0 flex-1 truncate font-display text-[14px]">
         {title}
       </span>
-      {channel ? <span className="sr-only">, {channel.name}</span> : null}
+      {/* Everything the eye gets from the tag, the trailing stage and the tone,
+          in words — the same clause the chip in the cell above carries. The
+          panel is the view you open to see a day in full; it must not say less
+          than the cell it expands. */}
+      <span className="sr-only">
+        {channel ? `, ${channel.name}` : ""}
+        {trailing ? `, in ${trailing}` : ""}
+        {state ? `, ${STATE_WORDS[state].spoken}` : ""}
+      </span>
       {trailing ? (
-        <span className="shrink-0 text-[11px] text-muted">{trailing}</span>
+        <span aria-hidden="true" className="shrink-0 text-[11px] text-muted">
+          {trailing}
+        </span>
       ) : null}
       {late ? (
-        <span className="shrink-0 text-[11px] font-medium text-over-limit">
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-[11px] font-medium text-over-limit"
+        >
           late
         </span>
       ) : null}

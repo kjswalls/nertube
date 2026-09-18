@@ -427,15 +427,15 @@ export function AppSidebar({
  * visible) applied to mouse users only. `aria-disabled` keeps it in the tab
  * order and announces it as unavailable, which is the honest pair.
  *
- * Three call sites, and they are two different situations — the M5 review
- * corrected a claim here that there was one:
+ * Two call sites, and they are the same situation: **Board and Ideas on an
+ * account with no channel at all**. There is nothing to link to until a channel
+ * exists, and a row that vanished would hide the shape of the product from the
+ * person who has least idea of it. Creating a channel turns both into links.
  *
- * - **Calendar** is the unbuilt *section*, and the only one left: M5 made Ideas
- *   a real link, which is the only complete fix for a row nobody could reach.
- * - **Board and Ideas with no channel at all** are the same control used for a
- *   different reason: there is nothing to link to until a channel exists, and a
- *   row that vanished would hide the shape of the product from the person who
- *   has least idea of it. Creating a channel turns both into links.
+ * There is no longer a third. M5 made Ideas a real link and M6 made Calendar
+ * one, which is the only complete fix for a row nobody could reach — this
+ * paragraph claimed otherwise until M6's review noticed it contradicting the
+ * file's own header twelve lines up.
  *
  * There is no click handler, which is what makes it do nothing. Nothing to
  * intercept, nothing to hydrate: this stays a Server Component.

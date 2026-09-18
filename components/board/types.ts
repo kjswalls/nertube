@@ -31,6 +31,17 @@ export interface BoardCard {
   readonly id: string;
   /** `videos.title`; may be empty — a captured idea can have no title yet. */
   readonly title: string;
+  /**
+   * The channel this card belongs to — always the board's own channel, since
+   * the read is `.eq("channel_id", channel.id)`.
+   *
+   * Carried explicitly because the Filming badge builds `FilmingCandidate`
+   * objects from these cards, and a `FilmingCandidate` claims to know its
+   * channel. Before M6's review the board filled that field with `""` for half
+   * the dialog's list, which nothing read yet and which the next thing to group
+   * candidates by channel would have got silently wrong.
+   */
+  readonly channelId: string;
   readonly stageId: string;
   /** ISO timestamp. Replaced client-side by the value `move_video` stamps. */
   readonly stageEnteredAt: string;
@@ -48,6 +59,12 @@ export interface BoardCard {
    * it is already on a day, because `/calendar` counts the ones that are not.
    */
   readonly filmingDayId: string | null;
+  /**
+   * That day in words — "Sat 1 May" — or null. Formatted on the server, like
+   * `targetPublishLabel`, so the schedule dialog can name the shoot a candidate
+   * is already on without formatting a date during hydration.
+   */
+  readonly filmingDayLabel: string | null;
   /**
    * Storage path of the concept sketch, or null. Not rendered directly — it is
    * a private object name — but it is what the board page signs, and what the

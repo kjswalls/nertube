@@ -109,80 +109,101 @@ export function VideoFilmingDay({
   function choose(dayId: string): void {
     setError(null);
     startBusy(async () => {
-      if (dayId === "") {
-        const result = await unlinkVideoFromFilmingDay({ videoId });
+      try {
+        if (dayId === "") {
+          const result = await unlinkVideoFromFilmingDay({ videoId });
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+          setCurrent(null);
+          toast.push({
+            message: `“${videoTitle}” is no longer on a filming day.`,
+          });
+          router.refresh();
+          return;
+        }
+
+        const result = await linkVideosToFilmingDay({
+          dayId,
+          videoIds: [videoId],
+        });
         if (!result.ok) {
           setError(result.error);
           return;
         }
-        setCurrent(null);
-        toast.push({ message: `“${videoTitle}” is no longer on a filming day.` });
+        setCurrent(result.day.id);
+        toast.push({
+          message: `“${videoTitle}” is on the filming day of ${labelFor(result.day.onDate)}.`,
+        });
         router.refresh();
-        return;
+      } catch {
+        // The POST never landed. Without this the rejection escapes the
+        // transition and — the app has no `app/error.tsx` — Next replaces the
+        // whole video page with its error screen. See the same `catch` in
+        // `components/board/board.tsx`.
+        setError(UNREACHABLE);
       }
-
-      const result = await linkVideosToFilmingDay({ dayId, videoIds: [videoId] });
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      setCurrent(result.day.id);
-      toast.push({
-        message: `“${videoTitle}” is on the filming day of ${labelFor(result.day.onDate)}.`,
-      });
-      router.refresh();
     });
   }
 
   function scheduleNew(): void {
     setError(null);
     startBusy(async () => {
-      const result = await createFilmingDay({
-        onDate: newDate,
-        videoIds: [videoId],
-      });
-
-      if (result.ok) {
-        remember(result.day);
-        setCreating(false);
-        toast.push({
-          message: `Filming day scheduled for ${labelFor(result.day.onDate)}, with “${videoTitle}” on it.`,
+      try {
+        const result = await createFilmingDay({
+          onDate: newDate,
+          videoIds: [videoId],
         });
-        router.refresh();
-        return;
-      }
 
-      if (result.kind === "exists") {
-        /*
+        if (result.ok) {
+          remember(result.day);
+          setCreating(false);
+          toast.push({
+            message: `Filming day scheduled for ${labelFor(result.day.onDate)}, with “${videoTitle}” on it.`,
+          });
+          router.refresh();
+          return;
+        }
+
+        if (result.kind === "exists") {
+          /*
           One creator, one camera, one day per date. The date is already booked,
           so the useful thing to do with this click is attach the video to the
           day that is already there — which is what the person was asking for,
           spelled slightly differently.
         */
-        const existing = result.day;
-        const linked = await linkVideosToFilmingDay({
-          dayId: existing.id,
-          videoIds: [videoId],
-        });
-        if (!linked.ok) {
-          setError(linked.error);
+          const existing = result.day;
+          const linked = await linkVideosToFilmingDay({
+            dayId: existing.id,
+            videoIds: [videoId],
+          });
+          if (!linked.ok) {
+            setError(linked.error);
+            return;
+          }
+          remember(linked.day);
+          setCreating(false);
+          toast.push({
+            message: `You already had a filming day on ${labelFor(existing.onDate)} — “${videoTitle}” was added to it.`,
+          });
+          router.refresh();
           return;
         }
-        remember(linked.day);
-        setCreating(false);
-        toast.push({
-          message: `You already had a filming day on ${labelFor(existing.onDate)} — “${videoTitle}” was added to it.`,
-        });
-        router.refresh();
-        return;
-      }
 
-      setError(result.error);
+        setError(result.error);
+      } catch {
+        setError(UNREACHABLE);
+      }
     });
   }
 
   /** Keep a day the select has never heard of, so it can name what it shows. */
-  function remember(day: { id: string; onDate: string; notes: string | null }): void {
+  function remember(day: {
+    id: string;
+    onDate: string;
+    notes: string | null;
+  }): void {
     setKnown((previous) =>
       previous.some((candidate) => candidate.id === day.id)
         ? previous
@@ -194,7 +215,9 @@ export function VideoFilmingDay({
               notes: day.notes,
               label: labelFor(day.onDate),
             },
-          ].sort((a, b) => (a.onDate < b.onDate ? -1 : a.onDate > b.onDate ? 1 : 0)),
+          ].sort((a, b) =>
+            a.onDate < b.onDate ? -1 : a.onDate > b.onDate ? 1 : 0,
+          ),
     );
     setCurrent(day.id);
   }
@@ -317,3 +340,12 @@ function calendarLinkTo(onDate: string): string {
     ? CALENDAR_PATH
     : calendarHref({ month: monthKey(month), day: onDate });
 }
+
+/**
+ * What a dropped connection says. The application's one sentence for it —
+ * `components/board/board.tsx`, `components/post-publish/confirm-live.tsx` and
+ * both other filming components use the same words, because it is the same
+ * event: the POST never landed, so nothing changed.
+ */
+const UNREACHABLE =
+  "Could not reach the server, so nothing was changed. Nothing you typed has been lost — try again.";

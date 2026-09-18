@@ -5,8 +5,8 @@ import { calendarHref } from "@/components/calendar/grid/url";
 import type {
   CalendarChannel,
   CalendarEvent,
-  PublishState,
 } from "@/components/calendar/grid/types";
+import { STATE_WORDS } from "@/components/calendar/grid/types";
 
 /**
  * One line in a day cell.
@@ -24,11 +24,16 @@ import type {
  *   depends on decoding the abbreviation.
  * - **The title** is the video's own words, so it is set in the reading face,
  *   truncated with the full string in `title`.
- * - **The state** is a word, and it is the only place on this page that takes a
- *   colour: `late` — the date has passed and the video is neither scheduled nor
- *   live — is drawn in the over-limit tone. Planned, scheduled and published
- *   are quiet, because a video that is where it should be does not need
- *   attention.
+ * - **The state** is a word, and it is the only thing on a publish chip that
+ *   takes a colour: `late` — the date has passed and the video is neither
+ *   scheduled nor live — is drawn in the over-limit tone. Planned, scheduled and
+ *   published are quiet, because a video that is where it should be does not
+ *   need attention.
+ *
+ * A filming chip has exactly one coloured state of its own, and it is the
+ * mirror image: `tone === "attention"`, the day that has passed with videos
+ * still in Filming. Two coloured states on the whole grid, one per event kind,
+ * both meaning "this is asking for a decision".
  */
 export function EventChip({
   event,
@@ -52,33 +57,62 @@ export function EventChip({
   month: string;
 }) {
   if (event.kind === "filming") {
+    /*
+      The one filming state that spends colour: the day has passed and videos
+      are still in Filming — the batch day that did not happen. `summarise()`
+      decided it where the day was read (`lib/calendar-data.ts`); this chip only
+      draws the answer, so the grid and the day panel cannot disagree about
+      which day is asking for a decision.
+
+      Everything else is furniture, in exactly the dashed outline it had before.
+      A calendar is the easiest place in an app to end up with a bag of
+      highlighters.
+    */
+    const missed = event.tone === "attention";
+
     return (
       <Link
         href={calendarHref({ month, day: event.date })}
         data-testid="calendar-chip"
         data-kind="filming"
         data-date={event.date}
-        title={
-          event.notes
-            ? `Filming day — ${event.notes}`
-            : "Filming day — the block of time the camera is out"
-        }
-        className="flex items-center gap-1 rounded-button border border-border border-dashed bg-background px-1.5 py-0.5 text-[11px] leading-4 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+        data-tone={event.tone}
+        title={`Filming day — ${event.headline}${event.notes ? ` — ${event.notes}` : ""}`}
+        className={[
+          "flex items-center gap-1 rounded-button border border-dashed px-1.5 py-0.5 text-[11px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-accent",
+          missed
+            ? "border-attention/50 bg-attention/10 font-medium text-attention hover:bg-attention/20"
+            : "border-border bg-background hover:bg-surface",
+        ].join(" ")}
       >
         {/* The one piece of iconography on the grid. A filming day is not a
             video and must not read as one, so it carries a mark no chip ever
             does and the word itself. */}
-        <span aria-hidden="true" className="font-mono text-[10px] text-muted">
+        <span
+          aria-hidden="true"
+          className={[
+            "font-mono text-[10px]",
+            missed ? "text-attention" : "text-muted",
+          ].join(" ")}
+        >
           ●
         </span>
         <span className="min-w-0 truncate font-medium">Filming day</span>
-        <span className="shrink-0 font-mono text-[10px] text-muted">
+        <span
+          className={[
+            "shrink-0 font-mono text-[10px]",
+            missed ? "text-attention" : "text-muted",
+          ].join(" ")}
+        >
           {event.videoCount}
         </span>
         <span className="sr-only">
           {event.videoCount === 1
             ? ", 1 video linked"
             : `, ${event.videoCount} videos linked`}
+          {missed
+            ? `, ${event.pending === 1 ? "1 video is" : `${event.pending} videos are`} still to shoot and this day has passed`
+            : ""}
         </span>
       </Link>
     );
@@ -95,12 +129,7 @@ export function EventChip({
       data-video={event.videoId}
       data-channel={channel?.id ?? ""}
       data-state={event.state}
-      title={[
-        event.title,
-        channel?.name,
-        event.stageName,
-        state.tooltip,
-      ]
+      title={[event.title, channel?.name, event.stageName, state.tooltip]
         .filter(Boolean)
         .join(" · ")}
       className={[
@@ -137,19 +166,3 @@ export function EventChip({
     </Link>
   );
 }
-
-const STATE_WORDS: Record<
-  PublishState,
-  { spoken: string; tooltip: string }
-> = {
-  late: {
-    spoken: "late — this date has passed",
-    tooltip: "late — the target date has passed and it is not scheduled",
-  },
-  planned: { spoken: "on track", tooltip: "on track" },
-  scheduled: {
-    spoken: "scheduled on YouTube",
-    tooltip: "scheduled in YouTube Studio",
-  },
-  published: { spoken: "published", tooltip: "published" },
-};

@@ -94,12 +94,21 @@ test.beforeAll(async () => {
 });
 
 /**
- * Put the database back.
+ * Put the database back — the videos, the days **and the channels**.
  *
  * Not tidiness. `e2e/board.m1.spec.ts` asserts the Filming badge's
  * cross-channel count, and this file leaves three videos sitting in Filming in
  * a shared database that the dev stack reuses between runs. The same trap
  * `e2e/filming-days.spec.ts` documents, arriving from a second file.
+ *
+ * The channels go too, which they did not until M6's review pointed out that
+ * `docs/MILESTONES.md` claimed they did. Leaving them behind is the *other*
+ * half of the same trap: a spec that looks a channel up by its accessible name
+ * matches on a substring, so every run that leaves a channel row behind makes
+ * the next `getByRole('radio', { name: … })` one step closer to a strict-mode
+ * violation. The videos are already gone by this point, so nothing blocks the
+ * delete; the stages and buckets seeded with each channel go with it on the
+ * cascade.
  */
 test.afterAll(async () => {
   await db?.query(
@@ -110,6 +119,9 @@ test.afterAll(async () => {
     [[CHANNELS.main.slug, CHANNELS.other.slug]],
   );
   await db?.query('delete from public.filming_days');
+  await db?.query('delete from public.channels where slug = any($1::text[])', [
+    [CHANNELS.main.slug, CHANNELS.other.slug],
+  ]);
   await db?.end();
 });
 

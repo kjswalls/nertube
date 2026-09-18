@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useState, useTransition, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+  type RefObject,
+} from "react";
 
 import {
   createFilmingDay,
@@ -13,22 +20,53 @@ import { useToast } from "@/components/toast";
 import { formatDateColumn } from "@/lib/calendar-dates";
 
 import { FilmingDayPanel } from "./filming-day-panel";
-import { MAX_FILMING_NOTES_LENGTH, type FilmingCandidate } from "./types";
+import { defaultSelection } from "./selection";
+import {
+  MAX_FILMING_DAY_VIDEOS,
+  MAX_FILMING_NOTES_LENGTH,
+  type FilmingCandidate,
+} from "./types";
 
 /**
  * Scheduling a batch filming day: the dialog the board's Filming badge opens.
  *
  * BRIEF.md principle 4 is a loop — *three or more videos sitting in Filming is
  * the signal to schedule a batch day* — and this is the part of it that turns
- * noticing into a booking. Everything the badge already knows arrives
- * pre-selected, so the shortest path through this box is: pick the Saturday,
+ * noticing into a booking. Everything the badge knows is waiting for a camera
+ * arrives ticked, so the shortest path through this box is: pick the Saturday,
  * press Enter.
  *
  * ## Two phases, because there are two answers
  *
  * **Compose.** A date, optional notes, and the videos to cover — every video
- * currently in Filming, in every channel, all ticked. Unticking is how you say
- * "not that one"; nothing else has to be done.
+ * currently in Filming, in every channel. Unticking is how you say "not that
+ * one"; nothing else has to be done.
+ *
+ * ## What is ticked to begin with, and the blocker that decided it
+ *
+ * Everything **that is not already on a filming day**, up to
+ * `MAX_FILMING_DAY_VIDEOS`.
+ *
+ * Until M6's review it was everything, full stop, and that was a data-loss bug
+ * with a one-click path to it: `link()` re-points `filming_day_id`
+ * unconditionally, so pressing "Schedule the day" with an already-booked video
+ * ticked moved it off the shoot it was on — and because the board's badge keeps
+ * counting videos that are already booked, clicking the badge again after
+ * booking them was the natural next action. The previous Saturday was left
+ * holding its shoot notes and no videos, which is precisely the state
+ * `lib/filming-data.ts` refuses to render because it would be a lie about a day
+ * on which four videos were filmed.
+ *
+ * A booked candidate is still *listed* — the badge counts the whole pile and
+ * the dialog must not disagree with it — but it is unticked and its row says
+ * which day it is on. Re-pointing it is then a deliberate tick, and when it
+ * happens the action reports it: `createFilmingDay` and `linkVideosToFilmingDay`
+ * count the ids that came off another day and return a `warning`, which lands in
+ * the `role="status"` notice below.
+ *
+ * The cap is the same number the server refuses above, so a big pile in Filming
+ * — the exact state the badge exists for — opens a dialog that can be submitted
+ * rather than one that is refused with a sentence naming no limit.
  *
  * **Scheduled.** What now exists, drawn by `FilmingDayPanel` — the same
  * component the calendar expands a day into, so the dialog and the calendar
@@ -52,7 +90,10 @@ export function ScheduleDayDialog({
   returnFocusRef,
   onClose,
 }: {
-  /** Everything in Filming right now — all ticked to begin with. */
+  /**
+   * Everything in Filming right now. The ones not already on a day are ticked
+   * to begin with; see the note above.
+   */
   candidates: readonly FilmingCandidate[];
   /** `YYYY-MM-DD` the date box opens on. Computed by the opener, not here. */
   defaultDate: string;
@@ -70,10 +111,21 @@ export function ScheduleDayDialog({
 
   const [date, setDate] = useState(defaultDate);
   const [notes, setNotes] = useState("");
-  const [selected, setSelected] = useState<ReadonlySet<string>>(
-    () => new Set(candidates.map((candidate) => candidate.id)),
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() =>
+    defaultSelection(candidates),
   );
   const [error, setError] = useState<string | null>(null);
+
+  /** How many of the listed videos are already booked onto some other day. */
+  const bookedCount = candidates.filter(
+    (candidate) => candidate.filmingDayId !== null,
+  ).length;
+  /** Ticked, and currently on a different day: this press will move them. */
+  const movingCount = candidates.filter(
+    (candidate) =>
+      candidate.filmingDayId !== null && selected.has(candidate.id),
+  ).length;
+  const overCap = selected.size > MAX_FILMING_DAY_VIDEOS;
 
   /** Set once a day exists — the second phase. */
   const [day, setDay] = useState<FilmingDayState | null>(null);
@@ -99,36 +151,40 @@ export function ScheduleDayDialog({
   function schedule(): void {
     setError(null);
     startBusy(async () => {
-      const result = await createFilmingDay({
-        onDate: date,
-        notes,
-        videoIds: [...selected],
-      });
-
-      if (result.ok) {
-        setDay(result.day);
-        setNotice(result.warning ?? null);
-        toast.push({
-          message: `Filming day scheduled for ${formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate}${
-            result.linked === 0
-              ? ""
-              : `, covering ${result.linked === 1 ? "1 video" : `${result.linked} videos`}`
-          }.`,
+      try {
+        const result = await createFilmingDay({
+          onDate: date,
+          notes,
+          videoIds: [...selected],
         });
-        router.refresh();
-        return;
-      }
 
-      if (result.kind === "exists") {
-        // Not an error: the day they asked for is the day they already have.
-        setDay(result.day);
-        setNotice(
-          `You already have a filming day on ${formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate}. Add to it instead of starting a second one.`,
-        );
-        return;
-      }
+        if (result.ok) {
+          setDay(result.day);
+          setNotice(result.warning ?? null);
+          toast.push({
+            message: `Filming day scheduled for ${formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate}${
+              result.linked === 0
+                ? ""
+                : `, covering ${result.linked === 1 ? "1 video" : `${result.linked} videos`}`
+            }.`,
+          });
+          router.refresh();
+          return;
+        }
 
-      setError(result.error);
+        if (result.kind === "exists") {
+          // Not an error: the day they asked for is the day they already have.
+          setDay(result.day);
+          setNotice(
+            `You already have a filming day on ${formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate}. Add to it instead of starting a second one.`,
+          );
+          return;
+        }
+
+        setError(result.error);
+      } catch {
+        setError(UNREACHABLE);
+      }
     });
   }
 
@@ -137,21 +193,49 @@ export function ScheduleDayDialog({
     setError(null);
     const ids = outstanding.map((candidate) => candidate.id);
     startBusy(async () => {
-      const result = await linkVideosToFilmingDay({ dayId: day.id, videoIds: ids });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await linkVideosToFilmingDay({
+          dayId: day.id,
+          videoIds: ids,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setDay(result.day);
+        setNotice(result.warning ?? null);
+        toast.push({
+          message: `${result.linked === 1 ? "1 video" : `${result.linked} videos`} added to ${
+            formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate
+          }.`,
+        });
+        router.refresh();
+      } catch {
+        setError(UNREACHABLE);
       }
-      setDay(result.day);
-      setNotice(result.warning ?? null);
-      toast.push({
-        message: `${result.linked === 1 ? "1 video" : `${result.linked} videos`} added to ${
-          formatDateColumn(result.day.onDate, "weekday") ?? result.day.onDate
-        }.`,
-      });
-      router.refresh();
     });
   }
+
+  /*
+    Where focus goes when the box changes phase.
+
+    Pressing "Schedule the day" unmounts the button that was pressed, so the
+    browser drops focus on `<body>` — inside a still-open `aria-modal` dialog,
+    with Tab restarting from the top of the document behind it. M4 found the
+    same shape in the swap dialog, which is why `components/modal.tsx` grew
+    `onClosed`; this is the in-dialog version of it. The scheduled phase's
+    wrapper takes focus so a screen reader reads what now exists, and the
+    `role="status"` notice above it carries any warning either way.
+  */
+  const scheduledRef = useRef<HTMLDivElement>(null);
+  const scheduledId = day === null ? null : day.id;
+  useEffect(() => {
+    if (scheduledId === null) return;
+    const wrapper = scheduledRef.current;
+    if (!wrapper) return;
+    if (wrapper.contains(document.activeElement)) return;
+    wrapper.focus();
+  }, [scheduledId]);
 
   return (
     <Modal
@@ -214,10 +298,46 @@ export function ScheduleDayDialog({
           <fieldset className="flex flex-col gap-2">
             <legend className="text-xs font-medium text-muted">
               Videos to shoot
-              <span className="ml-2 font-mono text-[11px]">
+              <span
+                data-testid="filming-candidate-count"
+                className={[
+                  "ml-2 font-mono text-[11px]",
+                  overCap ? "font-medium text-over-limit" : "",
+                ].join(" ")}
+              >
                 {selected.size}/{candidates.length}
               </span>
             </legend>
+
+            {/*
+              The two sentences this list needs, and only when they are true.
+
+              Colour means something, so neither is toned unless it is the one
+              asking for a decision: the cap is, because the form cannot be
+              submitted until it is under it.
+            */}
+            {bookedCount > 0 ? (
+              <p
+                data-testid="filming-already-booked"
+                className="text-[12px] text-muted"
+              >
+                {bookedCount === 1
+                  ? "1 of these is already on a filming day and is left unticked."
+                  : `${bookedCount} of these are already on a filming day and are left unticked.`}{" "}
+                Ticking one moves it off that day.
+              </p>
+            ) : null}
+
+            {overCap ? (
+              <p
+                data-testid="filming-over-cap"
+                className="text-[12px] font-medium text-over-limit"
+              >
+                A filming day takes at most {MAX_FILMING_DAY_VIDEOS} videos at a
+                time. Untick {selected.size - MAX_FILMING_DAY_VIDEOS} of them,
+                or attach the rest afterwards.
+              </p>
+            ) : null}
 
             {candidates.length === 0 ? (
               <p className="text-[12px] text-muted">
@@ -236,6 +356,9 @@ export function ScheduleDayDialog({
                         type="checkbox"
                         data-testid="filming-candidate"
                         data-video-id={candidate.id}
+                        data-booked={
+                          candidate.filmingDayId === null ? "no" : "yes"
+                        }
                         checked={selected.has(candidate.id)}
                         onChange={() => toggle(candidate.id)}
                         className="mt-0.5 accent-[var(--accent)]"
@@ -246,6 +369,23 @@ export function ScheduleDayDialog({
                         </span>
                         <span className="text-[11px] text-muted">
                           {candidate.channelName}
+                          {/*
+                            The day it is already on, named. Without it, ticking
+                            this row is a move nobody can see coming — which is
+                            the blocker at the top of this file. The label is
+                            formatted on the server and carried on the
+                            candidate; formatting it here would be `Intl` during
+                            hydration.
+                          */}
+                          {candidate.filmingDayId !== null ? (
+                            <>
+                              {" · "}
+                              <span data-testid="filming-candidate-booked">
+                                already on{" "}
+                                {candidate.filmingDayLabel ?? "another day"}
+                              </span>
+                            </>
+                          ) : null}
                         </span>
                       </span>
                     </label>
@@ -269,13 +409,19 @@ export function ScheduleDayDialog({
             <button
               type="submit"
               data-testid="schedule-day-submit"
-              disabled={busy}
+              disabled={busy || overCap}
               // The application's primary button: solid ink, no hue. The
               // accent means "this needs attention" everywhere else in the
               // product, and a save button is not that.
               className="min-h-11 rounded-button bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
             >
-              {busy ? "Scheduling…" : "Schedule the day"}
+              {busy
+                ? "Scheduling…"
+                : movingCount === 0
+                  ? "Schedule the day"
+                  : movingCount === 1
+                    ? "Schedule the day, moving 1 video"
+                    : `Schedule the day, moving ${movingCount} videos`}
             </button>
             <button
               type="button"
@@ -287,7 +433,12 @@ export function ScheduleDayDialog({
           </div>
         </form>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div
+          ref={scheduledRef}
+          tabIndex={-1}
+          data-testid="schedule-day-scheduled"
+          className="flex flex-col gap-4 outline-none"
+        >
           {notice ? (
             <p
               data-testid="filming-day-notice"
@@ -351,3 +502,16 @@ export function ScheduleDayDialog({
     </Modal>
   );
 }
+
+/**
+ * What a dropped connection says.
+ *
+ * The same wording `components/board/board.tsx` and
+ * `components/post-publish/confirm-live.tsx` settled on: nothing changed, and
+ * nothing you typed has gone. Without the `catch` these live in, a failed POST
+ * escaped as an unhandled rejection, React unwound to the nearest boundary and
+ * — the app has no `app/error.tsx` — Next replaced the whole route with its own
+ * error page, taking the date, the notes and the ticks with it.
+ */
+const UNREACHABLE =
+  "Could not reach the server, so nothing was changed. Nothing you typed has been lost — try again.";

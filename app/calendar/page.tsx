@@ -9,7 +9,14 @@ import { packDay } from "@/components/calendar/grid/density";
 import { dayFromQuery, monthFromQuery } from "@/components/calendar/grid/url";
 import { ScheduleFilmingDayButton } from "@/components/calendar/filming/schedule-day-button";
 import { nearestMonths, readCalendarMonth } from "@/lib/calendar-data";
-import { monthKey, monthOf, todayColumn } from "@/lib/calendar-dates";
+import {
+  formatDateColumn,
+  formatMonth,
+  monthKey,
+  monthOf,
+  parseMonthKey,
+  todayColumn,
+} from "@/lib/calendar-dates";
 import { readFilmingVideos } from "@/lib/filming-data";
 
 export async function generateMetadata({
@@ -17,8 +24,52 @@ export async function generateMetadata({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const month = first((await searchParams).month);
-  return { title: `${month ?? "calendar"} · calendar · NerTube` };
+  /*
+    The tab's name is the month that is actually drawn.
+
+    It used to interpolate the raw `?month=` — so `/calendar` was titled
+    "calendar · calendar · NerTube", a valid month gave the bare key `2026-03`,
+    and a typo'd one put the typo in the title while the grid below rendered
+    this month. A bookmarkable month whose bookmark is named wrong is the one
+    part of "a month can be shared" that was not true. It goes through the same
+    two functions the page does, so the title and the heading cannot disagree.
+  */
+  const { month, openDay } = resolveView(await searchParams, Date.now());
+  const parsed = parseMonthKey(month);
+  const where = openDay
+    ? (formatDateColumn(openDay, "full") ?? month)
+    : parsed
+      ? formatMonth(parsed)
+      : month;
+  return { title: `${where} · calendar · NerTube` };
+}
+
+/**
+ * Which month is on screen and which day is open — decided once, and used by
+ * both the page and its metadata.
+ *
+ * **The open day wins.** `dayFromQuery` deliberately accepts any valid date and
+ * does not require it to be inside `?month=`, but `readCalendarMonth` only
+ * reads events between the first and last of the month, so a `?day=` in a
+ * neighbouring month used to draw a panel with the right heading and the
+ * sentence "Nothing is planned for this day" underneath it — a confident claim
+ * that was false, most easily reached by pasting a `?day=` with no `?month=`
+ * beside it, since the month then falls back to *this* one. Deriving the month
+ * from the open day makes the read window always contain the panel's contents,
+ * and it makes the panel's Close link point back at the month the day is in.
+ */
+function resolveView(
+  query: Record<string, string | string[] | undefined>,
+  now: number,
+): { month: string; openDay: string | null } {
+  const openDay = dayFromQuery(first(query.day));
+  const dayMonth = openDay === null ? null : monthOf(openDay);
+  return {
+    month: dayMonth
+      ? monthKey(dayMonth)
+      : monthFromQuery(first(query.month), now),
+    openDay,
+  };
 }
 
 /**
@@ -74,8 +125,7 @@ export default async function CalendarPage({
 
   const today = todayColumn(now);
   const currentMonth = monthKey(monthOf(today) ?? { year: 1970, month: 1 });
-  const month = monthFromQuery(first(query.month), now);
-  const openDay = dayFromQuery(first(query.day));
+  const { month, openDay } = resolveView(query, now);
 
   const { channels, events, filming, counts } = await readCalendarMonth(
     month,
@@ -126,51 +176,83 @@ export default async function CalendarPage({
         />
 
         {/*
-          Booking a day from the calendar. The same control the board's badge
-          became, in its `plain` tone: on the board it is a signal that has
-          fired (three or more waiting) and it carries the attention colour; here
-          it is an affordance on the page whose job is scheduling, so it is
-          quiet furniture. One component, two tones — not a second dialog.
+          Booking a day from the calendar.
+
+          The same control the board's badge became, in its `plain` tone: on the
+          board it is a signal that has fired (three or more waiting) and it
+          carries the attention colour; here it is an affordance on the page
+          whose job is scheduling, so it is quiet furniture. One component, two
+          tones — not a second dialog.
+
+          **It is not inside the conditional below, and that is the fix for two
+          bugs at once.** It used to be, so the calendar lost its only way to
+          book a day the moment everything in Filming was on one — or before
+          anything was in Filming at all, which is the ordinary planning
+          direction for a batch shoot: book the Saturday first, move videos into
+          it as scripting finishes. The dialog already handles an empty list
+          ("the day can be scheduled empty and filled from a video's own page
+          later"). The second bug was worse: `schedule()` calls
+          `router.refresh()`, so ticking every candidate — the default, and the
+          one-press path the dialog is built around — emptied `waitingForADay`,
+          unmounted this block, and took the open dialog with it about 750ms
+          after it succeeded. The scheduled phase, the day panel and any
+          `warning` were destroyed before they could be read. A dialog's host
+          must not be conditional on state the dialog itself changes.
         */}
-        {waitingForADay.length > 0 ? (
-          <div
-            data-testid="calendar-waiting-for-a-day"
-            data-count={waitingForADay.length}
-            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3"
-          >
-            <p className="text-[13px] text-muted">
+        <div
+          data-testid="calendar-schedule-row"
+          className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3"
+        >
+          {waitingForADay.length > 0 ? (
+            <p
+              data-testid="calendar-waiting-for-a-day"
+              data-count={waitingForADay.length}
+              className="text-[13px] text-muted"
+            >
               <span className="font-medium text-foreground">
                 {waitingForADay.length === 1
                   ? "1 video is"
                   : `${waitingForADay.length} videos are`}
               </span>{" "}
               waiting for a filming day. Filming needs a real block of time, so
-              it does not show up on{" "}
+              these rows are hidden behind{" "}
               <Link
                 href="/now"
                 className="underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
               >
                 What can I move right now?
               </Link>
-              .
+              ’s ten-minute filter.
             </p>
-            <ScheduleFilmingDayButton
-              candidates={waitingForADay}
-              today={today}
-              label="Schedule a filming day"
-              title="Book a batch day and put these videos on it."
-            />
-          </div>
-        ) : null}
+          ) : (
+            /*
+              What the button is for when nothing is waiting. Said plainly
+              rather than left as a control with no explanation beside it —
+              and it is the truth: a day can be booked before anything is
+              ready for it.
+            */
+            <p
+              data-testid="calendar-nothing-waiting"
+              className="text-[13px] text-muted"
+            >
+              Nothing is waiting for a camera right now. A day can still be
+              booked ahead and filled in later.
+            </p>
+          )}
+          <ScheduleFilmingDayButton
+            candidates={waitingForADay}
+            today={today}
+            label="Schedule a filming day"
+            title="Book a batch day and put these videos on it."
+          />
+        </div>
 
         {isEmpty ? (
           <EmptyMonth
             month={month}
             previous={nearest.previous}
             next={nearest.next}
-            boardHref={
-              channels[0] ? `/c/${channels[0].slug}/board` : null
-            }
+            boardHref={channels[0] ? `/c/${channels[0].slug}/board` : null}
           />
         ) : null}
 
@@ -241,7 +323,9 @@ function summarise(
     parts.push("No videos going out");
   } else {
     parts.push(
-      counts.videos === 1 ? "1 video going out" : `${counts.videos} videos going out`,
+      counts.videos === 1
+        ? "1 video going out"
+        : `${counts.videos} videos going out`,
     );
   }
   if (counts.filmingDays > 0) {

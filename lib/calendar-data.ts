@@ -2,6 +2,7 @@ import { cache } from "react";
 
 import type { FilmingDay } from "@/components/calendar/filming/types";
 import type { NearestMonth } from "@/components/calendar/grid/empty-month";
+import { summarise } from "@/components/calendar/filming/summary";
 import { publishStateOf } from "@/components/calendar/grid/density";
 import { tagsFor } from "@/components/calendar/grid/channels";
 import type {
@@ -168,6 +169,15 @@ export async function readCalendarMonth(
   const filming = new Map<string, FilmingDay>(days.map((day) => [day.id, day]));
 
   for (const day of days) {
+    /*
+      The same `summarise()` the day panel's headline comes from, called here
+      so the grid and the panel cannot form two opinions about one day. Until
+      M6's review the grid never asked: a shoot that had passed with videos
+      still in Filming — the one filming state the milestone reserved colour for
+      — drew exactly like one that happened, on the page whose job is showing a
+      month of days.
+    */
+    const summary = summarise(day.videos, { onDate: day.onDate, today });
     events.push({
       kind: "filming",
       date: day.onDate,
@@ -175,6 +185,9 @@ export async function readCalendarMonth(
       notes: day.notes,
       // The same array the panel lists, so the two cannot disagree.
       videoCount: day.videos.length,
+      tone: summary.tone,
+      headline: summary.headline,
+      pending: summary.toShoot + summary.notReady,
     });
   }
 

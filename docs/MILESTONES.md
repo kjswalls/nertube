@@ -5232,9 +5232,16 @@ Two renderings of one object, which is how the archived disagreement above got
 in unnoticed in the first place.
 
 `DayPanel` now renders `FilmingDayPanel` itself, as a client island inside the
-server-rendered page, and the calendar header carries the same
+server-rendered page, and the calendar carries the same
 `ScheduleFilmingDayButton` the board's badge became — in its `plain` tone, which
 the filming slice had already built and left for exactly this.
+
+> **Corrected by the M6 review.** As written, this paragraph said the button was
+> in the calendar's *header*. It was not: it was nested inside the "N videos are
+> waiting for a filming day" block, so it disappeared whenever nothing was
+> unbooked, and the block unmounted the open dialog on success. It is in the
+> header row now, unconditionally, and only the sentence beside it is gated. See
+> *M6 — adversarial review, applied*, findings 10 and 17.
 
 **The hydration trap this had to avoid, because it had already bitten once.**
 `FilmingDayPanel` formatted two dates during render with
@@ -5364,6 +5371,11 @@ cleans up its channels and days in `afterAll` — the trap `e2e/filming-days.spe
 documents, which bites any file that leaves videos sitting in Filming while
 `board.m1` is asserting a cross-channel count.
 
+> **Corrected by the M6 review.** When this was written the `afterAll` deleted
+> the videos and the filming days but *not* the channels, so the claim was half
+> true and the accumulation this paragraph warns about kept happening through a
+> second door. The channel delete is there now. See finding 25.
+
 `e2e/calendar.spec.ts`'s filming-day case was updated in place: the day now
 expands into an editable panel, so the shoot notes are a field with a value
 rather than a paragraph with text.
@@ -5427,3 +5439,281 @@ small extra queries per render. Both are `cache()`d per request, the tables are
 a handful of rows each at PLAN.md's sizing, and the alternative — one reader
 owning both shapes — is a larger change than joining two slices should make.
 Recorded rather than fixed.
+
+## M6 — adversarial review, applied
+
+> Twenty-eight findings from six reviewers, against the M6 tree. Every one was
+> checked against the code before anything was changed; four of them are the
+> same blocker found independently, and it was real.
+
+### The blocker: the board's badge could empty a filming day
+
+Findings 2, 8, 12 and 22 are one bug, reported by four reviewers from four
+directions, with four separate browser reproductions ending in a `select` on
+Postgres. It is worth stating precisely, because the milestone's own notes
+walked past it twice.
+
+Three facts, each defensible on its own:
+
+1. `readFilmingVideos()` defines "in Filming" as *every non-archived video in an
+   enabled filming-kind stage*, **whether or not it is already on a day**. The
+   board's badge counts that set, and `docs/MILESTONES.md` defends that choice
+   above: the badge is BRIEF.md principle 4's signal, and the signal is about
+   the pile.
+2. `ScheduleDayDialog` pre-ticked **every** candidate it was handed, because the
+   shortest path through the box is meant to be "pick the Saturday, press
+   Enter".
+3. `link()` in `app/actions/filming-days.ts` runs
+   `update videos set filming_day_id = <new day>` with no check on what was
+   there before.
+
+Together they are data loss on the happy path. Book a Saturday with three
+videos; the badge still says "3 in Filming", because those three are still in
+Filming; press it again, pick another date, press Enter — and all three are
+re-pointed at the second date, leaving the first day holding its shoot notes and
+no videos. Nothing in the dialog, the toast, the day panel or the copy mentioned
+it. That empty day is precisely the state `lib/filming-data.ts` refuses to
+render, on the grounds that it "would render last month's real shoot as an empty
+one" — the milestone had an argument about not *lying* about a day while leaving
+a one-click way to *make* the lie true.
+
+**What was changed, in three places.**
+
+- `FilmingVideo` (and `BoardCard`) now carry `filmingDayLabel` beside
+  `filmingDayId` — the day in words, formatted on the server like every other
+  date that crosses the wire. `lib/filming-data.ts` fills it from one extra
+  query, and only when something in Filming is booked; the board page does the
+  same for its own cards.
+- `defaultSelection()` — its own module, `components/calendar/filming/selection.ts`,
+  with six unit tests — decides what arrives ticked: **everything not already on
+  a day**. A booked candidate stays in the list, because the badge counts it and
+  a dialog showing a different set would be the two disagreeing, but it is
+  unticked and its row reads "already on Sat 1 May". Moving it is a tick, and
+  the submit button says so before it is pressed ("Schedule the day, moving 1
+  video").
+- `link()` counts the ids whose `filming_day_id` was non-null and different,
+  reads it *before* the update because afterwards there is nothing left to read,
+  and both `createFilmingDay` and `linkVideosToFilmingDay` return it as a
+  `warning`. The dialog already renders that in a `role="status"` paragraph, so
+  a deliberate move is announced rather than silent.
+
+`e2e/filming-days.spec.ts` gained two cases, and the first is the one the bug
+failed: seed a day with two videos on it, press the badge, press "Schedule the
+day" on a different date with the defaults, and assert **from Postgres** that
+the first day still has both.
+
+### The other blocker: a dropped connection took the whole route down
+
+Finding 16. Nine `await`ed server-action calls across `filming-day-panel.tsx`,
+`schedule-day-dialog.tsx` and `video-filming-day.tsx` sat inside
+`startTransition` with no `try`/`catch`. An aborted POST — a restarted server, a
+dropped connection — escaped as an unhandled rejection; the app has no
+`app/error.tsx`, so Next replaced the route with its own error page and took the
+composed date, the shoot notes and the ticked list with it. Reproduced with
+Playwright's `route.abort('failed')`.
+
+Every call is wrapped now, with the sentence `components/board/board.tsx` and
+`components/post-publish/confirm-live.tsx` already use: *"Could not reach the
+server, so nothing was changed. Nothing you typed has been lost — try again."*
+This file was the one place in the app that did not follow the convention five
+milestones of reviewers established; `DayNotes` in the same component degraded
+correctly all along, because `useAutosave` catches.
+
+### The calendar could not book a day, and destroyed the one it booked
+
+Findings 10 and 17, which are the same line of code. `ScheduleFilmingDayButton`
+was nested inside `{waitingForADay.length > 0 ? … : null}` — so the calendar
+lost its only way to book a day the moment nothing was unbooked, which is the
+*ordinary* planning direction for a batch shoot (book the Saturday, fill it as
+scripting finishes), and it is the direction this page is the right one for.
+`docs/MILESTONES.md` claimed the button was in the header; it was not, and the
+claim is corrected rather than left standing.
+
+The worse half: `schedule()` calls `router.refresh()`, so ticking every
+candidate — the default — emptied `waitingForADay`, unmounted the block and took
+the **open dialog** with it about 750ms later. The scheduled phase, the day
+panel and any `warning` were on screen for half a second. A reviewer caught it
+by polling every 250ms; the two existing specs missed it because they assert on
+the panel immediately, inside that window.
+
+The button is unconditional now and only the sentence beside it is gated. A
+dialog's host must not be conditional on state the dialog changes.
+
+### Dates: the fifth interpretation, and the one that still hydrated wrong
+
+- **`skip-packaging.tsx`** (finding 1) formatted `packaging_skipped_at` with
+  `toLocaleDateString(undefined, …)` — no locale, no zone — in a `"use client"`
+  component that `/videos/[id]` server-renders. Node formatted in its locale and
+  UTC, the browser in the viewer's, and React threw the subtree away on every
+  load. Reproduced with `timezoneId: 'Pacific/Kiritimati'`, `locale: 'en-US'`:
+  server "Mar 3", browser "Mar 4". Pinned to `en-GB` + `UTC`, the pair
+  `components/thumbnails/thumbnails-section.tsx` already uses two files away.
+  `packaging_skipped_at` is a `timestamptz`, not a `date` column, so it is not
+  `lib/calendar-dates.ts`'s business — but the *rule* is.
+- **`lib/next-action.ts`** (findings 3 and 24) held a fifth interpretation of a
+  `date` column that the integration's own table missed: `formatPublishDate`
+  parsed `${value}T00:00:00Z` and built an `Intl.DateTimeFormat` with options
+  byte-identical to `FORMATS.short`, and `isFuture` hand-rolled the same parse.
+  Output matched for real dates; it diverged on impossible ones, printing
+  "2 Mar" for `2026-02-30` where the helper refuses. Both go through the helper
+  now, `app/videos/[id]/page.tsx` stopped deriving the same instant twice, and
+  three unit tests pin the divergence shut.
+- **`scripts/seed-demo.ts`** (finding 4) computed `nextTuesday()` with local-zone
+  getters and a UTC `toISOString().slice(0, 10)`. Under `TZ=Pacific/Kiritimati`
+  the function named "the next Tuesday" returned a Monday, and wrote it into
+  `target_publish_date`. It walks the calendar through the helper now, the way
+  `nextSaturday` in `schedule-day-button.tsx` already did.
+
+### The colour budget was left unspent on the thing it was reserved for
+
+Finding 9. `docs/MILESTONES.md` records the decision that "exactly one state on
+a filming day takes colour: a day that has passed with videos still in Filming",
+`summarise()` computes it, and `FilmingDayPanel` renders it — but `FilmingEvent`
+had no status on it at all, so on `/calendar`, the view whose whole job is
+showing a month of days, a shoot that silently did not happen was pixel-identical
+to one that did. You had to click into `?day=` to find out. That is the opposite
+of BRIEF.md principle 5.
+
+`readCalendarMonth` now calls the same `summarise()` where it reads the day and
+puts `tone`, `headline` and `pending` on the event; `EventChip` spends the
+attention token on `tone === "attention"` only, mirrors it in `data-tone`, and
+says why in the accessible name ("2 videos are still to shoot and this day has
+passed"). Two coloured states on the whole grid, one per event kind, both
+meaning *this is asking for a decision*. No second summary, no new mechanism.
+
+### `?day=` told the truth about the heading and lied about the contents
+
+Findings 5, 14 and 23. `dayFromQuery` deliberately accepts any valid date and
+does not require it to be inside `?month=`, but `readCalendarMonth`'s window is
+the month — so a `?day=` outside it rendered a confident heading, a correct
+relative label, and the sentence "Nothing is planned for this day." The easiest
+way to reach it is the most likely one: a pasted `/calendar?day=…` with no
+`?month=` falls back to *this* month. The panel's Close link pointed at the
+wrong month too.
+
+`resolveView()` now derives the month from the open day when there is one, so
+the read window always contains the panel's contents. The alternative — dropping
+the panel for an out-of-month day — was rejected: the milestone's own "honest
+limits" say the panel is reachable for every day by URL, and making that true is
+better than making it smaller.
+
+### The tab said one month and the page drew another
+
+Findings 6, 15 and 21. `generateMetadata` interpolated the raw `?month=`: the
+common case, `/calendar` with no query, was titled "calendar · calendar ·
+NerTube"; a valid month gave the bare key `2026-03` where the page says
+"September 2026"; and a typo'd one put the typo in the title while the grid
+rendered this month. Not an injection — React escapes it — but a bookmark named
+after something that is not on the page, in a view whose whole argument is that
+a month is shareable. It goes through `resolveView` and `formatMonth` now, and
+names the open day when there is one.
+
+### The sentence that taught the reader something false
+
+Finding 11. The calendar's waiting banner said filming rows "do not show up on
+*What can I move right now?*". They do: `/now`'s quick filter is off on first
+load, and only the ten-minute toggle hides them — behind a `needs a block` chip
+that *this milestone* turned into a link back to the calendar. The sentence
+carrying the "/now and the calendar name the same set" argument had the argument
+backwards. It now says the rows are hidden behind the ten-minute filter, which
+is what `NEEDS_A_BLOCK` actually does.
+
+### Keyboard and screen reader
+
+- **Finding 18.** Every write in `FilmingDayPanel` dropped focus to `<body>` and
+  left it there, because the control that was pressed is either `disabled` while
+  the write is in flight or replaced by the one that comes next. The worst case
+  was the destructive one: "Cancel this day…" is replaced by a confirmation that
+  was a plain `<p>` with no role, so a screen-reader user activating the delete
+  heard nothing at all. Each write now names its landing place through one
+  `requestFocus` ref — the next row's Detach, the date box, `cancel-day-yes`,
+  the control that replaced the one pressed — applied once the transition has
+  committed, and skipped when focus has stayed inside the panel. The
+  confirmation is `role="status"`. The dialog's phase change focuses the
+  scheduled phase rather than `<body>` inside a still-open `aria-modal`.
+- **Finding 19.** `VideoLine` in the day panel rendered the two-letter channel
+  tag *without* `aria-hidden` and then read the channel name as well, and
+  carried no state word — so the panel, the view you open to see a day in full,
+  said strictly less than the chip it expands. `STATE_WORDS` moved to
+  `components/calendar/grid/types.ts` and both renderers use it.
+- **Finding 20.** The day panel's `<h2>` separated the date from "in 5 days" with
+  `ml-2`, and accessible-name computation concatenates text nodes with nothing
+  between them: `"Wednesday, 23 September 2026in 5 days"`. Both that heading and
+  `FilmingDayPanel`'s `<h3>` emit a real separator now.
+
+### The dialog that could not be submitted
+
+Finding 13. `VideoIdsSchema` caps a write at 50 ids; the dialog ticked every
+candidate and knew nothing about the cap. So the one account state the badge
+exists for — a big pile in Filming — opened a dialog that was refused with "That
+is more videos than one day of filming.", naming no number, with no way under it
+but unticking one box at a time. `MAX_FILMING_DAY_VIDEOS` is now a shared
+constant: `defaultSelection` ticks at most that many, the legend turns
+over-limit, a sentence says how many to untick, submit is disabled while over,
+and the action's message names the limit.
+
+### Smaller things
+
+- **Findings 7, 26, 27.** Two doc comments contradicted the code under them:
+  `SidebarDisabled`'s JSDoc still called Calendar "the unbuilt section, and the
+  only one left" and claimed three call sites where its own file header (twelve
+  lines up) said two, and `formatTargetDate` on the board carried two stacked
+  JSDoc blocks after the M6 rewrite, the first describing the implementation that
+  had been deleted. Both corrected.
+- **Finding 28.** The board filled `channelId: ""` on the half of the dialog's
+  candidates that came from its own cards — latent, since nothing reads it, and
+  exactly the kind of latent that the next thing to group candidates by channel
+  gets silently wrong. `BoardCard` carries the real id now.
+- **Finding 25.** `docs/MILESTONES.md` claimed `e2e/m6-acceptance.spec.ts`
+  "cleans up its channels and days in `afterAll`". It cleaned up videos and days.
+  The channels are deleted too now — the videos are already gone by then, so
+  nothing blocks it, and leaving them is the other half of the accumulation trap
+  this section spends a page on: a spec that names a channel matches on a
+  substring.
+
+### Rejected
+
+| Finding | Why |
+|---|---|
+| — | None. All twenty-eight were reproduced or confirmed by reading the code, and all were fixed. |
+
+The two "optional" halves of findings 8 and 12 were **not** taken, and that is a
+decision rather than an omission:
+
+| Not taken | Reason |
+|---|---|
+| Stop the badge counting videos that are already on a day, or change its sentence to "3 in Filming, 2 already on a day". | The badge's count is a signed-off decision recorded above: it is principle 4's signal, and the signal is about the pile. What made re-clicking it dangerous was the *default tick*, and that is fixed. Changing the sentence would also break `e2e/board.m1.spec.ts`'s literal assertion for a cosmetic gain. |
+| Filter the board's candidates down to the unbooked subset, as `/calendar` does. | Simpler, and it would fix the blocker — but then the badge would say 3 and the dialog would list 2, which is the badge and the dialog disagreeing, the thing `lib/filming-data.ts` exists to prevent. Three of the four reviewers preferred listing-and-unticking first; so does this. |
+| Replace `disabled={busy}` with `aria-disabled` plus a no-op handler across the panel. | A real improvement to the tab-stop behaviour, and a mechanism change across every control in the file. Deferred to **M9**, the mobile-and-accessibility pass, where it can be done once for the whole app rather than in one component. |
+
+### Deferred
+
+| To | What |
+|---|---|
+| **M7 (settings)** | The timezone question behind `todayColumn`'s UTC day is unchanged and still the right call until there is a `profiles.tz` to read. |
+| **M9 (mobile and accessibility pass)** | `aria-disabled` in place of `disabled` on in-flight controls, application-wide. Also still `e2e/board.m1.spec.ts:453`'s literal `3 in Filming across all channels`, which is true only on a clean database — named in the section above and still not this milestone's work. |
+
+### Migration
+
+**None.** Every fix is reads, renders and one extra `select` on `filming_days`.
+`filming_day_id`, `on_date` and `target_publish_date` are unchanged, and nothing
+in `supabase/migrations/` was touched.
+
+### The gates, re-run last
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled; 10 routes, `/calendar` among them |
+| `./scripts/verify-db.sh m6_final` | OK — migrations applied, 14 SQL test files passed, **no migration added** |
+| `npm test` | 18 files, 325 tests passed |
+| `npm run e2e` (first run) | **198 passed, 1 skipped, 0 failed** (11.8m) |
+| `npm run e2e` (second run) | GATE_E2E2 |
+
+Two full runs, reported because an intermittent failure is a finding rather than
+noise. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`
+— by design, and unchanged since M0. The suite is six specs longer than it was:
+two in `e2e/filming-days.spec.ts` for the blocker, four in `e2e/calendar.spec.ts`
+for the `?day=` window, the tab title, booking with nothing waiting, and the
+missed-shoot tone.

@@ -109,7 +109,21 @@ interface VideoRow {
   filming_day_id: string | null;
 }
 
-function dress(row: VideoRow, lookups: Lookups): FilmingVideo {
+/**
+ * A video row, dressed.
+ *
+ * `dayLabels` maps `filming_days.id` to that day in words. It is passed in
+ * rather than looked up here because the two callers already know the answer
+ * from different directions: `readFilmingDays` is holding the days themselves,
+ * and `readFilmingVideos` reads the handful of days its rows point at in one
+ * query. Formatted on the server for the reason `FilmingVideo.filmingDayLabel`
+ * gives.
+ */
+function dress(
+  row: VideoRow,
+  lookups: Lookups,
+  dayLabels: ReadonlyMap<string, string>,
+): FilmingVideo {
   const channel = lookups.channels.get(row.channel_id);
   const stage = lookups.stages.get(row.stage_id);
   return {
@@ -130,7 +144,38 @@ function dress(row: VideoRow, lookups: Lookups): FilmingVideo {
     // schedule dialog). See `FilmingVideo.targetPublishLabel`.
     targetPublishLabel: formatDateColumn(row.target_publish_date, "short"),
     filmingDayId: row.filming_day_id,
+    filmingDayLabel:
+      row.filming_day_id === null
+        ? null
+        : (dayLabels.get(row.filming_day_id) ?? null),
   };
+}
+
+/** `filming_days.id` → "Sat 1 May", for the ids these rows point at. */
+async function labelsForDays(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  rows: readonly VideoRow[],
+): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(
+      rows
+        .map((row) => row.filming_day_id)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  if (ids.length === 0) return new Map();
+
+  const { data } = await supabase
+    .from("filming_days")
+    .select("id, on_date")
+    .in("id", ids);
+
+  return new Map(
+    (data ?? []).map((day) => [
+      day.id,
+      formatDateColumn(day.on_date, "weekday") ?? day.on_date,
+    ]),
+  );
 }
 
 const VIDEO_COLUMNS =
@@ -144,9 +189,14 @@ const VIDEO_COLUMNS =
  * Every non-archived video sitting in Filming, in any channel.
  *
  * This is the set the board's badge counts and the set the schedule dialog
- * pre-selects, and it is one function so those two can never disagree — which
- * they would the moment somebody counted with `head: true` here and listed with
- * a slightly different filter there.
+ * lists, and it is one function so those two can never disagree — which they
+ * would the moment somebody counted with `head: true` here and listed with a
+ * slightly different filter there.
+ *
+ * *Lists*, not pre-selects: which of them arrive ticked is a separate rule, in
+ * `components/calendar/filming/selection.ts`, and it deliberately leaves out the
+ * ones that are already on a day. See M6's review section in
+ * `docs/MILESTONES.md` — ticking those moved them off the shoot they were on.
  *
  * Ordered by title so the dialog's checkbox list is stable between renders;
  * the board sorts its own cards by target date and does not use this order.
@@ -183,8 +233,18 @@ export const readFilmingVideos = cache(async (): Promise<FilmingVideo[]> => {
       .range(from, to),
   );
 
+  /*
+    Which day each of these is already on, in words.
+
+    One extra query, and only when something in Filming is booked. It is what
+    lets the schedule dialog say "already on Sat 1 May" beside a candidate
+    instead of pre-ticking it and silently moving it — the blocker M6's review
+    found. A user has a handful of days at PLAN.md's sizing.
+  */
+  const dayLabels = await labelsForDays(supabase, rows);
+
   return rows
-    .map((row) => dress(row, lookups))
+    .map((row) => dress(row, lookups, dayLabels))
     .sort((a, b) => a.title.localeCompare(b.title, "en"));
 });
 
@@ -244,12 +304,22 @@ export async function readFilmingDays(
 
   // Grouped in memory: the alternative is one query per day, and a month has
   // at most a handful of days on it.
+  // These rows are on the days just read, so their labels are already known —
+  // no second query, and the day's own words and the video's agree by
+  // construction.
+  const dayLabels = new Map(
+    days.map((day) => [
+      day.id,
+      formatDateColumn(day.on_date, "weekday") ?? day.on_date,
+    ]),
+  );
+
   const byDay = new Map<string, FilmingVideo[]>();
   for (const row of rows) {
     const dayId = row.filming_day_id;
     if (!dayId) continue;
     const list = byDay.get(dayId) ?? [];
-    list.push(dress(row, lookups));
+    list.push(dress(row, lookups, dayLabels));
     byDay.set(dayId, list);
   }
 

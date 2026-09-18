@@ -28,6 +28,21 @@ import type { StageKind } from "@/lib/defaults";
  */
 export const MAX_FILMING_NOTES_LENGTH = 2_000;
 
+/**
+ * How many videos one write may attach to a day.
+ *
+ * A list posted from a browser, and a server action is an HTTP endpoint like
+ * any other, so the array is bounded — far above a real day's shoot and far
+ * below a runaway `in (...)`. It lives here, beside the notes length and for
+ * the same reason: `app/actions/filming-days.ts` is a `"use server"` module and
+ * may only export async functions, while both the zod schema that enforces the
+ * bound and the dialog that has to stay under it need the number. Before M6's
+ * review only the schema knew it, so a dialog with 57 boxes ticked by default
+ * was refused with a sentence that named no limit and offered no way to get
+ * under one.
+ */
+export const MAX_FILMING_DAY_VIDEOS = 50;
+
 /** A video as a filming day renders it. */
 export interface FilmingVideo {
   readonly id: string;
@@ -69,6 +84,19 @@ export interface FilmingVideo {
    * it one query and one definition.
    */
   readonly filmingDayId: string | null;
+  /**
+   * That day in words — "Sat 1 May" — or null when the video is not on one.
+   *
+   * Formatted on the server for the reason `targetPublishLabel` gives, and
+   * carried rather than looked up because the schedule dialog is a client
+   * component that has to be able to say *which* day a candidate is already on
+   * without a second read. M6's review found the dialog pre-ticking every
+   * candidate, booked ones included, so one press of "Schedule the day" moved
+   * videos off a shoot that was already arranged and emptied it. Naming the day
+   * on the row is half that fix; the other half is that a booked candidate
+   * starts unticked.
+   */
+  readonly filmingDayLabel: string | null;
 }
 
 /** A scheduled batch day, with everything it covers. */

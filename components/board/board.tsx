@@ -285,12 +285,19 @@ export function Board({
   }, [columns, filmingElsewhere]);
 
   /**
-   * What the schedule dialog pre-selects: every video in Filming, in every
+   * What the schedule dialog is offered: every video in Filming, in every
    * channel — this channel's from the cards on screen (so a card dragged in a
    * second ago is included without a refetch), the rest from the server read.
    *
    * The two halves cannot double-count: `filmingElsewhere` is read with
    * `channel_id <> this one`, and a card cannot be in two channels.
+   *
+   * "Offered", not "pre-selected". Each candidate carries the filming day it is
+   * already on, if any, and the dialog leaves those unticked and names the day
+   * beside them — M6's review pressed "Schedule the day" with everything ticked
+   * and emptied a shoot that had already been booked. The badge still *counts*
+   * the whole pile, which is BRIEF.md principle 4's signal; what changed is
+   * that the default action can no longer move anything.
    */
   const filmingCandidates = useMemo<FilmingCandidate[]>(() => {
     const filming = columns.find((column) => column.stage.kind === "filming");
@@ -300,7 +307,11 @@ export function Board({
     const here = (filming?.all ?? []).map((card) => ({
       id: card.id,
       title: card.title,
-      channelId: "",
+      // The board's own channel, carried on the card rather than invented
+      // here. It used to be `""` — a `FilmingCandidate` claiming to know its
+      // channel and naming one that does not exist, for exactly the half of
+      // the list belonging to the board you are looking at.
+      channelId: card.channelId,
       channelName,
       channelSlug,
       stageKind: "filming" as const,
@@ -309,6 +320,7 @@ export function Board({
       targetPublishDate: card.targetPublishDate,
       targetPublishLabel: card.targetPublishLabel,
       filmingDayId: card.filmingDayId,
+      filmingDayLabel: card.filmingDayLabel,
     }));
     return [...here, ...filmingElsewhere];
   }, [columns, channelName, channelSlug, filmingElsewhere]);

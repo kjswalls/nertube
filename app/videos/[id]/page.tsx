@@ -45,7 +45,12 @@ import {
 import { VideoSections } from "@/components/video-sections/video-sections";
 import { FilingBlock } from "@/components/ideas/assign/filing-block";
 import { FlowFields, type FlowStage } from "@/components/video-detail/flow-fields";
-import { formatDateColumn, todayColumn } from "@/lib/calendar-dates";
+import {
+  compareDateColumns,
+  formatDateColumn,
+  isDateColumn,
+  todayColumn,
+} from "@/lib/calendar-dates";
 import { readLinkableFilmingDays } from "@/lib/filming-data";
 import { formatAge } from "@/components/video-detail/age";
 import { PackagingBlock } from "@/components/packaging/packaging-block";
@@ -473,19 +478,19 @@ export default async function VideoDetailPage({
   /*
     Is the target date here yet?
 
-    The same arithmetic `lib/next-action.ts` rule 5 makes, against the same
-    single clock read: `target_publish_date` is a zoneless `date`, so the
-    comparison is with the start of that day in UTC and the day itself counts
-    as due. Computed on the server for the usual reason — a client component
-    reading the clock while rendering is a hydration mismatch waiting to
-    happen.
+    The same arithmetic `lib/next-action.ts` rule 5 makes, over the same single
+    clock read and now through the same helper: `target_publish_date` is a
+    zoneless `date`, so this is a comparison between two calendar days and the
+    day itself counts as due. It used to be a second `Date.parse(`${…}T00:00:00Z`)`
+    beside `today` above — one page, two derivations of the same instant, which
+    is the duplication `lib/calendar-dates.ts` exists to end. A column that is
+    not a calendar day at all reads as due, which is what the hand-rolled
+    version did with `NaN`.
   */
-  const targetStart =
-    video.target_publish_date === null
-      ? null
-      : Date.parse(`${video.target_publish_date}T00:00:00Z`);
   const dueToConfirm =
-    targetStart === null || Number.isNaN(targetStart) ? true : now >= targetStart;
+    video.target_publish_date === null ||
+    !isDateColumn(video.target_publish_date) ||
+    compareDateColumns(video.target_publish_date, today) <= 0;
 
   const header = (
     <div className="flex flex-col gap-2">

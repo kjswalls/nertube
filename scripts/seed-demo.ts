@@ -49,6 +49,7 @@ import {
   type StageKind,
 } from "../lib/defaults";
 import { slugify } from "../lib/slug";
+import { addDays, todayColumn, weekdayIndex } from "../lib/calendar-dates";
 
 /** The two channels PLAN.md's fixture assumes: a main channel and a side one. */
 const MAIN = "Main channel";
@@ -490,12 +491,26 @@ function daysAgo(days: number): string {
   return hoursAgo(days * 24);
 }
 
-/** The next Tuesday strictly after today, as a `date` string. */
+/**
+ * The next Tuesday strictly after today, as a `date` string.
+ *
+ * Through `lib/calendar-dates.ts`, like every other `date` column in this
+ * codebase. The version this replaces mixed zones: it read `getDay()` and
+ * `setDate()` in the machine's local zone and then serialised with
+ * `toISOString().slice(0, 10)` in UTC, so for part of every day the function
+ * named "the next Tuesday" wrote a Monday or a Wednesday into
+ * `videos.target_publish_date` — the column the calendar, the sidebar badge and
+ * the matrix quota all key off. `TZ=Pacific/Kiritimati` reproduced it.
+ *
+ * `weekdayIndex` counts from Monday, so Tuesday is 1, and `|| 7` keeps the
+ * "strictly after" in "the next Tuesday" when today is one.
+ */
 function nextTuesday(): string {
-  const date = new Date();
-  const ahead = ((2 - date.getDay() + 7) % 7) || 7;
-  date.setDate(date.getDate() + ahead);
-  return date.toISOString().slice(0, 10);
+  const today = todayColumn(Date.now());
+  const weekday = weekdayIndex(today);
+  if (weekday === null) return today;
+  const ahead = (1 - weekday + 7) % 7 || 7;
+  return addDays(today, ahead) ?? today;
 }
 
 main().catch((error: unknown) => {

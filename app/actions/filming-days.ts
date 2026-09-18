@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import {
+  MAX_FILMING_DAY_VIDEOS,
   MAX_FILMING_NOTES_LENGTH,
   type FilmingDay,
 } from "@/components/calendar/filming/types";
@@ -88,13 +89,22 @@ const NotesSchema = z
 /**
  * The videos a write is about.
  *
- * Capped, because this is a list posted from a browser and a server action is
- * an HTTP endpoint like any other. Fifty is far more than a day's shoot and far
- * less than a runaway `in (...)`.
+ * Capped by `MAX_FILMING_DAY_VIDEOS`, because this is a list posted from a
+ * browser and a server action is an HTTP endpoint like any other.
+ *
+ * The message **names the number**. M6's review drove the board badge with 57
+ * videos in Filming and got "That is more videos than one day of filming." — a
+ * refusal that says neither what the limit is nor how far over it you are, in
+ * front of a dialog with no way to get under it. The dialog now ticks at most
+ * this many by itself, so reaching this message takes deliberate ticking, and
+ * when it happens it says what to do.
  */
 const VideoIdsSchema = z
   .array(z.uuid("That is not a video id."))
-  .max(50, "That is more videos than one day of filming.")
+  .max(
+    MAX_FILMING_DAY_VIDEOS,
+    `A filming day takes at most ${MAX_FILMING_DAY_VIDEOS} videos at a time. Untick some, or attach the rest afterwards.`,
+  )
   // The same video twice is the same video.
   .transform((ids) => [...new Set(ids)]);
 
@@ -250,8 +260,28 @@ async function link(
   supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
   dayId: string,
   videoIds: readonly string[],
-): Promise<{ linked: string[]; error: string | null }> {
-  if (videoIds.length === 0) return { linked: [], error: null };
+): Promise<{ linked: string[]; movedFrom: number; error: string | null }> {
+  if (videoIds.length === 0) return { linked: [], movedFrom: 0, error: null };
+
+  /*
+    How many of these were already on a *different* day.
+
+    Read before the update, because afterwards there is nothing left to read:
+    one column, overwritten. M6's review found that a re-book was completely
+    silent — the previous shoot was emptied and neither the dialog, the toast
+    nor the day panel said so. The dialog now leaves a booked video unticked,
+    so this can only happen deliberately; this count is what lets the answer
+    say it happened at all. A failed read yields zero rather than a wrong
+    number: it is a sentence in a toast, not a precondition for the write.
+  */
+  const { data: before } = await supabase
+    .from("videos")
+    .select("id, filming_day_id")
+    .in("id", [...videoIds]);
+
+  const movedFrom = (before ?? []).filter(
+    (row) => row.filming_day_id !== null && row.filming_day_id !== dayId,
+  ).length;
 
   /*
     One column, and deliberately not `updated_at` with it.
@@ -272,6 +302,7 @@ async function link(
   if (error) {
     return {
       linked: [],
+      movedFrom: 0,
       error:
         error.code === FK_VIOLATION
           ? "That filming day does not exist any more — reload the calendar."
@@ -279,7 +310,27 @@ async function link(
     };
   }
 
-  return { linked: (data ?? []).map((row) => row.id), error: null };
+  return { linked: (data ?? []).map((row) => row.id), movedFrom, error: null };
+}
+
+/**
+ * "2 of these were on another day and have been moved off it."
+ *
+ * A move is never silent, whichever end asked for it. Returned as the result's
+ * `warning`, which both callers of these actions already render — the dialog in
+ * its `filming-day-notice` paragraph, which is `role="status"`.
+ */
+function movedWarning(movedFrom: number): string | null {
+  if (movedFrom === 0) return null;
+  return movedFrom === 1
+    ? "1 of these was already on another filming day and has been moved off it."
+    : `${movedFrom} of these were already on another filming day and have been moved off it.`;
+}
+
+/** The warnings a write produced, as one sentence or none. */
+function joinWarnings(...parts: (string | null | undefined)[]): string | null {
+  const kept = parts.filter((part): part is string => Boolean(part));
+  return kept.length === 0 ? null : kept.join(" ");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -355,7 +406,11 @@ export async function createFilmingDay(
     };
   }
 
-  const { linked, error: linkError } = await link(supabase, created.id, videoIds);
+  const { linked, movedFrom, error: linkError } = await link(
+    supabase,
+    created.id,
+    videoIds,
+  );
 
   await revalidateFor(supabase, videoIds);
 
@@ -373,18 +428,20 @@ export async function createFilmingDay(
     videos: [],
   };
 
+  const warning = joinWarnings(
+    linkError
+      ? `The day is scheduled, but ${linkError}`
+      : videoIds.length > linked.length
+        ? "The day is scheduled. Some of those videos are no longer there, so they were not attached."
+        : null,
+    movedWarning(movedFrom),
+  );
+
   return {
     ok: true,
     day,
     linked: linked.length,
-    ...(linkError
-      ? { warning: `The day is scheduled, but ${linkError}` }
-      : videoIds.length > linked.length
-        ? {
-            warning:
-              "The day is scheduled. Some of those videos are no longer there, so they were not attached.",
-          }
-        : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
@@ -415,22 +472,24 @@ export async function linkVideosToFilmingDay(
     };
   }
 
-  const { linked, error } = await link(supabase, dayId, videoIds);
+  const { linked, movedFrom, error } = await link(supabase, dayId, videoIds);
   if (error) return { ok: false, kind: "error", error };
 
   await revalidateFor(supabase, videoIds);
 
   const day = (await readFilmingDay(dayId)) ?? before;
+  const warning = joinWarnings(
+    linked.length < videoIds.length
+      ? "Some of those videos are no longer there, so they were not attached."
+      : null,
+    movedWarning(movedFrom),
+  );
+
   return {
     ok: true,
     day,
     linked: linked.length,
-    ...(linked.length < videoIds.length
-      ? {
-          warning:
-            "Some of those videos are no longer there, so they were not attached.",
-        }
-      : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
