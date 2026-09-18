@@ -54,8 +54,10 @@ next-env.d.ts
 # node_modules). Build output, never source.
 /.vitest/
 
-# Playwright
-/test-results/
+# Playwright. The glob covers the per-suite output dirs the E2E scripts pass
+# with `--output` (test-results-ideas, test-results-board, ...), not just the
+# default one — traces and screenshots are build output, never source.
+/test-results*/
 /playwright-report/
 /blob-report/
 /e2e/screenshots/
