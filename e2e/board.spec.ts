@@ -29,7 +29,7 @@ async function signIn(page: Page, password: string): Promise<void> {
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
-test('signing in lands on a board showing the nine seeded stages', async ({
+test('signing in lands on /now, and the board shows the nine seeded stages', async ({
   page,
 }) => {
   // Wide enough that all nine columns lay out side by side, so the screenshot
@@ -41,9 +41,15 @@ test('signing in lands on a board showing the nine seeded stages', async ({
 
   await signIn(page, SEED_PASSWORD);
 
-  // `/` sends a signed-in user to their first channel's board, and the seed
-  // creates "Personal" first.
-  await page.waitForURL(/\/c\/[^/]+\/board$/);
+  // PLAN.md's routing table: `/` sends a signed-in user with a channel to
+  // `/now`. Until M3 built that page this landed on the first channel's board
+  // instead, and the assertion moved rather than softened: the front door is
+  // asserted here, and the board it used to open is reached below through the
+  // sidebar, which is where a user goes for it.
+  await page.waitForURL('**/now');
+  await expect(
+    page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Now', exact: true }),
+  ).toHaveAttribute('aria-current', 'page');
 
   // The app under test is talking to THIS stack, and not to some other Supabase
   // origin that happens to accept the same credentials. supabase-js names its
@@ -55,6 +61,13 @@ test('signing in lands on a board showing the nine seeded stages', async ({
     cookieNames.some((name) => name.startsWith(expectedCookiePrefix)),
     `the session cookie should be ${expectedCookiePrefix}*, naming ${GATEWAY_URL}; got ${cookieNames.join(', ')}`,
   ).toBe(true);
+  // The seed creates "Personal" first, so the sidebar's Board link is its
+  // board — the one `/` used to redirect to.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
+  await page.waitForURL(/\/c\/[^/]+\/board$/);
   await expect(page.getByRole('heading', { name: 'Personal', level: 1 })).toBeVisible();
 
   // Each column is a <section aria-label={stage.name}>, i.e. a landmark region.

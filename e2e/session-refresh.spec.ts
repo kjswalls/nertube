@@ -83,6 +83,16 @@ test('the session survives access-token expiry, via the proxy.ts refresh', async
   await page.getByLabel('Email').fill(SEED_EMAIL);
   await page.getByLabel('Password').fill(SEED_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  // `/` is PLAN.md's front door and, as of M3, it lands on `/now` rather than
+  // on a board. This spec works on a board, so it goes to one the way a user
+  // would — the sidebar's Board link, which points at the first channel, the
+  // very one `/` used to redirect to. The post-condition is unchanged: after
+  // this helper the page is on a board.
+  await page.waitForURL('**/now');
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 
   // Past the expiry of the token the browser is holding.

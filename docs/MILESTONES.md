@@ -1809,3 +1809,473 @@ nothing in a browser:
 
 Both are named here rather than covered by a spec that would have to build most
 of M4 to exist.
+
+---
+
+## M3 — The video page's sections, and the YouTube preview
+
+### What this slice delivers
+
+- **Five sections on `/videos/[id]`**, as tabs across the top: Packaging,
+  Script, Thumbnails, Schedule, Publish. Each carries what it is holding — a
+  ratio, a tick, or a lock — so the page says what is behind a tab before the
+  tab is opened.
+- **`<YouTubePreview>`**: the chosen title and the concept sketch drawn at
+  YouTube's own metrics, in three places at once — a home feed card, a search
+  result row, and a phone tile with a sample tile above and below it — updating
+  as the title is typed.
+- **The truncation warning**: which of these titles the home feed would cut,
+  by how many characters, with the cut tail drawn struck through after the part
+  that survives.
+- **Three inert assist controls**, beside the candidates, the concept and the
+  hooks: the affordance M8 will fill, disabled, saying so on the control itself
+  and in its `title`.
+
+### The section routing, and the two promises it has to keep
+
+PLAN.md asks for a detail page; the design canvas asks for sections; the two
+requirements that make it hard are in the task: switching must be **linkable**
+and must **not lose unsaved edits**. Those pull in opposite directions — a URL
+that means something usually means a navigation, and a navigation re-renders
+the tree the packaging block is holding a draft, an autosave queue and an
+in-flight request in.
+
+What is built instead:
+
+- Every section is **mounted all the time**; switching sets the `hidden`
+  attribute. Nothing unmounts, so nothing is thrown away — including the state
+  that no blur would have saved, like a half-typed candidate sitting in the
+  "add" box. `hidden` also takes the panel out of the tab order and out of the
+  accessibility tree, which `visibility` or an opacity trick would not.
+- The URL is changed with **`window.history.pushState`**, which Next.js
+  supports for exactly this and keeps `usePathname`/`useSearchParams` in step
+  with (`node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md`,
+  "Native History API"). It is not a navigation: no route transition, no
+  loading state, no scroll reset, and — the part that matters — nothing
+  unmounts. To be exact about what it is, because the dev log shows it: one
+  `GET` of the route at the new URL appears per tab click, Next bringing its own
+  router into step with the address bar. The tree is reconciled in place, which
+  is why the draft survives, and the spec asserts that directly rather than
+  taking the mechanism's word for it.
+- `?section=` is parsed **on the server**, so a pasted link renders the right
+  section in its first HTML rather than switching to it after hydration. One
+  parse, handed down as `initial`; the browser owns it from there. `popstate`
+  is listened for, so back and forward walk the sections.
+- Unknown values (`?section=nonsense`, a repeated parameter, a renamed section)
+  open the gate rather than 404. The default section is the **bare URL**, so
+  there are not two links to one page.
+
+The tabs are real `<a href>`s with `aria-current="page"`, not `role="tab"`
+widgets: middle-click, "copy link address" and the focus ring all come free,
+and a plain left click is the only one intercepted.
+
+### The preview: what makes it worth having
+
+Two questions the editor cannot answer and the tool can — *where does the title
+get cut*, and *does the concept read at tile size*. The fidelity is the whole
+product here; an approximate mock answers both questions wrongly and
+confidently.
+
+- **Every metric is in one exported block**, `components/preview/metrics.ts`,
+  each with a comment saying what it represents: the 360px feed card and its
+  288px title column, 16/22 Roboto Medium clamped to two lines, the 360px
+  search thumbnail beside a 600px text column at 18/26, the 390px phone tile at
+  14/20, the avatar sizes, the ⋮ column, the duration chip. Correcting one is
+  one edit, and the three renderings, the warning and the e2e assertions all
+  move together because they all read it.
+- **Nothing was fetched from youtube.com.** The environment has no egress to
+  it; these are transcribed layout metrics, written down so they can be checked
+  one number at a time against the real page.
+- **No brand assets**: no logo, wordmark, play button or red. What is borrowed
+  is the geometry and the type scale, which is what the user needs.
+- **The clamp is measured, not guessed.** `components/preview/measure-title.ts`
+  lays the string out in a real element at the real width in the real type and
+  binary-searches for the longest prefix that still fits two lines with an
+  ellipsis — which is what the browser does to draw `-webkit-line-clamp`. A
+  character count cannot model where words break, and a warning that is wrong
+  is worse than none. The measuring element is attached to `document.body`
+  rather than rendered into the tree, because an inactive section panel is
+  `display: none` and everything inside one measures as zero.
+- **What is drawn is what is measured**: the title element carries the visible
+  prefix plus a real ellipsis once measured (with the CSS clamp still on it as
+  a safety net), so the cut on screen and the count in the warning are the same
+  computation. The ellipsis is text, so it can be asserted and copied.
+
+### How the live title reaches the preview
+
+The preview, the warning and the Packaging tab's ratio are all about fields
+that live inside the packaging block, and none of them is inside it.
+`/videos/[id]` is a Server Component, so it cannot hand the block a callback.
+
+`components/preview/live-packaging.tsx` is the one-way publish that resolves
+it: the block calls `usePublishPackagingDraft(...)` once, and whoever cares
+subscribes. The block stays the only owner of the draft. The alternative —
+reading the input's value out of the DOM — would have been a second source of
+truth for the thing this application has spent two milestones keeping
+single-sourced.
+
+The nav's packaging ratio is re-derived from that draft through the **same**
+`sectionReadiness` the server used, so a tab cannot say "1/3" about a form that
+visibly has all three.
+
+### Honest limits
+
+1. **The face is not Roboto.** It is not shipped with this app (no new
+   dependencies), so the measurement runs in the fallback — Liberation Sans on
+   this machine. Roboto is slightly narrower, so the warning errs towards
+   saying a title is cut when YouTube might just fit it. It is the first thing
+   to correct if these numbers are ever checked against the real page, and it
+   is named in `metrics.ts` beside the stack.
+2. **The metrics were transcribed, not measured against a live page** in this
+   session, for the reason above. They are individually labelled so that
+   checking them is a reading exercise rather than an archaeology one.
+3. **The search row is 976px wide** and the page column is not, so that frame
+   scrolls sideways inside its own border. Scaling it to fit was rejected: type
+   drawn at 80% answers "does this read?" wrongly, which is the one thing this
+   component must not do. The page itself never scrolls sideways.
+4. **The Script section is read-only.** `script` is not in
+   `lib/video-fields.ts`'s patch vocabulary and `updateVideo` has no branch for
+   it, so there is no save path to bind an editor to. It renders the column
+   `move_video` fills on first entry to Scripting, and says plainly that it
+   cannot be written here — a textarea over a column that cannot be saved would
+   accept an evening's work and lose it silently. The field and its save path
+   should arrive together.
+5. **Thumbnails and Publish are empty states**, not disabled controls. A
+   disabled control claims the feature exists and is unavailable *to you, now*;
+   nothing exists behind those two tabs at all. The assist pills are the
+   opposite case, and that is why they *are* drawn disabled: the field beside
+   them is real and finished, and where the button sits is a decision about
+   this screen.
+6. **The metadata lines are honest about being empty.** A feed card would show
+   "12K views · 2 days ago"; this one says "Not published yet", because
+   inventing a view count in the middle of a component whose job is to tell the
+   truth is not a trade worth making. The two phone neighbours *do* carry
+   sample counts — they are invented tiles, labelled as such, and a metadata
+   line of the right length is part of the layout being judged.
+7. **The duration chip is a placeholder** (`10:24`) and is drawn on purpose:
+   the chip covers the thumbnail's bottom-right corner on every YouTube
+   surface, so a concept whose subject lives in that corner is a concept that
+   gets sat on.
+8. The preview follows the app's light/dark choice using **YouTube's** greys
+   rather than Moss & Sand, through the same three-block pattern
+   `globals.css` uses. Rendering their grey metadata line in our muted green
+   would quietly change the contrast the user is trying to judge.
+
+### What the existing specs needed
+
+The flow fields moved into the Schedule section, so a spec that opened
+`/videos/<id>` and typed into `waiting-on` was now typing into a hidden panel.
+Four spec files were adjusted, and every change is a navigation, not a
+weakened assertion:
+
+- `e2e/flow-fields.spec.ts` — its one `openVideo` helper now opens
+  `?section=schedule`. That is the section routing's own promise being used the
+  way a user would paste it.
+- `e2e/m2-review.spec.ts` — three tests cross between the two sections; the
+  crossing is a tab click, which makes one of them (the version-token walk) a
+  stronger test than it was: the token now has to survive a section switch too.
+- `e2e/m2-acceptance.spec.ts` — the same, plus the layout assertion. It used to
+  compare the packaging block's `y` with the flow block's to prove "the gate
+  comes first". With sections, "first" is the first tab and the section a bare
+  URL opens at, so that is what it asserts now, and it additionally asserts the
+  flow block is *not* on screen until it is asked for.
+- `e2e/checklist.spec.ts` — one stage-select move, one tab click before it.
+
+`vitest.config.mts` gained the `@/` alias the application already has, so that
+a pure module under `components/` can be unit-tested without being moved into
+`lib/` for the resolver's sake.
+
+### Deliberately not built here
+
+Thumbnail roles, the swap dialog and the post-publish metrics (M4); any
+Anthropic call behind the assist pills (M8); a script editor (it needs a write
+path first); a description field (not in the schema); and any attempt to
+reproduce YouTube's interface beyond the geometry the two questions above
+need.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run test` | 191 passed (9 files), 13 of them `components/video-sections/sections.test.ts` |
+| `./scripts/verify-db.sh m3_sections` | OK - 13 SQL test files passed (this slice touches no SQL) |
+| `npx playwright test preview` | 6 passed |
+| `npm run e2e` (whole suite) | **94 passed, 1 skipped, 0 failed** - the skip is `session-refresh`, which only runs under `npm run e2e:refresh` |
+
+The one existing spec that failed on the first whole-suite run failed for a
+reason worth recording rather than hiding: `m2-acceptance` clicked through to
+the Schedule section, then called `page.reload()` - and the reload came back at
+*Schedule*, because the tab click had put `?section=schedule` in the address bar
+and that is what a reload reloads. The section routing demonstrating its own
+linkability by breaking a test that assumed the page had none. The spec now
+clicks back to Packaging after the reload, and says why.
+
+---
+
+## M3 — Integration: one shell, one front door, and the preview beside the work
+
+Four slices landed M3 concurrently — the design shell, the checklists, `/now`,
+and the sections with the YouTube preview. This is the step that makes them one
+application: what was composed, what was deduplicated, what changed about the
+front door, and every place this milestone as a whole departs from
+`docs/PLAN.md`.
+
+### 1. Composition
+
+**The checklist strip sits under the section tabs**, outside all five panels, so
+it never moves and never remounts when the section changes. "What do I actually
+do to this video next" is a question you have while looking at any section, so
+it cannot belong to one of them. It is keyed by `stage_id`: a move re-renders
+the route with a different list, and remounting is how the strip's optimistic
+copy is replaced wholesale rather than merged with a list it has nothing to do
+with.
+
+**The preview is the Packaging section's right rail.** It was under the
+packaging block, which is a scroll away from the title box — and a preview whose
+whole job is to show the clamp moving *as the title is typed* is worth nothing
+below the fold. `components/video-sections/video-sections.tsx` grew a `rails`
+map beside its `panels` map, and the page hands it one entry.
+
+Three decisions inside that are worth stating:
+
+- **The page column's width is decided by the sections component**, which is why
+  the page's header (channel, stage, heading) is now passed *in* as a prop
+  rather than rendered around it. A header outside would be aligned to neither
+  width.
+- **The column does not resize when the section changes.** The rail is empty on
+  four of the five tabs, but the layout is the same width on all five: a column
+  that narrowed on Script and widened on Packaging would slide the tabs out from
+  under the pointer that had just clicked one.
+- **The rail is side by side above 1480px and stacks below it.** 224 sidebar +
+  32 gutter + 672 measure + 32 gap + 452 rail + 32 gutter is 1444. Below that
+  there is no room for a rail next to a readable measure, and the one thing this
+  component must not do is shrink YouTube's own pixel sizes to fit — type drawn
+  at 80% answers "does this read?" wrongly. So it stacks, at full size, exactly
+  where it was before. `e2e/preview.spec.ts` asserts both arrangements and that
+  the page never scrolls sideways in either.
+
+**`/` lands on `/now`.** PLAN.md's routing table always said so; M1 and M2 sent
+an existing channel to its board because `/now` did not exist, and the `/now`
+slice left that in place because sixty-seven specs signed in by waiting for a
+board URL. Both reasons are gone, so the deviation is closed rather than
+inherited. BRIEF.md's complaint about every other tool is that they answer "what
+is the state of everything" when the morning question is "what do I do next";
+the board answers the first and `/now` answers the second, and either is one
+click from the other.
+
+Twelve sign-in helpers waited on a board URL. Every one now waits for `/now` and
+then *clicks the sidebar's Board link*, which is the same channel `/` used to
+redirect to. No assertion was weakened — each helper's post-condition is
+unchanged, and every spec that signs in now also proves the sidebar's Board link
+works. `e2e/board.spec.ts`'s first test is the one that was genuinely about the
+front door, so its assertion moved rather than softened: it asserts `/now` is
+where signing in lands and `aria-current="page"` marks it, then reaches the
+board through the sidebar and makes the nine-column assertion there.
+
+### 2. Reconciliation — what there is exactly one of
+
+Audited rather than assumed; the grep is in each case one line.
+
+| Mechanism | The one implementation | Everyone who uses it |
+|---|---|---|
+| Keyboard | `lib/shortcuts.ts` (`useShortcuts`) | board, `/now`, capture host, capture modal (exclusive scope), channel digits |
+| Toasts | `components/toast.tsx`, one `ToastProvider` in the root layout | board, `/now`, capture host |
+| Autosave | `components/autosave.tsx` (`useSaveQueue`) | packaging block, flow fields, checklist (`use-checklist.ts` adds a merge *on top of* the queue rather than a second queue) |
+| Theme | `lib/theme.ts` + the three-block pattern in `globals.css` | the whole application, through one `<html data-theme>` |
+
+The one deliberate second copy of the theme pattern is
+`components/preview/youtube-preview.tsx`, which declares **YouTube's** greys in
+both themes the same way. That is not the product's palette and must not be
+tidied into it: rendering their grey metadata line in our muted green would
+quietly change the contrast the user is trying to judge.
+
+### 3. The sidebar's Now count
+
+The sidebar draws how many rows `/now` is holding, and the number is
+`rankNow(...).length` over **exactly** the rows that page renders. That is not a
+nicety: a cheaper count from its own query would be a second definition of
+"something to do", and it would be wrong in all the interesting ways — it would
+count the idea bank, which `/now` deliberately never shows; it would count a
+video in a terminal stage with nothing left to do; and it would not know that a
+Scheduled video with no target date produces no row at all. The badge would say
+14, the page would list 9, and the user would be right to stop believing either.
+
+So the read moved out of `app/now/page.tsx` into **`lib/now-data.ts`**, wrapped
+in React's `cache()`. `AppShell` and `/now` both call it; on `/now` the five
+queries run once and both callers get the same object. `/now` also hands the
+shell its own clock, so the badge and the list cannot land on opposite sides of
+a 24-hour boundary.
+
+The count is *unfiltered* on purpose. The channel chips and "10 minutes or less"
+are a narrowing the user does on the page; a badge that followed them would be
+reporting the filter rather than the work. `e2e/now.spec.ts` asserts all three
+properties: it equals the unfiltered list, it does not move when the list is
+filtered, and it is the same number on a board.
+
+The chip is `aria-hidden` and the number is repeated in the link's `title` — an
+accessible *description*, not part of the name — so the link is still named
+exactly "Now". That is what keeps `e2e/shell.spec.ts`'s exact-name locator an
+honest assertion rather than one that had to be loosened.
+
+**The weekly strip needed nothing.** Its three numbers per column are already
+derived from the same `columns` memo the board's own column headers count, so a
+drag moves a card and both follow in the same render. Two derivations would have
+been the same bug as two counts of `/now`.
+
+### 4. The YouTube preview: closing the fidelity gap
+
+The preview shipped with one named weak point, and it was the important one:
+**Roboto was not loaded**, so `measure-title.ts` laid titles out in whatever the
+machine fell back to — Liberation Sans here, Arial on Windows, Helvetica on a
+Mac. None of those is metrically compatible with Roboto, which is slightly
+narrower, so every clamp was reported early: the warning said a title was cut
+where YouTube would have fitted it.
+
+`app/layout.tsx` now asks `next/font/google` for **Roboto at 400 and 500** — the
+two weights the preview draws — and publishes it as `--font-face-youtube`. It
+costs no new dependency (it is the same mechanism the product's own three faces
+already use) and it is self-hosted like them, so no reader's browser asks Google
+for anything. It is deliberately **not** in the `@theme inline` block: there is
+no utility class that could put YouTube's voice on one of our buttons.
+
+Loading a face is not the same as measuring in it, and three things had to change
+for the measurement to be honest:
+
+1. **The load is requested by name.** `document.fonts.ready` only answers
+   "nothing is loading right now", and the preview mounts inside a section panel
+   on a page that has already settled its own three faces — so `ready` can be an
+   already-resolved promise that says nothing about Roboto. `measure-title.ts`
+   reads the real family name off `--font-face-youtube` (it is generated at
+   build time) and calls `document.fonts.load()` for both weights first. Asking
+   for 400 does not bring 500, and a search title measured in a synthesised bold
+   is not a search title.
+2. **The measuring element uses font longhands, not the `font` shorthand.** The
+   family is reached through a custom property, and the shorthand resets every
+   font longhand it does not mention.
+3. **`-webkit-font-smoothing` is turned back off inside every frame.** The
+   application sets `antialiased` on `<body>`, which is right for its own faces
+   and makes text perceptibly lighter; YouTube sets no such rule. The measurer
+   pins the same four properties (`TEXT_RENDERING` in `metrics.ts`), so the drawn
+   title and the measured one stay the same computation.
+
+Three smaller fidelity corrections, all of them now numbers in `metrics.ts`
+rather than literals in the component: the duration chip's real padding, radius,
+weight and line box (`CHIP`); the avatar carries the **channel's initial**, which
+is YouTube's own fallback for a channel with no picture and reads as a tile
+rather than as a hole; and `letter-spacing` / `word-spacing` are pinned on the
+preview surface for the same reason the measurer pins them.
+
+#### What putting it in a 452px rail exposed
+
+Three defects that a 672px column had been hiding, all found by looking at the
+thing rather than at the test that passed:
+
+1. **The phone tile was clipped by five pixels** and lost the duration chip off
+   its right edge — which, in a component where the chip exists to show what
+   covers the thumbnail's corner, was a funny way to fail. The frame's own
+   padding is now 12 rather than 16, and `<YouTubePreview>` no longer draws a
+   box of its own: in the rail, a card around a group of cards cost 34px that
+   the 390px rendering does not have to give. The rail's rule and gutter are
+   already the separation that box was drawing.
+2. **The search row showed nothing but its thumbnail.** It is 976px and no rail
+   is; drawn from the left, 417px of it is grey rectangle. A clipped frame now
+   starts scrolled to the part worth seeing — for search, the text column,
+   because the thumbnail question is answered at true size by the other two
+   renderings and the only thing search can answer is how much later *its*
+   column cuts. Its caption says the row is 976px and that it scrolls.
+3. **A frame narrower than its content showed a strip of our page** down the
+   right of a picture of theirs. The surface is `min-width: 100%` now; YouTube's
+   own background runs past the card too.
+
+While fixing (2): a scroll container that nothing can focus cannot be scrolled
+from a keyboard at all. Each frame is now a focusable `role="group"` named by
+its caption.
+
+`e2e/preview.spec.ts` proves the face, and the third assertion is the one that
+makes the first two mean anything: a family the browser cannot resolve falls
+back to the default sans — which is precisely what `"Roboto"` did before — so
+the two measurements would be *identical* if the face were still missing. They
+are not. The control is an exact inequality rather than a threshold, because
+Roboto and Arial happen to sit within a pixel of each other on a short string,
+which is exactly why a character-count rule of thumb was never going to work.
+
+### Deviations from `docs/PLAN.md` introduced by M3, with reasons
+
+| Deviation | Why |
+|---|---|
+| **The sidebar replaced the top header.** PLAN.md names routes, not chrome; M0–M2 had a horizontal bar. | A 56px bar cost a board that is nine columns tall, put the channel switcher a long way from the board it switches, and had nowhere to put `/now`, `/calendar` and `/ideas`. |
+| **`/videos/[id]` is five sections, not one page.** PLAN.md describes the detail page as one list of blocks. | The page now holds packaging, a checklist, a script, dates, notes and two unbuilt blocks. As one column it is a scroll with no landmarks. The tabs are real `<a href>`s with `?section=`, so the page stayed linkable, and every panel stays mounted, so it stayed free of consequences for a half-typed field. |
+| **The checklist strip has a fixed position above the sections**, rather than being "the current-stage checklist" inside the detail page's list of blocks. | It is the only thing on the page that is about the *video* rather than about one part of it. Inside a section it would vanish when you opened another one. |
+| **The preview is a panel PLAN.md does not mention at all.** | BRIEF.md principle 1 is that the title and thumbnail are decided before the shoot; the two questions that decision needs — where does the title get cut, does the concept read at tile size — cannot be answered from an editor. It is the only new *surface* this milestone invented. |
+| **Three inert assist controls** beside the candidates, the concept and the hooks. | M8 fills them. Drawn disabled, naming the milestone on the control itself as well as in `title`, because a disabled button is not focusable and its tooltip reaches no keyboard user. The two empty tabs (Thumbnails, Publish) are the opposite case and are empty *states*: a disabled control claims the feature exists and is unavailable to you, and behind those two nothing exists yet. |
+| **The Script section is read-only.** PLAN.md lists `script` on the detail page. | `script` is not in `lib/video-fields.ts`'s patch vocabulary and `updateVideo` has no branch for it. A textarea over a column with no save path would accept an evening's work and lose it silently. It renders the column `move_video` fills and says plainly that it cannot be written here. The field and its save path should arrive together. |
+| **The weekly strip is not aligned to the board's columns.** | The board scrolls horizontally and the page does not, so an aligned strip would need a second synchronised scroller or would drift the moment anyone scrolled. Each cell names its stage instead. |
+| **A Scheduled video with no `target_publish_date` produces no `/now` row.** | Rule 5 has no honest branch without a date, and Scheduled has no seeded checklist. Named rather than papered over; the video is still on the board. |
+| **"Reset from template" is two requests, not a transaction.** | No fifth SQL function was added — `supabase/tests/90_schema_contract.test.sql` pins the count at four, and reset has no cross-row invariant to protect. If the insert fails the action says the list was cleared and the template did not go back; pressing Reset again is a complete retry. |
+
+**One deviation was closed rather than added:** `/` landing on a board instead of
+`/now`, carried since M1. See §1.
+
+### Honest limits
+
+1. **Every signed-in route now pays for `/now`'s five reads**, because that is
+   what makes the sidebar's count the same number as the page. They are flat,
+   RLS-scoped and `cache()`d per request, and PLAN.md sizes the account at one
+   user and hundreds of rows — but it is a real cost and this is where it is
+   written down. `videos` is capped at 2000 rows by the query.
+2. **The rail is only side by side above 1480px.** That is a wide window. The
+   alternative was scaling YouTube's metrics down, which would make the one
+   component whose job is fidelity lie about it.
+3. **The search row is 976px** and scrolls sideways inside its own frame — in
+   the rail as well as stacked. The page never does. In the rail it starts
+   parked on the text column, so the thumbnail is the half you scroll *to*.
+4. **The metrics are still transcribed, not measured against a live page.** This
+   environment has no egress to youtube.com. What changed is that the *face* is
+   no longer a guess; the geometry still is, and every number carries a comment
+   saying what it represents so checking it is a reading exercise.
+5. **The preview unmounts when you leave the Packaging tab**, unlike the panels,
+   which all stay mounted. It holds no unsaved state — it is derived from the
+   packaging draft — so the cost is one re-measure on return.
+6. **The metadata line says "Not published yet"** rather than inventing a view
+   count. Only the two labelled sample tiles in the phone rendering carry
+   invented counts, because a metadata line of the right length is part of the
+   layout being judged.
+7. **`--spacing-rail-min` finally has a consumer** (the rail's assertion floor);
+   the shell's honest limit about it having none is closed.
+8. Everything was verified against `scripts/dev-stack`, never a hosted Supabase
+   project. **M1's deploy gap is still open.**
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes |
+| `./scripts/verify-db.sh m3_check` | 4 migrations, 13 SQL test files (this step touches no SQL) |
+| `npm run test` | 191 passed (9 files) |
+| `npm run e2e` | **97 passed, 1 skipped, 0 failed** (5.6m) — the skip is `session-refresh`, which only runs under `npm run e2e:refresh`. 94 before this step, plus the three it added: the Roboto proof, the rail at both widths, and the sidebar count |
+
+### The acceptance walk
+
+PLAN.md's M3 acceptance is *"the Monday scenario — ten minutes on `/now`,
+complete rows without opening cards"*. Driven in a real browser against the dev
+stack, on a stack seeded with nothing but ideas:
+
+- Signing in landed on **`/now`**, which said *"Nothing is waiting on you.
+  Capture an idea with `c`, or promote one from the board."* and drew **no
+  badge** — zero is quiet.
+- Two ideas promoted on the board with the card's own forward button. A third
+  move, on to Scripting, was **refused by the gate** — the video has no title,
+  concept or hook — which is `move_video` doing its job.
+- Back on `/now`: two rows, and the sidebar badge read **2**.
+- **Four checklist rows completed in 711ms, in place, never leaving `/now` and
+  never opening a card**; the list re-ranked after each one. The URL was still
+  `/now` at the end.
+- On the video page at 1600px the rail measured **x=1038, width=452**, against a
+  block ending at 1006 — beside it, with the 32px gap, at exactly the design's
+  maximum rail. The feed clamp cut **32 characters**; search fitted the whole
+  title, which is the entire reason both are drawn.
+- At 1280px the rail stacked and the page did not scroll sideways.

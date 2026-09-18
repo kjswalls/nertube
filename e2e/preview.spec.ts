@@ -158,6 +158,16 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel('Email').fill(SEED_EMAIL);
   await page.getByLabel('Password').fill(SEED_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  // `/` is PLAN.md's front door and, as of M3, it lands on `/now` rather than
+  // on a board. This spec works on a board, so it goes to one the way a user
+  // would — the sidebar's Board link, which points at the first channel, the
+  // very one `/` used to redirect to. The post-condition is unchanged: after
+  // this helper the page is on a board.
+  await page.waitForURL('**/now');
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 }
 
@@ -400,4 +410,156 @@ test('the assist controls are present, disabled, and say when they arrive', asyn
     // using a keyboard.
     await expect(pill).toContainText('M8');
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 7. The face is Roboto, and the measurement can tell                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The fidelity claim that the rest of the preview rests on.
+ *
+ * Until M3's integration this measured in whatever the machine fell back to —
+ * Liberation Sans here — and the clamp it drew was therefore Liberation Sans's
+ * clamp with Roboto's numbers on it. Three things are asserted, and the third is
+ * the one that makes the first two mean something:
+ *
+ * 1. The drawn title's own computed family starts with Roboto.
+ * 2. That face is *loaded*, not merely asked for — `document.fonts.check`, so a
+ *    `display: swap` window that never closed would fail here.
+ * 3. A control against a family that does not exist. A name the browser cannot
+ *    resolve falls back to the default sans — which is precisely what "Roboto"
+ *    itself did before this face was loaded, so if it were still falling back
+ *    the two measurements would be *identical*. They are not, and the assertion
+ *    is exact rather than approximate: Roboto and Arial happen to be within a
+ *    pixel of each other on a short string, which is exactly why a threshold
+ *    would have been the wrong test.
+ */
+test('titles are drawn and measured in Roboto, not in a fallback', async ({
+  page,
+}) => {
+  const videoId = await capture('Roboto check');
+  await signIn(page);
+  await page.goto(`/videos/${videoId}`);
+
+  const feed = page.getByTestId('preview-title-feed');
+  await expect(feed).toBeVisible();
+  // The measurement has run: `data-cut` only exists once a clamp came back.
+  await expect(feed).toHaveAttribute('data-cut', /\d+/);
+
+  const evidence = await page.evaluate(() => {
+    const element = document.querySelector('[data-testid="preview-title-feed"]');
+    if (!element) throw new Error('no feed title');
+    const family = getComputedStyle(element).fontFamily;
+
+    // The first family in the resolved list, unquoted — what `next/font`
+    // published on `--font-face-youtube`.
+    const first = (family.split(',')[0] ?? '').trim().replace(/^["']|["']$/g, '');
+
+    const context = document.createElement('canvas').getContext('2d');
+    if (!context) throw new Error('no 2d context');
+    // Long enough that a per-glyph difference accumulates past any rounding.
+    const sample =
+      'Wide wondering willows, mmmm iiii WWWW jjjj — I rebuilt my entire ' +
+      'studio inside a kitchen cupboard for under two hundred pounds';
+
+    context.font = `500 16px "${first}"`;
+    const inRoboto = context.measureText(sample).width;
+    // A family no machine has. The browser falls back to its default sans —
+    // which is what `"Roboto"` resolved to before this face was loaded.
+    context.font = '500 16px "NerTubeNoSuchFace"';
+    const inFallback = context.measureText(sample).width;
+
+    return {
+      family,
+      first,
+      loaded: document.fonts.check(`500 16px "${first}"`),
+      inRoboto,
+      inFallback,
+    };
+  });
+
+  expect(evidence.first).toMatch(/^Roboto/);
+  expect(evidence.family).toMatch(/^Roboto/);
+  expect(
+    evidence.loaded,
+    `${evidence.first} should be loaded, not still swapping`,
+  ).toBe(true);
+  expect(
+    evidence.inRoboto,
+    `"${evidence.first}" laid the sample out at ${evidence.inRoboto}px and an ` +
+      `unresolvable family at ${evidence.inFallback}px. Equal widths would mean ` +
+      'the browser is falling back for both, and this test would be proving nothing',
+  ).not.toBe(evidence.inFallback);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8. The right rail                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where the preview lives, at both widths that matter.
+ *
+ * Wide, it is a right rail beside the packaging block, so the clamp moves while
+ * the title is typed rather than a scroll away. Narrow, there is no room for a
+ * 452px rail next to a readable measure — and shrinking YouTube's own pixel
+ * sizes to fit would answer "does this read?" wrongly — so it stacks under the
+ * block at full size, exactly where it was before the rail existed.
+ *
+ * Either way the page itself must not scroll sideways. The search row is 976px
+ * and scrolls inside its own frame; that is the frame's business and not the
+ * page's.
+ */
+test('the preview is a right rail when there is room, and stacks when there is not', async ({
+  page,
+}) => {
+  const videoId = await capture('Rail walk');
+  await signIn(page);
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto(`/videos/${videoId}`);
+
+  const rail = page.getByTestId('video-rail');
+  const block = page.getByTestId('packaging-block');
+  const preview = page.getByTestId('youtube-preview');
+
+  await expect(rail).toHaveAttribute('data-filled', 'true');
+  await expect(preview).toBeVisible();
+
+  const wideRail = (await rail.boundingBox())!;
+  const wideBlock = (await block.boundingBox())!;
+
+  // Beside, not below: the rail starts to the right of where the block ends.
+  expect(wideRail.x).toBeGreaterThanOrEqual(wideBlock.x + wideBlock.width);
+  // Within the design's range for a rail.
+  expect(wideRail.width).toBeLessThanOrEqual(452);
+  expect(wideRail.width).toBeGreaterThanOrEqual(276);
+
+  // The page does not scroll sideways, however wide the search frame is.
+  const overflows = () =>
+    page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+  expect(await overflows()).toBe(false);
+
+  // A section with no rail empties it and leaves the tabs where they were.
+  const tabs = page.getByRole('navigation', { name: 'Video sections' });
+  const tabsBefore = (await tabs.boundingBox())!;
+  await page.getByTestId('section-tab-script').click();
+  await expect(rail).toHaveAttribute('data-filled', 'false');
+  const tabsAfter = (await tabs.boundingBox())!;
+  expect(tabsAfter.y).toBe(tabsBefore.y);
+  expect(tabsAfter.width).toBe(tabsBefore.width);
+
+  // Narrow: the rail's content is not dropped, it goes underneath — and it is
+  // still drawn at full size rather than squeezed.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`/videos/${videoId}`);
+  await expect(preview).toBeVisible();
+
+  const narrowRail = (await page.getByTestId('video-rail').boundingBox())!;
+  const narrowBlock = (await block.boundingBox())!;
+  expect(narrowRail.y).toBeGreaterThan(narrowBlock.y);
+  expect(narrowRail.x).toBeLessThan(narrowBlock.x + narrowBlock.width);
+  expect(await overflows()).toBe(false);
 });

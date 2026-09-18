@@ -75,6 +75,23 @@ export interface VideoSectionsProps {
    * section and therefore must not move when the section changes.
    */
   underTabs?: ReactNode;
+  /**
+   * What a section puts in the **right rail**, if anything.
+   *
+   * Only Packaging has one today — the YouTube preview, which has to sit beside
+   * the title box rather than below it, because the whole point of it is
+   * watching the clamp move while the title is typed.
+   */
+  rails?: Partial<Record<VideoSectionId, ReactNode>>;
+  /**
+   * The line above the tabs — channel, stage, and the page's heading.
+   *
+   * It is passed in rather than rendered by the page around this component
+   * because this component owns the page column's *width*: with a rail the
+   * column is the main measure plus the rail, without one it is the reading
+   * measure, and a header rendered outside would be aligned to neither.
+   */
+  header?: ReactNode;
 }
 
 export function VideoSections({
@@ -83,6 +100,8 @@ export function VideoSections({
   facts,
   panels,
   underTabs,
+  rails,
+  header,
 }: VideoSectionsProps) {
   const [active, setActive] = useState<VideoSectionId>(initial);
 
@@ -122,36 +141,100 @@ export function VideoSections({
     window.history.pushState(null, "", `${window.location.pathname}${search}`);
   };
 
+  /*
+    The rail, and why the page's width is decided here.
+
+    `hasRail` is about the *set* of rails, not about the one showing. If the
+    column narrowed every time the user opened Script and widened again on
+    Packaging, the tabs would slide out from under the pointer on every click —
+    a layout that moves the control you just used. So the column keeps one
+    width for the whole page, and the rail column is simply empty for the four
+    sections that do not fill it.
+
+    Side by side only above 1480px, and the number is not a taste: the rail
+    holds the YouTube preview, whose frames are YouTube's own pixel sizes, and
+    a 360px feed card shrunk to fit a narrow rail would answer "does this
+    read?" wrongly — the one thing that component must never do. 224 sidebar +
+    32 gutter + 672 measure + 32 gap + 452 rail + 32 gutter is 1444, so the
+    breakpoint sits just above it. Below it the rail's content is not dropped;
+    the grid is one column and it stacks under the panels at full size, which
+    is exactly where the preview sat before the rail existed.
+  */
+  const rail = rails?.[active] ?? null;
+  const hasRail = rails !== undefined && Object.keys(rails).length > 0;
+
+  /*
+    Every class below is written out in full rather than composed from a
+    shared constant, because Tailwind finds the classes it must generate by
+    scanning this file as text: a template hole is a class that never gets a
+    rule. The breakpoint therefore appears literally, five times, and the
+    comment above is the one place it is explained.
+  */
+  const column = hasRail ? "max-w-2xl min-[1480px]:max-w-[1156px]" : "max-w-2xl";
+  const split = hasRail
+    ? "grid grid-cols-1 items-start gap-8 min-[1480px]:grid-cols-[minmax(0,42rem)_var(--spacing-rail-max)]"
+    : "flex flex-col";
+
   return (
     <PackagingLiveProvider>
-      <div className="flex flex-col gap-6">
-        <SectionNav
-          pathname={pathname}
-          active={active}
-          facts={facts}
-          onSelect={select}
-        />
+      <div className={`mx-auto flex w-full flex-col gap-8 ${column}`}>
+        {header}
 
-        {underTabs}
+        <div className="flex flex-col gap-6">
+          <SectionNav
+            pathname={pathname}
+            active={active}
+            facts={facts}
+            onSelect={select}
+          />
 
-        {VIDEO_SECTIONS.map((section) => {
-          const current = section.id === active;
-          return (
-            <div
-              key={section.id}
-              id={`section-${section.id}`}
-              data-testid={`section-panel-${section.id}`}
-              hidden={!current}
-              // `hidden` is `display: none` at the lowest specificity there is,
-              // so a `flex` utility on this element would beat it and the panel
-              // would stay on screen. The class is only applied when it shows.
-              className={current ? "flex flex-col gap-8" : undefined}
-            >
-              {panels[section.id]}
+          {underTabs}
+
+          <div className={split}>
+            <div className="flex min-w-0 flex-col gap-8">
+              {VIDEO_SECTIONS.map((section) => {
+                const current = section.id === active;
+                return (
+                  <div
+                    key={section.id}
+                    id={`section-${section.id}`}
+                    data-testid={`section-panel-${section.id}`}
+                    hidden={!current}
+                    // `hidden` is `display: none` at the lowest specificity
+                    // there is, so a `flex` utility on this element would beat
+                    // it and the panel would stay on screen. The class is only
+                    // applied when it shows.
+                    className={current ? "flex flex-col gap-8" : undefined}
+                  >
+                    {panels[section.id]}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+
+            {hasRail ? (
+              <aside
+                data-testid="video-rail"
+                data-filled={rail === null ? "false" : "true"}
+                aria-label="Alongside this section"
+                className={
+                  rail === null
+                    ? undefined
+                    : // The 1px rule and the gutter belong to the rail only
+                      // where there *is* a rail beside something: stacked, a
+                      // left border on a full-width block is a stripe down the
+                      // page. `sticky` keeps the preview in view while the
+                      // packaging block below it is scrolled through.
+                      "min-w-0 min-[1480px]:sticky min-[1480px]:top-gutter min-[1480px]:border-l min-[1480px]:border-border min-[1480px]:pl-gutter"
+                }
+              >
+                {rail}
+              </aside>
+            ) : null}
+          </div>
+        </div>
       </div>
     </PackagingLiveProvider>
   );
 }
+

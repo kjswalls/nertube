@@ -235,35 +235,37 @@ export default async function VideoDetailPage({
     name: row.name,
   }));
 
+  const header = (
+    <div className="flex flex-col gap-2">
+      <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
+        {channel ? (
+          <Link
+            href={`/c/${channel.slug}/board`}
+            className="underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            ← {channel.name} board
+          </Link>
+        ) : null}
+        <span
+          data-testid="stage-name"
+          className="rounded-full border border-border px-2 py-0.5"
+        >
+          <span className="sr-only">Stage: </span>
+          {stage?.name ?? "No stage"}
+        </span>
+      </p>
+
+      {/* The heading a screen reader announces for the page. The visible
+          version of the same string is the editable field below it, and two
+          visible copies of one title would just disagree while it is being
+          typed. */}
+      <h1 className="sr-only">{displayTitle}</h1>
+    </div>
+  );
+
   return (
     <AppShell currentSlug={channel?.slug}>
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8">
-        <div className="flex flex-col gap-2">
-          <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            {channel ? (
-              <Link
-                href={`/c/${channel.slug}/board`}
-                className="underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                ← {channel.name} board
-              </Link>
-            ) : null}
-            <span
-              data-testid="stage-name"
-              className="rounded-full border border-border px-2 py-0.5"
-            >
-              <span className="sr-only">Stage: </span>
-              {stage?.name ?? "No stage"}
-            </span>
-          </p>
-
-          {/* The heading a screen reader announces for the page. The visible
-              version of the same string is the editable field below it, and
-              two visible copies of one title would just disagree while it is
-              being typed. */}
-          <h1 className="sr-only">{displayTitle}</h1>
-        </div>
-
+      <div className="flex w-full flex-1 flex-col">
         {/*
           The sections, and everything inside them.
 
@@ -278,6 +280,10 @@ export default async function VideoDetailPage({
             pathname={`/videos/${video.id}`}
             initial={section}
             facts={sectionFacts}
+            /* The channel/stage line and the page heading. They live above the
+               tabs but inside this component, because it is what decides how
+               wide the page column is — see its `header` prop. */
+            header={header}
             /*
               The checklist, in the one place it lives on this page: under the
               tabs and above every section, because the question it answers —
@@ -355,14 +361,6 @@ export default async function VideoDetailPage({
                       ),
                     }}
                   />
-
-                  {/* The point of the packaging section: what the title and
-                      the sketch look like where they will be seen. */}
-                  <YouTubePreview
-                    channelName={channel?.name ?? "Your channel"}
-                    sketchUrl={sketchUrl}
-                    savedTitle={video.title}
-                  />
                 </>
               ),
 
@@ -435,6 +433,30 @@ export default async function VideoDetailPage({
                     logged.
                   </p>
                 </NotYet>
+              ),
+            }}
+            /*
+              The right rail, and the one section that fills it.
+
+              The preview belongs *beside* the packaging block rather than
+              under it: its job is to show the clamp moving as the title is
+              typed, and a preview below the fold shows that to nobody. The
+              rail is sticky, so it stays there while the candidate list and
+              the hooks are scrolled through.
+
+              Under 1480px there is not room for a 452px rail next to a
+              readable measure, and shrinking YouTube's own pixel sizes to fit
+              is the one thing this component must not do — so below that width
+              the rail stacks under the panel at full size, which is exactly
+              where it was before. See `components/video-sections/video-sections.tsx`.
+            */
+            rails={{
+              packaging: (
+                <YouTubePreview
+                  channelName={channel?.name ?? "Your channel"}
+                  sketchUrl={sketchUrl}
+                  savedTitle={video.title}
+                />
               ),
             }}
           />

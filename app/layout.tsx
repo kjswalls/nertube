@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Instrument_Sans, JetBrains_Mono, Newsreader } from "next/font/google";
+import { Instrument_Sans, JetBrains_Mono, Newsreader, Roboto } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { ToastProvider } from "@/components/toast";
@@ -13,13 +13,19 @@ export const metadata: Metadata = {
 };
 
 /*
-  The three faces, self-hosted by `next/font`.
+  The faces, self-hosted by `next/font`.
+
+  Three of them are the product's (see the `--font-*` comments in
+  `globals.css`); the fourth is Roboto, which exists only so the YouTube
+  preview measures and draws in the face YouTube actually uses. Its note is
+  beside it below.
 
   `next/font/google` downloads the files at build time and serves them from
   this application's own origin: no `<link>` to fonts.googleapis.com, so no
   render-blocking round trip to a third party and no request to Google from a
   reader's browser. Each one is asked for as a *variable* font — one file per
-  family covering the whole weight range — which is why no `weight` is given.
+  family covering the whole weight range — which is why no `weight` is given
+  for them.
 
   `display: "swap"` is the deliberate choice over `optional`: the fallback
   stacks in `globals.css` are metric-mismatched enough that a permanently
@@ -27,7 +33,8 @@ export const metadata: Metadata = {
   job (see the `--font-*` comments) rather than decorating.
 
   Each declares the CSS variable it publishes; the `@theme inline` block maps
-  those onto Tailwind's `font-display` / `font-sans` / `font-mono`.
+  the three product ones onto Tailwind's `font-display` / `font-sans` /
+  `font-mono`. The fourth is deliberately not mapped onto anything.
 */
 
 /** What the user wrote: page titles, video titles, hooks. */
@@ -49,6 +56,37 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-face-mono",
+});
+
+/*
+  The fourth face is not one of the product's three, and it is not used by any
+  of the product's chrome.
+
+  It is **Roboto, for the YouTube preview only** — the face YouTube sets its
+  titles in. Until it was here, `components/preview/measure-title.ts` measured
+  in whatever the machine happened to fall back to (Liberation Sans on Linux,
+  Arial on Windows, Helvetica on a Mac), and the preview's whole claim is that
+  the cut it draws is the cut YouTube will make. Measuring a Roboto clamp in
+  Arial is off by a character or two in the wrong direction, and it was the
+  largest named gap in this component's fidelity.
+
+  It costs no new dependency: `next/font/google` is already how the other
+  three arrive, and this is one more call to it. The weights are pinned to the
+  two the preview actually draws — 400 for a search title and a metadata line,
+  500 for a feed and phone title — rather than the whole variable range, so the
+  bytes fetched are the bytes used. It is self-hosted like the others, so no
+  reader's browser asks Google for anything.
+
+  Nothing else in the application may use it: Roboto is YouTube's voice here,
+  not NerTube's, and `--font-face-youtube` is deliberately absent from the
+  `@theme inline` block in `globals.css` so there is no utility class that
+  could put it on a button by accident.
+*/
+const youtube = Roboto({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  display: "swap",
+  variable: "--font-face-youtube",
 });
 
 /**
@@ -79,7 +117,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`h-full ${display.variable} ${sans.variable} ${mono.variable}`}
+      className={`h-full ${display.variable} ${sans.variable} ${mono.variable} ${youtube.variable}`}
     >
       <head>
         {/*

@@ -72,6 +72,13 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel('Email').fill(SEED_EMAIL);
   await page.getByLabel('Password').fill(SEED_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  // `/` lands on `/now` as of M3. The sidebar tests below are about a board, so
+  // this goes to one through the sidebar's own Board link.
+  await page.waitForURL('**/now');
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 }
 

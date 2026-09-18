@@ -61,6 +61,7 @@ export function AppSidebar({
   channels,
   currentSlug,
   section,
+  nowCount,
   userEmail,
 }: {
   channels: readonly SidebarChannel[];
@@ -73,6 +74,11 @@ export function AppSidebar({
    * `aria-current` values say exactly that difference.
    */
   section?: SidebarSection;
+  /**
+   * How many rows `/now` is holding — see the note on the count below.
+   * Undefined on a route that has no shell-level read to do it with.
+   */
+  nowCount?: number;
   userEmail: string | null;
 }) {
   // "Board" needs a channel to be the board *of*: the route's, or the first
@@ -121,7 +127,42 @@ export function AppSidebar({
             <li>
               {/* M3 built it, so it is a link. The disabled treatment below is
                   for the sections that genuinely do not exist yet. */}
-              <SidebarLink href="/now" current={section === "now" ? "page" : false}>
+              <SidebarLink
+                href="/now"
+                current={section === "now" ? "page" : false}
+                /*
+                  The count, and why it is drawn the way it is.
+
+                  It is the *same* number `/now` renders: `AppShell` gets it
+                  from `rankNow()` over the rows that page lists, not from a
+                  cheaper query that would quietly mean something else. Zero
+                  draws nothing — a badge reading 0 is a claim that needs
+                  reading, and an empty inbox should be quiet.
+
+                  `aria-hidden` on the chip and the number repeated in `title`:
+                  that keeps the link's accessible name exactly "Now" (which is
+                  what makes the sidebar's own spec an honest assertion) while
+                  still giving a screen reader the number, as the link's
+                  description rather than as part of its name.
+                */
+                title={
+                  nowCount === undefined || nowCount === 0
+                    ? undefined
+                    : `${nowCount} ${nowCount === 1 ? "thing" : "things"} you could do right now`
+                }
+                trailing={
+                  nowCount === undefined || nowCount === 0 ? null : (
+                    <span
+                      aria-hidden="true"
+                      data-testid="sidebar-now-count"
+                      data-count={nowCount}
+                      className="font-mono text-[10px] text-muted"
+                    >
+                      {nowCount}
+                    </span>
+                  )
+                }
+              >
                 Now
               </SidebarLink>
             </li>
@@ -284,17 +325,26 @@ function SidebarLink({
   current,
   keyShortcut,
   trailing,
+  title,
   children,
 }: {
   href: string;
   current: "page" | "true" | false;
   keyShortcut?: string;
   trailing?: React.ReactNode;
+  /**
+   * The link's accessible *description*, not its name: `title` on an element
+   * that already has text content never joins the name computation. That is
+   * how the Now count reaches assistive technology without turning the link
+   * called "Now" into a link called "Now 7".
+   */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
+      title={title}
       aria-current={current === false ? undefined : current}
       aria-keyshortcuts={keyShortcut}
       className={[

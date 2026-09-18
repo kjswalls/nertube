@@ -25,21 +25,70 @@
  */
 
 /**
- * The face YouTube sets titles in, with the fallbacks a machine without it
- * will actually use.
+ * The CSS custom property the real Roboto arrives on.
  *
- * **This is the known weak point of the measurement.** Roboto is not shipped by
- * this app (no new dependencies, and the three app faces are fetched from
- * Google at build time), so on a machine without Roboto installed the browser
- * measures Arial — or, on this Linux box, Liberation Sans, which is
- * metrically compatible with Arial and *not* with Roboto. Roboto is slightly
- * narrower, so the warning errs towards saying a title is cut when YouTube
- * might just fit it. The error is a character or two at the clamp, in the
- * pessimistic direction, and it is the first thing to fix if these numbers are
- * ever checked against the real page.
+ * `app/layout.tsx` asks `next/font/google` for Roboto at weights 400 and 500
+ * and publishes it here, self-hosted, on `<html>`. The generated family name is
+ * a build-time hash (`__Roboto_1a2b3c`), which is why the stack below reaches
+ * it through the variable rather than by name, and why
+ * `measure-title.ts` resolves this variable at runtime when it needs a concrete
+ * family to hand `document.fonts.load()`.
+ */
+export const YOUTUBE_FONT_VAR = "--font-face-youtube";
+
+/**
+ * The face YouTube sets titles in, with the fallbacks behind it.
+ *
+ * **This used to be the known weak point of the measurement, and is not any
+ * more.** Until Roboto was loaded, the browser measured the first fallback it
+ * had — Liberation Sans on this Linux box, Arial on Windows, Helvetica on a
+ * Mac — and none of those is metrically compatible with Roboto. Roboto is
+ * slightly narrower, so every clamp was reported a character or two early: the
+ * warning said a title was cut when YouTube would have fitted it.
+ *
+ * The literal `Roboto` after the variable is not redundant. It is what a
+ * machine that genuinely has Roboto installed uses if the self-hosted file
+ * fails to fetch, and the rest is what is painted during `display: swap` —
+ * a window `measure-title.ts` explicitly waits out before it trusts a
+ * measurement.
  */
 export const YOUTUBE_FONT_STACK =
-  'Roboto, "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif';
+  `var(${YOUTUBE_FONT_VAR}), Roboto, "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif`;
+
+/**
+ * The weights the preview draws in, and the sizes it draws them at.
+ *
+ * `document.fonts.load()` takes a font *shorthand*, and it only fetches the
+ * face that shorthand selects — asking for 400 does not bring 500. These are
+ * the pairs `measure-title.ts` asks for before it trusts a clamp; they are
+ * exactly the weights `app/layout.tsx` asks Google for.
+ */
+export const PREVIEW_FACES = [
+  { weight: 400, size: 18 },
+  { weight: 500, size: 16 },
+] as const;
+
+/**
+ * Text rendering the preview turns *off* the application's setting for.
+ *
+ * `app/globals.css` puts `-webkit-font-smoothing: antialiased` on `<body>`,
+ * which is a deliberate choice for the product's own faces and makes text
+ * perceptibly lighter. YouTube sets no such rule, so its titles are drawn with
+ * the platform default. Leaving the app's setting in place would make every
+ * title in the preview a little thinner than the real one — a small thing that
+ * is exactly the kind of small thing this component exists to get right.
+ *
+ * `letter-spacing` and `word-spacing` are pinned for a second reason: the
+ * measuring element in `measure-title.ts` pins them too, and a drawn title that
+ * inherited tracking the measured one did not would break the guarantee that
+ * the two are the same computation.
+ */
+export const TEXT_RENDERING = {
+  WebkitFontSmoothing: "auto",
+  MozOsxFontSmoothing: "auto",
+  letterSpacing: "normal",
+  wordSpacing: "normal",
+} as const;
 
 /** Every title box is clamped to this many lines on every surface YouTube has. */
 export const TITLE_LINES = 2;
@@ -295,3 +344,26 @@ export const SAMPLE_NEIGHBOURS = [
  * That is a thing the preview exists to show.
  */
 export const SAMPLE_DURATION = "10:24";
+
+/**
+ * The duration chip's own metrics (`ytd-thumbnail-overlay-time-status-renderer`).
+ *
+ * Its *size* is the same on every surface — only the type size and the inset
+ * from the corner change, and those live on `FEED` / `SEARCH` / `PHONE`
+ * beside the rest of that surface's numbers. Everything here was previously
+ * inlined in the component, which is exactly the drift this file exists to
+ * prevent.
+ */
+export const CHIP = {
+  /** Vertical and horizontal padding inside the chip. */
+  paddingY: 3,
+  paddingX: 4,
+  radius: 4,
+  /** Roboto Medium, and a line box the height of the type. */
+  fontWeight: 500,
+  lineHeight: 12,
+  /** The scrim behind it, which is the same black at the same alpha everywhere. */
+  background: "rgba(0, 0, 0, 0.8)",
+  /** Chip text is white on every YouTube theme, light or dark. */
+  color: "#ffffff",
+} as const;

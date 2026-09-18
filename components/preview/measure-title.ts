@@ -2,7 +2,12 @@
 
 import { useLayoutEffect, useState, useSyncExternalStore } from "react";
 
-import type { TitleBox } from "./metrics";
+import {
+  PREVIEW_FACES,
+  TEXT_RENDERING,
+  YOUTUBE_FONT_VAR,
+  type TitleBox,
+} from "./metrics";
 
 /**
  * Where a title stops fitting — measured by laying it out, not guessed from a
@@ -88,7 +93,12 @@ function measurer(): HTMLDivElement | null {
     margin: "0px",
     padding: "0px",
     border: "0px",
-    letterSpacing: "normal",
+    // The same four properties the drawn title pins, for the same reason: a
+    // measurement taken with the application's `-webkit-font-smoothing:
+    // antialiased` in force would be a measurement of slightly lighter text
+    // than the preview paints. `TEXT_RENDERING` is the one place they are
+    // decided.
+    ...TEXT_RENDERING,
   });
 
   document.body.append(node);
@@ -106,7 +116,14 @@ export function measureClamp(text: string, box: TitleBox): Clamp | null {
   if (text === "") return whole(text);
 
   node.style.width = `${box.width}px`;
-  node.style.font = `${box.fontWeight} ${box.fontSize}px/${box.lineHeight}px ${box.fontFamily}`;
+  // Longhands rather than the `font` shorthand: the family is reached through a
+  // custom property (`var(--font-face-youtube)`, whose real name is a build-time
+  // hash), and the shorthand also *resets* every font longhand it does not
+  // mention — including the smoothing pinned above.
+  node.style.fontWeight = String(box.fontWeight);
+  node.style.fontSize = `${box.fontSize}px`;
+  node.style.lineHeight = `${box.lineHeight}px`;
+  node.style.fontFamily = box.fontFamily;
 
   // Half a line of slack: `scrollHeight` is an integer and a fractional line
   // box would otherwise round a two-line height up past the limit.
@@ -145,25 +162,71 @@ export function measureClamp(text: string, box: TitleBox): Clamp | null {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Every measurement taken before the face loads was taken in the fallback one,
- * and is wrong the moment the real one arrives. `document.fonts.ready` settles
- * once; this bumps every hook below, so each clamp on the page is recomputed
- * exactly once more.
+ * Every measurement taken before Roboto loads was taken in a fallback face, and
+ * is wrong the moment the real one arrives. This settles once and bumps every
+ * hook below, so each clamp on the page is recomputed exactly once more.
+ *
+ * ## Why `document.fonts.ready` is not enough on its own
+ *
+ * `ready` answers "nothing is loading *right now*". The preview is inside a
+ * section panel on a page that has already loaded its own three faces, so by
+ * the time it mounts `ready` may well be an already-resolved promise — and a
+ * promise that resolved before Roboto was ever asked for says nothing about
+ * Roboto.
+ *
+ * So the load is *requested by name* first. `document.fonts.load()` takes a
+ * font shorthand and fetches the face it selects, which is why
+ * `PREVIEW_FACES` lists both weights: asking for 400 does not bring 500, and
+ * a search title measured in a synthesised bold-of-400 is not a search title.
+ *
+ * The concrete family name is read off the document, because `next/font`
+ * generates it at build time (`__Roboto_1a2b3c`) and nothing in the source
+ * knows it. If the variable is not there — the stylesheet has not applied, or
+ * someone removed the face — this falls back to plain `ready`, which is what
+ * the code did before and is still better than never re-measuring.
  */
 let fontsReady = false;
 const listeners = new Set<() => void>();
+
+/**
+ * The real family name behind `--font-face-youtube`, or `null` if the document
+ * does not have one.
+ */
+function resolvedFamily(): string | null {
+  const root = document.documentElement;
+  const value = getComputedStyle(root).getPropertyValue(YOUTUBE_FONT_VAR).trim();
+  return value === "" ? null : value;
+}
+
+function settle(): void {
+  fontsReady = true;
+  for (const listener of listeners) listener();
+}
 
 function watchFonts(): void {
   if (fontsReady || typeof document === "undefined") return;
   const fonts = document.fonts;
   if (!fonts) {
+    // No Font Loading API: whatever the first measurement saw is all there is.
     fontsReady = true;
     return;
   }
-  void fonts.ready.then(() => {
-    fontsReady = true;
-    for (const listener of listeners) listener();
-  });
+
+  const family = resolvedFamily();
+  const requested =
+    family === null
+      ? []
+      : PREVIEW_FACES.map((face) =>
+          // A rejection here is a face that will never arrive, which is a
+          // reason to stop waiting rather than a reason to throw.
+          fonts.load(`${face.weight} ${face.size}px ${family}`).catch(() => []),
+        );
+
+  void Promise.all(requested)
+    // `ready` after the explicit loads, not instead of them: it also covers the
+    // application's own three faces, which share the page's layout.
+    .then(() => fonts.ready)
+    .then(settle, settle);
 }
 
 /**

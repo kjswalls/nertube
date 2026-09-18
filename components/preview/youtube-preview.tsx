@@ -1,10 +1,11 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 import { usePackagingDraft } from "./live-packaging";
 import { useClamp, type Clamp } from "./measure-title";
 import {
+  CHIP,
   FEED,
   FEED_TITLE_BOX,
   PHONE,
@@ -14,6 +15,7 @@ import {
   SEARCH,
   SEARCH_ROW_WIDTH,
   SEARCH_TITLE_BOX,
+  TEXT_RENDERING,
   YOUTUBE_COLORS,
   YOUTUBE_FONT_STACK,
   type TitleBox,
@@ -43,8 +45,17 @@ import {
  * Every number comes from `./metrics.ts`, which says what each one represents
  * so it can be corrected in one place. Nothing was fetched from youtube.com —
  * this environment has no egress to it, and a mock built by scraping would be a
- * copy rather than a model. The known gaps are written down there too; the
- * largest is the face, since Roboto is not shipped with this app.
+ * copy rather than a model. The known gaps are written down there too.
+ *
+ * The face is **Roboto**, self-hosted by `next/font` (`app/layout.tsx`), which
+ * is the one thing here that is not a transcribed number: it is the same family
+ * YouTube sets, so the clamp this measures is the clamp YouTube makes rather
+ * than the clamp Arial would have made. Two more details follow from the same
+ * ambition and are easy to miss — the application's `-webkit-font-smoothing:
+ * antialiased` is turned back off inside every frame, because YouTube does not
+ * set it and smoothed text is visibly lighter; and the avatar carries the
+ * channel's initial, which is YouTube's own fallback for a channel with no
+ * picture rather than a hole in the layout.
  *
  * **No brand assets.** No logo, no wordmark, no play button, no red. The parts
  * that are theirs are the *metrics* — a 16:9 thumbnail, a two-line clamp, 16/22
@@ -90,7 +101,16 @@ export function YouTubePreview({
     <section
       data-testid="youtube-preview"
       aria-labelledby="preview-heading"
-      className="flex flex-col gap-4 rounded-card border border-border p-4"
+      /*
+        No border and no padding of its own, and the reason is arithmetic
+        rather than taste. In the right rail there are 452px, of which the
+        rail's own rule and gutter take 33. A box around this section would take
+        another 34, leaving 385 — and the phone rendering is 390px wide because
+        that is what a phone is. The card the frames are already drawn in is the
+        grouping; a second box around the group bought nothing and cost the one
+        rendering whose width is not negotiable.
+      */
+      className="flex flex-col gap-4"
     >
       <div className="flex flex-col gap-1">
         <h3 id="preview-heading" className="text-sm font-semibold">
@@ -118,8 +138,11 @@ export function YouTubePreview({
       </Frame>
 
       <Frame
-        caption="Search results — bigger type, a much wider column, so the cut comes later."
+        caption="Search results — bigger type in a 600px column, so the cut comes much later. The row is 976px wide; scroll it sideways for the thumbnail."
         testId="preview-search"
+        // Park it on the text column: that is the half of a search result this
+        // frame exists to answer, and it is the half a narrow rail hides.
+        startAt={SEARCH.thumbWidth + SEARCH.thumbGap}
       >
         <SearchRow
           title={title}
@@ -183,35 +206,96 @@ function PreviewStyles() {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * The frame's own padding — ours, not YouTube's, and it is load-bearing
+ * arithmetic rather than taste.
+ *
+ * The preview lives in a 452px right rail. The rail's own rule and gutter take
+ * 33 and this section draws no box of its own (see the note on it), so a frame
+ * gets 419 — 417 inside its 1px border.
+ *
+ * The widest rendering that has to fit there *whole* is the phone tile, and it
+ * is 390px because that is what a phone is: 390 + 2 × 12 = 414, with three to
+ * spare. At 16 it was 422 and clipped the duration chip off the right-hand
+ * edge, which — in a component where the chip exists to show what covers the
+ * thumbnail's corner — was a funny way to fail.
+ *
+ * The search row is the one rendering that does not fit at any padding; it is
+ * 976px and it scrolls. See `Frame`.
+ */
+const FRAME_PADDING = 12;
+
+/**
  * One rendering, at its true pixel size, with a caption saying what it is.
  *
  * `overflow-x: auto` and not a scale transform: a search row is 976px wide and
- * the page column is not, and shrinking it to fit would be the one thing this
- * component must not do. Type drawn at 80% is type that answers "does this
- * read?" wrongly. So it scrolls, inside its own frame, and the page itself
- * never scrolls sideways.
+ * no rail is, and shrinking it to fit would be the one thing this component
+ * must not do. Type drawn at 80% is type that answers "does this read?"
+ * wrongly. So it scrolls, inside its own frame, and the page itself never
+ * scrolls sideways.
+ *
+ * Two things follow from a frame that scrolls, and both are easy to leave out:
+ *
+ * - **It is focusable.** A scroll container that nothing can focus cannot be
+ *   scrolled from a keyboard at all, which is a straightforward WCAG failure
+ *   and not a detail. `tabIndex={0}` with a group role and the caption as its
+ *   name.
+ * - **It starts where the question is.** `startAt` scrolls a clipped frame to
+ *   the part worth seeing first. For the search row that is the text column:
+ *   drawn from the left, a 419px rail shows 419px of a 360px thumbnail and
+ *   nothing else — a grey rectangle where a title was supposed to be. The
+ *   thumbnail is answered at true size by the other two renderings; what only
+ *   search can answer is how much later *its* column cuts.
  */
 function Frame({
   caption,
   testId,
+  startAt = 0,
   children,
 }: {
   caption: string;
   testId: string;
+  /** Where to park the scroll when the frame is too narrow for its content. */
+  startAt?: number;
   children: ReactNode;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    if (node === null || startAt === 0) return;
+    // Only when it is actually clipped: in a wide page the whole row is
+    // visible and moving it would just hide the thumbnail for no reason.
+    if (node.scrollWidth <= node.clientWidth) return;
+    node.scrollLeft = startAt;
+  }, [startAt]);
+
   return (
     <figure className="flex flex-col gap-2" data-testid={testId}>
       <figcaption className="text-xs text-muted">{caption}</figcaption>
-      <div className="overflow-x-auto rounded-card border border-border">
+      <div
+        ref={scroller}
+        role="group"
+        aria-label={caption}
+        tabIndex={0}
+        className="overflow-x-auto rounded-card border border-border outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
         <div
           data-yt-surface=""
           style={{
             background: "var(--yt-surface)",
             color: "var(--yt-text)",
             fontFamily: YOUTUBE_FONT_STACK,
-            padding: 16,
+            padding: FRAME_PADDING,
+            // `max-content` so a 976px row is 976px and scrolls; `min-width:
+            // 100%` so a 360px card does not leave a strip of *our* page
+            // showing down the right of a frame that is supposed to be a
+            // picture of theirs. YouTube's own background runs past the card.
             width: "max-content",
+            minWidth: "100%",
+            boxSizing: "border-box",
+            // The application smooths its own faces and YouTube does not, and
+            // the measurer pins the same four properties. See `TEXT_RENDERING`.
+            ...TEXT_RENDERING,
           }}
         >
           {children}
@@ -338,13 +422,13 @@ function Thumb({
           position: "absolute",
           right: chipInset,
           bottom: chipInset,
-          padding: "1px 4px",
-          borderRadius: 4,
-          background: "rgba(0,0,0,0.8)",
-          color: "#fff",
+          padding: `${CHIP.paddingY}px ${CHIP.paddingX}px`,
+          borderRadius: CHIP.radius,
+          background: CHIP.background,
+          color: CHIP.color,
           fontSize: chipFontSize,
-          lineHeight: "14px",
-          fontWeight: 500,
+          lineHeight: `${CHIP.lineHeight}px`,
+          fontWeight: CHIP.fontWeight,
         }}
       >
         {SAMPLE_DURATION}
@@ -353,7 +437,21 @@ function Thumb({
   );
 }
 
-function Avatar({ size }: { size: number }) {
+/**
+ * The channel avatar: a filled circle carrying the channel's initial.
+ *
+ * YouTube draws the channel's picture here, which this application does not
+ * have and would not be allowed to invent. A blank grey disc is honest but
+ * reads as a hole in the layout; the initial is what YouTube itself falls back
+ * to for a channel with no picture, so it is both closer to the real thing and
+ * still nobody's asset. `aria-hidden`, because the channel's name is written
+ * out in full on the line beside it.
+ */
+function Avatar({ size, channelName }: { size: number; channelName: string }) {
+  // `Array.from` and not `[0]`: a channel called "🎬 Sunday Softworks" has a
+  // first *code unit* that is half a character.
+  const initial = (Array.from(channelName.trim())[0] ?? "?").toUpperCase();
+
   return (
     <span
       aria-hidden="true"
@@ -362,10 +460,20 @@ function Avatar({ size }: { size: number }) {
         height: size,
         borderRadius: "50%",
         background: "var(--yt-fill)",
+        color: "var(--yt-text-2)",
         flex: "none",
-        display: "block",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // Roughly half the disc, which is where YouTube's own initial sits.
+        fontSize: Math.round(size * 0.45),
+        lineHeight: 1,
+        fontWeight: 500,
+        userSelect: "none",
       }}
-    />
+    >
+      {initial}
+    </span>
   );
 }
 
@@ -458,7 +566,7 @@ function FeedCard({
           alignItems: "flex-start",
         }}
       >
-        <Avatar size={FEED.avatarSize} />
+        <Avatar size={FEED.avatarSize} channelName={channelName} />
         <div style={{ display: "flex", flexDirection: "column", gap: FEED.metaGap }}>
           <ClampedTitle
             text={title}
@@ -525,7 +633,7 @@ function SearchRow({
         </Meta>
 
         <div style={{ display: "flex", alignItems: "center", gap: SEARCH.avatarGap }}>
-          <Avatar size={SEARCH.avatarSize} />
+          <Avatar size={SEARCH.avatarSize} channelName={channelName} />
           <Meta fontSize={SEARCH.metaFontSize} lineHeight={SEARCH.metaLineHeight}>
             {channelName}
           </Meta>
@@ -628,7 +736,7 @@ function PhoneTile({
           alignItems: "flex-start",
         }}
       >
-        <Avatar size={PHONE.avatarSize} />
+        <Avatar size={PHONE.avatarSize} channelName={channelName} />
         <div style={{ display: "flex", flexDirection: "column", gap: PHONE.metaGap }}>
           <ClampedTitle
             text={title}

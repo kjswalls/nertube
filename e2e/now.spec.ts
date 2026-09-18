@@ -254,6 +254,16 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel('Email').fill(SEED_EMAIL);
   await page.getByLabel('Password').fill(SEED_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  // `/` is PLAN.md's front door and, as of M3, it lands on `/now` rather than
+  // on a board. This spec works on a board, so it goes to one the way a user
+  // would — the sidebar's Board link, which points at the first channel, the
+  // very one `/` used to redirect to. The post-condition is unchanged: after
+  // this helper the page is on a board.
+  await page.waitForURL('**/now');
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
   await page.waitForURL(/\/c\/[^/]+\/board$/);
 }
 
@@ -557,4 +567,66 @@ test('the weekly strip counts each column and ages it', async ({ page }) => {
   await expect(
     strip.getByTestId('strip-cell').filter({ hasText: 'Publish Prep' }),
   ).toHaveCount(0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The sidebar's count is this page's count                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The badge beside "Now" in the sidebar, and the only property that makes it
+ * worth drawing: it is the same number as the list.
+ *
+ * It is computed from `rankNow()` over the same rows the page renders
+ * (`lib/now-data.ts`), not from a cheaper "videos not archived" count, which
+ * would include the idea bank and a good deal else this page deliberately never
+ * shows. The three checks below are the three ways that could come apart:
+ *
+ * 1. On `/now` itself the badge equals the rows on screen.
+ * 2. Filtering the page does **not** move it — the chips are a narrowing the
+ *    user does, and a badge that followed them would be reporting the filter.
+ * 3. Away from `/now` — on a board, where the count is the only reason those
+ *    reads happen — it is still the same number.
+ *
+ * The count is `aria-hidden` and the number is repeated in the link's `title`,
+ * so the link's accessible name stays exactly "Now"; that is asserted too,
+ * because it is what keeps `e2e/shell.spec.ts`'s exact-name locator honest.
+ */
+test('the sidebar says how many rows /now has, and keeps saying it elsewhere', async ({
+  page,
+}) => {
+  // Deliberately NOT `openNow`, which narrows to this fixture's channel: the
+  // badge counts every channel, because it is a count of the work and not of
+  // the filter. The page with no filter on is the thing it has to agree with.
+  await page.goto('/now');
+  await expect(page.getByTestId('now')).toHaveAttribute('data-ready', 'true');
+
+  const onScreen = await rows(page).count();
+  expect(onScreen).toBeGreaterThan(0);
+
+  const badge = page.getByTestId('sidebar-now-count');
+  await expect(badge).toHaveAttribute('data-count', String(onScreen));
+  await expect(badge).toHaveText(String(onScreen));
+
+  const nowLink = page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Now', exact: true });
+  await expect(nowLink).toHaveAccessibleName('Now');
+  await expect(nowLink).toHaveAttribute('title', new RegExp(`^${onScreen} things? `));
+
+  // A filter narrows the list and leaves the badge alone.
+  await page.getByTestId('quick-filter').click();
+  await expect(rows(page)).not.toHaveCount(onScreen);
+  await expect(badge).toHaveAttribute('data-count', String(onScreen));
+
+  // And the same number on a page that is not `/now`.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Board', exact: true })
+    .click();
+  await page.waitForURL(/\/c\/[^/]+\/board$/);
+  await expect(page.getByTestId('sidebar-now-count')).toHaveAttribute(
+    'data-count',
+    String(onScreen),
+  );
 });
