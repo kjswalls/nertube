@@ -479,13 +479,29 @@ test('picking a target date saves it without waiting for a blur', async ({ page 
   await page.goto(`/videos/${videoId}?section=schedule`);
 
   const field = page.getByTestId('target-date');
-  await field.focus();
-  await field.fill('2026-12-01');
 
-  // No blur. The native overlay keeps focus after a date is picked, so this is
-  // what the whole interaction looks like — and the value sat unsaved, with the
-  // status line saying nothing, until something else happened to move focus.
-  await expect(page.getByTestId('target-date-status')).toHaveText('Saved');
+  /*
+    No blur. The native overlay keeps focus after a date is picked, so this is
+    what the whole interaction looks like — and the value sat unsaved, with the
+    status line saying nothing, until something else happened to move focus.
+
+    Wrapped in `untilTaken` because the first fill can land inside the video
+    page's hydration window, where the input takes the value and React has not
+    attached the `onChange` that saves it — `e2e/hydration.ts` describes that
+    property at length. Re-filling the same date is idempotent and does not
+    move focus, so the retry is exactly what a person whose first attempt did
+    nothing would do, and the assertion stays about the outcome.
+  */
+  await untilTaken(
+    async () => {
+      await field.focus();
+      await field.fill('2026-12-01');
+    },
+    () =>
+      expect(page.getByTestId('target-date-status')).toHaveText('Saved', {
+        timeout: 2_000,
+      }),
+  );
   expect(await focused(page)).toContain('target-date');
   // `pg` hands a `date` column back as a Date; the column is what matters.
   const stored = (await readRow(videoId)).target_publish_date;
@@ -552,8 +568,14 @@ test('a one-character skip reason is refused, and re-skipping after an un-skip c
 
   const open = page.getByTestId('packaging-skip-open');
   await expect(open).toHaveAttribute('aria-expanded', 'false');
-  await open.click();
-  await expect(open).toHaveAttribute('aria-expanded', 'true');
+
+  // Opened with a retry, for the same reason the test below this one does it:
+  // a click that lands before the route has hydrated is swallowed, and this is
+  // the first click of the test. See `e2e/hydration.ts`.
+  await untilTaken(
+    () => open.click(),
+    () => expect(open).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 }),
+  );
   // The disclosure button stays mounted and says what it controls, and the
   // caret is in the one thing that has to be typed.
   const controls = await open.getAttribute('aria-controls');

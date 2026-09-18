@@ -264,9 +264,20 @@ export function AppSidebar({
           >
             Channels
           </h2>
+          {/*
+            The channel list is the one part of the sidebar that grows without
+            bound, so it is the one part that scrolls.
+
+            Its parent carries `min-h-0`, which lets this block shrink when the
+            rest of the sidebar plus a long channel list is taller than `h-dvh`.
+            Shrinking without `overflow-y-auto` here is the bug that produced:
+            the `<ul>` kept its natural height, painted straight over the
+            account block below it, and swallowed clicks meant for the theme
+            toggle. Clipping and scrolling is what the shrink was for.
+          */}
           <ul
             aria-labelledby="sidebar-channels"
-            className="flex flex-col gap-0.5"
+            className="flex min-h-0 flex-col gap-0.5 overflow-y-auto"
           >
             {channels.map((channel, index) => {
               const isCurrent = channel.slug === currentSlug;

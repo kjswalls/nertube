@@ -4300,6 +4300,50 @@ checked against the database rather than against the page's other half.
 - **Assist pills remain inert and disabled** until M8. Nothing in this pass
   touched them.
 
+### Two things the suite found, and what was done about them
+
+Both were pre-existing and neither is in `components/ideas/**`. Adding a
+fixture channel and two shell-level reads was enough to tip each one over, which
+is the useful thing an integration pass does.
+
+- **The sidebar's channel list could paint over the account block.** With enough
+  channels for the sidebar to exceed `h-dvh`, the channels `<div>` shrank (it
+  carries `min-h-0`) while its `<ul>` kept its natural height and overflowed
+  visibly — swallowing clicks meant for the theme toggle underneath it.
+  `e2e/shell.spec.ts:154` failed on exactly that, with Playwright naming a
+  channel link as the element intercepting the click. Fixed where it was broken:
+  the `<ul>` now has `min-h-0 overflow-y-auto`, so the shrink clips and scrolls
+  instead of overlapping. The file's own comment had claimed this behaviour
+  since M3; now it is true.
+- **Two cases in `e2e/m2-review.spec.ts` landed inside the video page's
+  hydration window.** `:476` filled the target-date input once, with no retry,
+  immediately after `goto`; `:562` clicked the skip disclosure the same way. In
+  both, React had not yet attached the handler, so the input took the value (or
+  the button depressed) and nothing happened — and the case then spent its whole
+  timeout waiting for a result that could not arrive. This class was already
+  recorded as intermittent by the filing slice before this pass, which saw it in
+  `m2-review:640`, `preview:1119` and `m2-review:476`; a different case in the
+  same file failed on each of the two full runs here.
+
+  `e2e/hydration.ts` exists for precisely this and says the answer is to write
+  the retry down rather than to unmount the sections, so both interactions now
+  go through `untilTaken` — which the test immediately after `:562` in the same
+  file already did, for the same reason, in the same words. Re-filling the same
+  date and re-opening the same disclosure are idempotent and do not move focus,
+  and both assertions stay about the outcome. **No product code was changed for
+  either.** The honest reading is that the video page's hydration window is at
+  the edge of what an un-retried first interaction can survive under suite load;
+  the two shell-level reads this pass added are server time rather than
+  hydration time, but they are one more thing on a page that has no room left.
+- **`e2e/preview.spec.ts:1119` read the clamp before the clamp was measured.**
+  The third of the cases the filing slice had named. It waited for the three
+  comparison titles to exist and then snapshotted their `data-cut` and
+  `data-truncated` in one `evaluateAll` — but those attributes are written by
+  `useClamps` in a layout effect, a tick after the nodes appear, so the snapshot
+  could read `null` for all of them. It now waits for the attribute to *exist*
+  before snapshotting; the assertions that decide the test are untouched, and
+  again no product code changed.
+
 ### Gates for this pass
 
 | Gate | Result |
@@ -4309,4 +4353,20 @@ checked against the database rather than against the page's other half.
 | `npm run build` | compiled, 9 routes |
 | `./scripts/verify-db.sh m5_check` | OK — migrations applied, 14 SQL test files passed |
 | `npm run test` | 14 files, 257 tests passed (7 of them the new `agreement.test.ts`) |
-| `npm run e2e` | see below |
+| `npm run e2e` | **154 passed, 1 skipped, 0 failed** (10.1m) — and again, **154 passed, 1 skipped, 0 failed** (10.7m) |
+
+Two consecutive clean full runs, on the default ports and the default database,
+with nothing else holding this directory's one `next dev`. The skipped case is
+`e2e/session-refresh.spec.ts:60`, which only runs under `npm run e2e:refresh`
+(it needs a stack minting five-second access tokens); that is its designed
+behaviour and not a M5 skip.
+
+Four earlier full runs are worth naming rather than hiding, because the first
+three were red and the reason matters: run 1 — 152 passed / 2 failed
+(`shell:154`, `m2-review:476`); run 2 — 153 / 1 (`m2-review:476`); run 3 —
+153 / 1 (`m2-review:562`); run 4 — 153 / 1 (`preview:1119`). One of those was a
+real product defect and is fixed in the product (the sidebar overlap); the other
+three were the same test-side hydration-window class, in the three cases the
+filing slice had already named, and are fixed in the specs with the retry the
+suite already had a helper for. `npx playwright test m5-integration` on its own
+is 4 passed.

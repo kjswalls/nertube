@@ -1130,6 +1130,17 @@ test('the comparison clamps the title exactly as the feed card does', async ({
   const titles = page.getByTestId('preview-comparison-title');
   await expect(titles).toHaveCount(ROLES.length);
 
+  /*
+    The clamp is measured in a layout effect, so `data-cut` and `data-truncated`
+    appear a tick after the nodes themselves do — snapshotting the DOM the
+    instant the count is right can catch the window before the measurement, and
+    then reads `null` for every attribute. Waiting for the attribute to *exist*
+    (not for a value) keeps the assertions below the ones that decide the test.
+  */
+  await expect(
+    page.locator('[data-testid="preview-comparison-title"][data-truncated]'),
+  ).toHaveCount(ROLES.length);
+
   const measured = await titles.evaluateAll((nodes) =>
     nodes.map((node) => ({
       text: node.textContent ?? '',
