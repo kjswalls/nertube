@@ -63,8 +63,8 @@ test('H: /now shows filming rows by default, contradicting the calendar banner',
   const v = await seedVideo(CH.slug, 'ZZ needs the camera');
   // give it a checklist item so rule 6 fires (that is what tags needsABlock)
   await db.query(
-    `insert into public.checklist_items (user_id, video_id, stage_id, text, position, est_minutes)
-     values ($1, $2, (select stage_id from public.videos where id=$2), 'Outline visible while filming', 0, 5)`,
+    `insert into public.checklist_items (user_id, channel_id, video_id, stage_id, text, position, est_minutes)
+     values ($1, (select channel_id from public.videos where id=$2), $2, (select stage_id from public.videos where id=$2), 'Outline visible while filming', 0, 5)`,
     [c.user_id, v],
   );
 
