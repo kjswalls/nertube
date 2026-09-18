@@ -1,5 +1,9 @@
 import { cache } from "react";
 
+import type {
+  FilmingDay,
+  FilmingVideo,
+} from "@/components/calendar/filming/types";
 import type { StageKind } from "@/lib/defaults";
 import { isStageKind } from "@/lib/defaults";
 import { compareDateColumns } from "@/lib/calendar-dates";
@@ -45,30 +49,13 @@ import { requireUser } from "@/lib/supabase/require-user";
 /* Types                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** A video as a filming day renders it, or as the schedule dialog lists it. */
-export interface FilmingVideo {
-  readonly id: string;
-  readonly title: string;
-  readonly channelId: string;
-  readonly channelName: string;
-  readonly channelSlug: string;
-  /** The stage it is in *now* — the thing that makes a past day truthful. */
-  readonly stageKind: StageKind | null;
-  readonly stageName: string;
-  /** Archived videos stay on the day they were filmed on; they just say so. */
-  readonly archived: boolean;
-  /** `YYYY-MM-DD` or null — drawn beside the title on the day it is filmed for. */
-  readonly targetPublishDate: string | null;
-}
-
-/** A scheduled batch day, with everything it covers. */
-export interface FilmingDay {
-  readonly id: string;
-  /** `YYYY-MM-DD`. A calendar day, never an instant — see `lib/calendar-dates.ts`. */
-  readonly onDate: string;
-  readonly notes: string | null;
-  readonly videos: readonly FilmingVideo[];
-}
+/*
+  The shapes live in `components/calendar/filming/types.ts` — the neutral
+  ground between this reader, the server actions that hand a day back, and the
+  client components that draw one. Re-exported here so a caller that only needs
+  the data can import the reader and its types from one place.
+*/
+export type { FilmingDay, FilmingVideo } from "@/components/calendar/filming/types";
 
 /* -------------------------------------------------------------------------- */
 /* Shared pieces                                                               */
@@ -270,6 +257,33 @@ export async function readFilmingDays(
       ),
     }))
     .sort((a, b) => compareDateColumns(a.onDate, b.onDate));
+}
+
+/**
+ * One filming day, with what it covers — the read-back every write in
+ * `app/actions/filming-days.ts` ends with.
+ *
+ * Expressed as a one-day window over the reader above rather than as its own
+ * pair of queries, so "a day and its videos" has one definition and an action's
+ * answer is the same shape the calendar renders. The window is a *date* range,
+ * not an id filter, and `unique (user_id, on_date)` is what makes those
+ * equivalent — but the id is still checked, because a caller asking for a
+ * specific day must not be handed a different one that happens to share its
+ * date after a move.
+ */
+export async function readFilmingDay(dayId: string): Promise<FilmingDay | null> {
+  const { supabase } = await requireUser();
+
+  const { data: day } = await supabase
+    .from("filming_days")
+    .select("on_date")
+    .eq("id", dayId)
+    .maybeSingle();
+
+  if (!day) return null;
+
+  const days = await readFilmingDays(day.on_date, day.on_date);
+  return days.find((candidate) => candidate.id === dayId) ?? null;
 }
 
 /**
