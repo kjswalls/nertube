@@ -3526,7 +3526,7 @@ the call site, and a full run is clean.
 | `npm run build` | 8 routes, compiled |
 | `./scripts/verify-db.sh m4_final` | OK — 6 migrations applied, 13 SQL test files passed |
 | `npm run test` | 11 files, 223 tests passed |
-| `npm run e2e`, twice | 137 passed, 1 skipped, 0 failed, both times |
+| `npm run e2e`, twice | 132 passed, 1 skipped, 0 failed, both times (7.7m, 7.8m). The second run deliberately reused the stack the first left running — that is the condition the `/now` counter fix is about — and was green. `grep -c "Each child in a list"` over both piped logs: 0. |
 
 The skip is `e2e/session-refresh.spec.ts`, which skips itself unless the stack
 was started with a short access-token TTL; `npm run e2e:refresh` runs it.
