@@ -5140,3 +5140,39 @@ calendar's own nine cases pass in the same run that shows them failing.
   reason — and the count belongs to `lib/filming-data.ts`, which the other slice
   owns. Adding a second reader for it here would have been the sixth mechanism
   this project keeps refusing to grow.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled; 10 routes, `/calendar` among them |
+| `npm test` | 17 files, 317 tests passed — and **identical** under `TZ=America/Los_Angeles` |
+| `./scripts/verify-db.sh nertube_m6_sql` | OK — migrations applied, 14 SQL test files passed |
+| `npx playwright test filming-days matrix` | 20 passed (1.7m) |
+| `npx playwright test` (whole suite) | 133 passed, 2 failed, stopped at ~135 of ~180 — see below |
+
+**Everything here ran in a copy of the tree, on its own ports and its own
+database** (`E2E_PORT=3131`, `DEV_STACK_PORT=54341`, `NERTUBE_DEV_DB=nertube_m6`),
+because the calendar slice was building and running its own suite in the working
+tree at the same time and Next allows one `next dev` per directory. M5's list
+slice did the same thing for the same reason.
+
+**The two failures in the whole-suite run, and what they were.**
+
+1. `e2e/filming-days.spec.ts` — *"a day can be moved to another date, and
+   refuses an occupied one"*. The spec, not the product: it asserted on
+   `getByRole('alert')`, and the toast region renders an always-present empty
+   `role="alert"` container, so Playwright's strict mode refused the two
+   matches. The panel's own line has a test id now, and the test passes.
+2. `e2e/matrix.spec.ts:668` — *"capturing into a cell leaves focus on the cell
+   that replaced it"*, an M5 test this slice does not touch. It failed at 29.5s
+   with **two full suites sharing one machine**; on its own it passes in 3.0s.
+   Recorded rather than dismissed: it is a test whose deadline is long enough to
+   be a load measurement, which is worth somebody's attention.
+
+The run was stopped at ~135 to give the machine back. Every spec that touches
+this slice's code had run by then and passed: `board.m1` (including the Filming
+badge's cross-channel count), `flow-fields`, `m2-review`, `filming-days` and
+`calendar`.
