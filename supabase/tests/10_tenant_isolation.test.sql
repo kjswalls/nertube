@@ -110,7 +110,9 @@ end $$;
 do $$
 declare ok boolean := false; st text;
 begin
-  -- And a thumbnail_swaps log row against A's video.
+  -- And a thumbnail_swaps log row against A's video. Since 0006 there is no
+  -- client INSERT grant on the log at all, so this is refused before the FK is
+  -- reached — which is the stronger refusal, not a weaker one.
   begin
     insert into public.thumbnail_swaps (user_id, video_id, to_role, reason)
     values (fx.user_b(), fx.video_a(), 'safe', 'not mine');
@@ -119,6 +121,23 @@ begin
     ok := true;
   end;
   if not ok then raise exception 'FAILED: B logged a swap against A''s video'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
+
+  -- The composite FK underneath it, exercised as the table owner so the revoke
+  -- is out of the way and only the constraint can refuse. This is the binding
+  -- that matters for swap_thumbnail, which is security definer and therefore
+  -- runs exactly here.
+  ok := false;
+  reset role;
+  begin
+    insert into public.thumbnail_swaps (user_id, video_id, to_role, reason)
+    values (fx.user_b(), fx.video_a(), 'safe', 'not mine');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate;
+    ok := true;
+  end;
+  set local role authenticated;
+  if not ok then raise exception 'FAILED: a swap log row bridged two tenants'; end if;
   if st <> '23503' then raise exception 'FAILED: expected 23503, got %', st; end if;
 end $$;
 

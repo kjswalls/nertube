@@ -532,3 +532,35 @@ export function describeGate(status: GateStatus): string {
   }
   return `Packaging: needs ${GATE_WORDING[status.missing]}`;
 }
+/**
+ * `move_video` raises `gate:title`, `gate:thumbnail_concept` or `gate:hook`.
+ * PostgREST hands that back as the error message, sometimes with its own
+ * prefix, so this matches rather than compares.
+ */
+export function readGateField(message: string): GateField | null {
+  const match = /gate:(title|thumbnail_concept|hook)/.exec(message);
+  return match ? (match[1] as GateField) : null;
+}
+
+/**
+ * The soft warning PLAN.md asks for, and the one place that knows it.
+ *
+ * PLAN.md, "Key UI behaviours": *One hard gate; Publish Prep → Scheduled with
+ * < 3 thumbnail paths is a soft warning only.* It is **not** a refusal — the
+ * move has already happened by the time this is computed, and BRIEF.md
+ * principle 6 is that the tool must not add friction. What it is, is the one
+ * moment where saying "you are queueing this up with one image" is still
+ * useful: after it is scheduled, a swap means making a new thumbnail under
+ * time pressure, which is the whole reason principle 7 asks for three.
+ *
+ * Returning a sentence rather than rendering one keeps the three surfaces that
+ * move a video (the board's drag, the detail page's stage select, `/now`'s
+ * move row) saying the same thing, the same way the gate refusal already is.
+ */
+export function describeThumbnailShortfall(ready: number): string | null {
+  if (ready >= 3) return null;
+  return ready === 0
+    ? "Scheduled with no thumbnail variants yet. Three — a wild card, a moderate and a safe — are what make a bad first hour cost a swap rather than a day."
+    : `Scheduled with ${ready} of 3 thumbnail variants. That is allowed, but a swap only takes minutes when the other two already exist.`;
+}
+

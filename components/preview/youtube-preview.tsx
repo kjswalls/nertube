@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { usePackagingDraft } from "./live-packaging";
 import {
   FEED_TITLE_BOX,
@@ -139,6 +141,24 @@ export interface YouTubePreviewProps {
    * is not mounted.
    */
   savedTitle: string;
+  /**
+   * Where the *assets* are — `/videos/[id]?section=thumbnails`.
+   *
+   * The preview draws the concept sketch. After M4 the same visual language
+   * draws the real shipped image one tab along, so this rendering has to say
+   * which of the two it is holding and point at the other; BRIEF.md principle
+   * 2 is that they are different things at different stages, and a card that
+   * blurs them is the confusion the principle exists to prevent.
+   */
+  thumbnailsHref: string;
+  /**
+   * The live variant's name, when one has shipped. Null before that.
+   *
+   * Once a real image is on YouTube, "how this looks" is a question about that
+   * image and not about the sketch, and the preview says so rather than letting
+   * the reader assume.
+   */
+  shippedLabel?: string | null;
 }
 
 export function YouTubePreview({
@@ -146,6 +166,8 @@ export function YouTubePreview({
   sketchUrl,
   hasSketch,
   savedTitle,
+  thumbnailsHref,
+  shippedLabel = null,
 }: YouTubePreviewProps) {
   const draft = usePackagingDraft();
   const typed = (draft?.title ?? savedTitle).trim();
@@ -170,13 +192,36 @@ export function YouTubePreview({
         <h3 id="preview-heading" className="text-sm font-semibold">
           How this looks on YouTube
         </h3>
+        {/*
+          What the picture in these frames *is*, said out loud.
+
+          BRIEF.md principle 2 is that the concept and the asset are two
+          different things at two different stages, and M4 put the real shipped
+          image into a near-identical card one tab along. Without this line a
+          person looking at a realistic feed card containing their scribble,
+          captioned "the size the thumbnail is really seen at", has been handed
+          exactly the confusion the principle exists to prevent. (The file the
+          layout numbers come from used to be printed here as product copy; it
+          is a note for a reader of the repository, and it lives in
+          `components/preview/metrics.ts` and in this file's comments instead.)
+        */}
         <p className="text-xs text-muted">
           A layout mock at YouTube&rsquo;s own metrics — 16:9, the two-line
-          clamp, the real type sizes — drawn from the numbers in{" "}
-          <code className="font-mono text-[11px] [overflow-wrap:anywhere]">
-            components/preview/metrics.ts
-          </code>.
-          Not their interface, and not their assets.
+          clamp, the real type sizes. Not their interface, and not their assets.
+        </p>
+        <p data-testid="preview-subject" className="text-xs text-muted">
+          The picture in these frames is your <strong>concept sketch</strong>,
+          at tile size.{" "}
+          {shippedLabel === null
+            ? "The image files that actually ship live in "
+            : `The ${shippedLabel.toLowerCase()} variant is the one that is actually live; it is in `}
+          <Link
+            href={thumbnailsHref}
+            className="underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Thumbnails
+          </Link>
+          .
         </p>
       </div>
 
@@ -221,7 +266,7 @@ export function YouTubePreview({
       </Frame>
 
       <Frame
-        caption="On a phone, between two other tiles — the size the thumbnail is really seen at. The neighbours are invented samples, for scale."
+        caption="On a phone, between two other tiles — the size the concept is really judged at. The neighbours are invented samples, for scale."
         testId="preview-phone"
       >
         <PhoneFeed

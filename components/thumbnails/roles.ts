@@ -28,6 +28,13 @@ export const ROLE_LABEL: Readonly<Record<ThumbnailRole, string>> = {
 /**
  * What each variant is *for*, in one line, under its frame.
  *
+ * This is the **role's** description, the same on every video — not a note
+ * somebody wrote about this particular image. The two were being called by one
+ * word, which is why the slot labels it in the UI rather than presenting it as
+ * a remark. A genuine per-variant note has no column, and neither BRIEF.md nor
+ * PLAN.md asks for one; the per-variant thing a person actually writes is the
+ * swap reason, which the live slot prints from the log.
+ *
  * BRIEF.md principle 7 is not "make three thumbnails", it is "make three
  * *different bets*": the whole mechanism only pays off if the safe one is
  * genuinely a different idea from the wild card, so that swapping is a change

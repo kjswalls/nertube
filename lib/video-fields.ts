@@ -146,7 +146,7 @@ export const TargetPublishDateSchema = NullableText.refine(
  * thing that is not a link at all — `javascript:`, a bare "tomorrow", a video
  * id on its own — because this string ends up in an anchor's `href`.
  */
-function isHttpUrl(value: string): boolean {
+export function isHttpUrl(value: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -156,11 +156,36 @@ function isHttpUrl(value: string): boolean {
   return parsed.protocol === "http:" || parsed.protocol === "https:";
 }
 
+/** What a thing that is not a link is refused with. */
+export const NOT_A_LINK =
+  "That is not a link. Paste the whole address, starting with https://.";
+
+/** The same, for a link that is merely far too long to be one. */
+export const LINK_TOO_LONG = `That link is longer than ${MAX_URL_LENGTH} characters.`;
+
+/**
+ * The URL rule, before the round trip.
+ *
+ * `confirm-live.tsx` refuses a bad link in the browser so the refusal costs
+ * nothing, and `YoutubeUrlSchema` refuses it again in the action. Both go
+ * through this one function for the same reason
+ * `describeReasonRejection` exists in `components/thumbnails/roles.ts`: a
+ * hand-rolled second copy of the predicate and a retyped copy of the sentence
+ * are how the client and the server drift into disagreeing about what a link
+ * is. This module is pure — no `server-only` import — so a client component
+ * can call it.
+ */
+export function describeUrlRejection(value: string): string | null {
+  if (value.length > MAX_URL_LENGTH) return LINK_TOO_LONG;
+  if (!isHttpUrl(value)) return NOT_A_LINK;
+  return null;
+}
+
 export const YoutubeUrlSchema = NullableText.refine(
   (value) => value === null || value.length <= MAX_URL_LENGTH,
-  { message: `That link is longer than ${MAX_URL_LENGTH} characters.` },
+  { message: LINK_TOO_LONG },
 ).refine((value) => value === null || isHttpUrl(value), {
-  message: "That is not a link. Paste the whole address, starting with https://.",
+  message: NOT_A_LINK,
 });
 
 export const NotesSchema = NullableText.refine(

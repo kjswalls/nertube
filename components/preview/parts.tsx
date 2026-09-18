@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -368,6 +369,25 @@ export function Thumb({
   const broken = url !== null && brokenUrl === url;
   const drawImage = url !== null && !broken;
 
+  /*
+    An image that failed before React attached `onError`.
+
+    On a server-rendered load the browser fetches the signed URL and fires
+    `error` long before hydration, and React does not replay it — so an expired
+    signature or a missing object left this frame drawing an `<img>` with
+    `naturalWidth` 0: a blank rectangle at full size with no caption, which is
+    the exact failure the empty/broken captions exist to prevent. The ref
+    callback runs on mount with the real element and asks the question then.
+    `onError` stays for failures that arrive later.
+  */
+  const watchImage = useCallback(
+    (element: HTMLImageElement | null) => {
+      if (!element || url === null) return;
+      if (element.complete && element.naturalWidth === 0) setBrokenUrl(url);
+    },
+    [url],
+  );
+
   // With no image drawn, there are two things it can be: there is an object
   // (this one broke, or the app could not sign a URL for it), or there is not.
   const state = sample ? "sample" : broken || hasAsset ? "broken" : "empty";
@@ -394,6 +414,7 @@ export function Thumb({
           src={url}
           alt=""
           data-testid={imageTestId}
+          ref={watchImage}
           onError={() => setBrokenUrl(url)}
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
         />

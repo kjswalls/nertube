@@ -358,8 +358,23 @@ function RowControl({
           >
             Swap thumbnail…
           </Link>
-          <span className="font-mono text-[11px] text-muted">
-            expected {formatCtr(payload.expectation)}%
+          {/*
+            The bar, and what kind of bar it is.
+
+            The mono face is reserved for measured values, and a derived median
+            printed bare in it reads as a fact about the channel. The video
+            page's prompt has always distinguished "the 5% this channel
+            expects" from "the 5.2% median of its last three logged videos";
+            this is the same distinction in the space a row has. The
+            qualification is outside the mono span because it is prose, not a
+            measurement.
+          */}
+          <span className="text-[11px] text-muted">
+            expected{" "}
+            <span className="font-mono">{formatCtr(payload.expectation)}%</span>
+            {payload.expectationSource === "median"
+              ? ` (median of ${payload.expectationSample})`
+              : ""}
           </span>
         </div>
       );

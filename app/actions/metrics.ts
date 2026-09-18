@@ -9,6 +9,7 @@ import {
   metricsRefusal,
   type LogMetricsInput,
 } from "@/lib/metrics";
+import { GATE_WORDING, readGateField } from "@/lib/packaging";
 import { CHANGED_ELSEWHERE, YoutubeUrlSchema } from "@/lib/video-fields";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -444,11 +445,24 @@ export async function confirmLive(
   });
 
   if (moveError) {
+    /*
+      The packaging gate can still refuse this. The packaging fields stay
+      editable at every stage, so a video that reached Scheduled and then had
+      its concept cleared hits `gate:thumbnail_concept` on the next confirm —
+      and `gate:thumbnail_concept` is not a sentence anybody can act on.
+      `readGateField` and `GATE_WORDING` are the same pair `app/actions/
+      moves.ts` uses, imported rather than copied, so the board's refusal, the
+      stage select's and this one cannot come to three different wordings for
+      one rule.
+    */
+    const missing = readGateField(moveError.message);
     return {
       ok: false,
       // The URL landed; only the move did not. Said plainly, because the next
       // thing the user does depends on which half failed.
-      error: `The URL is saved, but the move was refused: ${moveError.message}`,
+      error: missing
+        ? `The URL is saved, but it was not moved: packaging still needs ${GATE_WORDING[missing]}.`
+        : `The URL is saved, but the move was refused: ${moveError.message}`,
     };
   }
   if (!moved) {

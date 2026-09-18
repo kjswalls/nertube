@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/database.types";
 import { NO_EXPECTATION, type Expectation } from "@/lib/metrics";
-import { channelExpectation, EXPECTATION_SAMPLE } from "@/lib/next-action";
+import {
+  channelExpectation,
+  EXPECTATION_SAMPLE,
+  MIN_MEDIAN_SAMPLE,
+} from "@/lib/next-action";
 
 /**
  * What this channel expects a first-24-hours click-through to be.
@@ -42,8 +46,6 @@ import { channelExpectation, EXPECTATION_SAMPLE } from "@/lib/next-action";
  * expectation, it is a coincidence, and the prompt says so rather than dressing
  * it up.
  */
-/** Fewer logged videos than this and the median is not an expectation. */
-const MIN_MEDIAN_SAMPLE = 2;
 
 export async function readExpectation(
   supabase: SupabaseClient<Database>,
@@ -82,19 +84,18 @@ export async function readExpectation(
   }
 
   /*
-    A median of one is that video compared with itself.
+    Below `MIN_MEDIAN_SAMPLE` the median is not an expectation.
 
-    The sample includes the video being judged (see above), so a channel whose
-    first published video has just been logged would otherwise get an
-    "expectation" equal to its own click-through — and a prompt reading "at or
-    above the 4.2% median of its last 1 logged video", which is a sentence that
-    means nothing. Below one real comparison there is no expectation, and the
-    prompt says so rather than inventing one.
-
-    This agrees with `/now` rather than diverging from it: with a one-video
-    sample its rule 3 compares a number to itself, `ctr < expectation` is false,
-    and the rule never fires. Silence there and "no verdict" here are the same
-    claim.
+    The sample includes the video being judged (see above), and at n = 1 that is
+    the video compared with itself. At n = 2 it is worse: the median of two
+    numbers is their mean, so the worse of any two videos is *always* strictly
+    below "expectation" and the better one is always at or above it, whatever
+    the numbers are — a red prompt and an Overdue row manufactured out of one
+    comparison. The floor lives in `lib/next-action.ts` and is imported here so
+    the page and `/now` draw the line in one place: below it, this returns
+    NO_EXPECTATION and `channelExpectation` returns null, so the prompt renders
+    its honest "no verdict" state and rule 3 does not fire. Two ways of saying
+    the same thing, which is the point.
   */
   if (sample.length < MIN_MEDIAN_SAMPLE) return NO_EXPECTATION;
 

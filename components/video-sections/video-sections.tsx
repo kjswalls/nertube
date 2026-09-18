@@ -28,8 +28,18 @@ import {
  * Hidden panels use the `hidden` attribute, so they are out of the tab order and
  * out of the accessibility tree, and not merely invisible.
  *
- * The cost is honest and small: five sections' markup on every video, four of
- * them not painted. Four of the five are a heading and a paragraph.
+ * The cost is honest, and M4 raised it. Five sections' markup renders on every
+ * video, four of them not painted — and three of the five are now real work
+ * (the packaging block, the three thumbnail slots with their feed comparison,
+ * and the post-publish block), not a heading and a paragraph. Hydration is one
+ * synchronous pass over the whole tree, so a heavier page is a longer window in
+ * which a server-rendered control has no handler yet and a first click can be
+ * swallowed. `e2e/hydration.ts` holds the full argument and the retry helper
+ * the specs use.
+ *
+ * The trade is still the right way round: unmounting the hidden panels would
+ * turn a swallowed first click into a lost draft, which is the worse of the
+ * two. The honest fix if it gets worse is to make the sections lighter.
  *
  * ## The URL changes without a navigation
  *

@@ -10,6 +10,19 @@ begin
   select * into b from storage.buckets where id = 'thumbnails';
   if b.id is null then raise exception 'FAILED: the thumbnails bucket was not created'; end if;
   if b.public then raise exception 'FAILED: the thumbnails bucket is public'; end if;
+
+  -- The server-side half of the rule `lib/storage.ts` states in the browser and
+  -- says, in its own words, is *not security*. The policy below decides who may
+  -- write where; only these two columns decide what. Same number as
+  -- MAX_SKETCH_BYTES, same list as CONCEPT_SKETCH_TYPES. Set by 0006.
+  if b.file_size_limit is distinct from 5242880 then
+    raise exception 'FAILED: the thumbnails bucket has no 5 MB ceiling (got %)', b.file_size_limit;
+  end if;
+  if b.allowed_mime_types is distinct from array[
+       'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'
+     ] then
+    raise exception 'FAILED: the thumbnails bucket accepts types it should not (got %)', b.allowed_mime_types;
+  end if;
 end $$;
 
 -- An object already in A's folder, planted as the owner.

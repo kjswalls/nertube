@@ -74,6 +74,8 @@ function channel(over: Partial<NowChannel> = {}): NowChannel {
     name: "Personal",
     slug: "personal",
     expectedCtr: null,
+    expectedCtrSource: null,
+    expectedCtrSample: 0,
     stages: stagesOf(id),
     ...over,
   };
@@ -392,6 +394,25 @@ describe("channelExpectation", () => {
 
   it("is null when there is nothing to go on", () => {
     expect(channelExpectation(null, [])).toBeNull();
+  });
+
+  it("refuses a median the video being judged could decide on its own", () => {
+    /*
+      The sample includes the video being judged, deliberately — so at n = 1 it
+      is the video compared with itself, and at n = 2 the median of two numbers
+      is their mean, which makes the worse of any two videos *always* strictly
+      below "expectation" and the better one always at or above it. Whatever
+      the numbers are. Rule 3 would then manufacture an Overdue row out of one
+      comparison, in the one place the product tells the user to act fast.
+    */
+    expect(channelExpectation(null, [2.4])).toBeNull();
+    expect(channelExpectation(null, [2.4, 8])).toBeNull();
+    // Three is the first size that survives removing the subject: the median is
+    // the middle value, so the judged video is either not it, or it is — and
+    // then `ctr < expectation` is false and nothing fires.
+    expect(channelExpectation(null, [2.4, 8, 5])).toBe(5);
+    // A configured expectation is not a median and is not subject to the floor.
+    expect(channelExpectation(4.5, [])).toBe(4.5);
   });
 });
 

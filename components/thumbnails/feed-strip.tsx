@@ -62,15 +62,17 @@ export function FeedStrip({
       </h3>
       {/* What this row is for. What it *is* — one card per variant, plus a
           neighbour — is the frame's own caption, a few pixels below; saying it
-          twice was the first thing a look at the rendered page caught. */}
+          twice was the first thing a look at the rendered page caught.
+
+          The sentence used to name the file the numbers come from, in a <code>
+          span, as visible product copy. That is a note to somebody reading the
+          repository — it is not something the person choosing a thumbnail can
+          act on, and it goes stale the moment the file moves. The provenance
+          lives in this file's doc comment above, which is where it belongs. */}
       <p className="text-xs text-muted">
         Only the picture changes from one card to the next, because that is the
-        only thing being judged. Everything else is YouTube&rsquo;s own metrics
-        out of{" "}
-        <code className="font-mono text-[11px] [overflow-wrap:anywhere]">
-          components/preview/metrics.ts
-        </code>{" "}
-        — 360px wide, the two-line clamp, the duration chip over the corner.
+        only thing being judged. Everything else is YouTube&rsquo;s own layout —
+        360px wide, the two-line clamp, the duration chip over the corner.
       </p>
 
       <FeedComparison tiles={tiles} title={title} channelName={channelName} />

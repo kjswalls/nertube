@@ -347,6 +347,17 @@ export type ShipThumbnailResult =
        * the dialog rather than show an error beside a button.
        */
       needsReason?: true;
+      /**
+       * What was live when this action looked, on a `needsReason` refusal.
+       *
+       * The caller cannot work this out for itself. It decides whether to open
+       * the dialog from the `shipped_role` its page was rendered with, and the
+       * whole point of this refusal is that that prop is *stale* — another tab
+       * shipped something between the render and the click. Returning what the
+       * row actually holds is what makes the recovery reachable rather than a
+       * branch that can never be taken.
+       */
+      currentRole?: ThumbnailRole;
     };
 
 export async function shipThumbnail(
@@ -385,7 +396,15 @@ export async function shipThumbnail(
     logReason = LAUNCH_REASON;
   } else {
     const rejection = describeReasonRejection(reason ?? "");
-    if (rejection) return { ok: false, error: rejection, needsReason: true };
+    if (rejection) {
+      return {
+        ok: false,
+        error: rejection,
+        needsReason: true,
+        // `current`, not the caller's idea of it — see `currentRole` above.
+        currentRole: current,
+      };
+    }
     logReason = (reason ?? "").trim();
   }
 
@@ -413,7 +432,12 @@ export async function shipThumbnail(
       return { ok: false, error: alreadyLiveMessage(role) };
     }
     if (/reason/.test(error.message) && /check/i.test(error.message)) {
-      return { ok: false, error: describeReasonRejection("") ?? error.message, needsReason: true };
+      return {
+        ok: false,
+        error: describeReasonRejection("") ?? error.message,
+        needsReason: true,
+        ...(current === null ? {} : { currentRole: current }),
+      };
     }
     return { ok: false, error: `The swap was refused: ${error.message}` };
   }

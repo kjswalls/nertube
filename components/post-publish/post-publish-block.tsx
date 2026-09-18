@@ -10,7 +10,7 @@ import {
   reopenSwap,
   type MetricsState,
 } from "@/app/actions/metrics";
-import { SaveStatus, useSaveQueue } from "@/components/autosave";
+import { SaveStatus, useSaveQueue, type SaveState } from "@/components/autosave";
 import { useVideoVersion } from "@/components/video-version";
 import type { ThumbnailRole } from "@/lib/storage";
 import type { Expectation } from "@/lib/metrics";
@@ -18,6 +18,8 @@ import type { StageKind } from "@/lib/defaults";
 
 import { ConfirmLive } from "./confirm-live";
 import { MetricsPair, type MetricsSubmission, type MetricsValues } from "./metrics-pair";
+import { reached } from "@/components/video-sections/sections";
+
 import { RepurposedLane } from "./repurposed-lane";
 import { SwapPrompt } from "./swap-prompt";
 
@@ -82,6 +84,23 @@ export interface PostPublishProps {
   repurposedOccupied: number;
 }
 
+/**
+ * What a "keep it" / "ask me again" that never reached the server says.
+ *
+ * The queue's own sentence is written for a form — *nothing you typed has been
+ * lost* — and nothing was typed here. A decision either got recorded or it did
+ * not, and the useful thing to say is which.
+ */
+const DECISION_UNREACHABLE = {
+  ok: false as const,
+  error:
+    "Could not reach the server, so the decision was not recorded. Try again.",
+  conflict: undefined,
+};
+
+/** Nothing to report — what the sub-block that did not send the patch shows. */
+const QUIET: SaveState<PostPublishPatch> = { kind: "idle" };
+
 /** The three decisions this block can send. Later ones replace earlier ones. */
 type PostPublishPatch =
   | { kind: "metrics"; submission: MetricsSubmission }
@@ -137,6 +156,20 @@ export function PostPublishBlock(props: PostPublishProps) {
   const loggedLabel =
     metricsLoggedAt === null ? null : formatStamp(metricsLoggedAt);
 
+  /*
+    Which sub-block the queue's current state belongs to.
+
+    There is one queue here on purpose — one save on the wire at a time across
+    the whole section — but there are two controls, 180px apart, and a single
+    status line under the metrics form reported the swap decision's failures in
+    the metrics form's words ("Nothing you typed has been lost") after a button
+    press in which nothing was typed, while the control that was actually
+    pressed said nothing at all. So the state is *routed*: whichever sub-block
+    sent the last patch is the one that reports on it, and the other renders
+    idle.
+  */
+  const [reporting, setReporting] = useState<PostPublishPatch["kind"]>("metrics");
+
   const queue = useSaveQueue<PostPublishPatch>({
     // These are decisions, not deltas: if two are queued, the later one is the
     // one the person meant.
@@ -144,6 +177,13 @@ export function PostPublishBlock(props: PostPublishProps) {
     save: async (patch) => {
       const expectedUpdatedAt = version.peek();
 
+      /*
+        A rejected promise — the server unreachable — is the queue's to word
+        for the metrics form, where "nothing you typed has been lost" is
+        exactly right. It is the wrong sentence for a button press, so the two
+        decisions answer for themselves and only the form falls through to the
+        queue's wording.
+      */
       const result =
         patch.kind === "metrics"
           ? await logMetrics({
@@ -155,8 +195,12 @@ export function PostPublishBlock(props: PostPublishProps) {
               expectedUpdatedAt,
             })
           : patch.kind === "keep"
-            ? await dismissSwap({ videoId: props.videoId, expectedUpdatedAt })
-            : await reopenSwap({ videoId: props.videoId, expectedUpdatedAt });
+            ? await dismissSwap({ videoId: props.videoId, expectedUpdatedAt }).catch(
+                () => DECISION_UNREACHABLE,
+              )
+            : await reopenSwap({ videoId: props.videoId, expectedUpdatedAt }).catch(
+                () => DECISION_UNREACHABLE,
+              );
 
       if (!result.ok) {
         return { ok: false, error: result.error, conflict: result.conflict };
@@ -282,6 +326,7 @@ export function PostPublishBlock(props: PostPublishProps) {
             busy={queue.pending}
             withNote
             onSubmit={(submission) => {
+              setReporting("metrics");
               queue.touch();
               queue.send({ kind: "metrics", submission });
             }}
@@ -289,7 +334,7 @@ export function PostPublishBlock(props: PostPublishProps) {
           />
 
           <SaveStatus
-            state={queue.state}
+            state={reporting === "metrics" ? queue.state : QUIET}
             testId="post-publish-status"
             onRetry={(payload) => queue.send(payload)}
           />
@@ -309,23 +354,54 @@ export function PostPublishBlock(props: PostPublishProps) {
           swappedSinceMetrics={props.swappedSinceMetrics}
           busy={queue.pending}
           onKeep={() => {
+            setReporting("keep");
             queue.touch();
             queue.send({ kind: "keep" });
           }}
           onReopen={() => {
+            setReporting("reopen");
             queue.touch();
             queue.send({ kind: "reopen" });
           }}
+          /*
+            The decision's own status line, inside the prompt rather than 180px
+            above it in the metrics form. A refusal has to appear on the control
+            that was pressed, or the person watching that control sees nothing
+            happen at all.
+          */
+          status={
+            <SaveStatus
+              state={reporting === "metrics" ? QUIET : queue.state}
+              testId="swap-decision-status"
+              onRetry={(payload) => queue.send(payload)}
+            />
+          }
         />
       ) : null}
 
       {/* ------------------------------------------------- the lane --------- */}
 
-      <RepurposedLane
-        stage={props.repurposed}
-        occupied={props.repurposedOccupied}
-        onChanged={() => router.refresh()}
-      />
+      {/*
+        The lane switch appears exactly when this tab stops claiming there is
+        nothing here.
+
+        It is a *channel* setting, and it was rendered unconditionally — so an
+        Idea-stage video's Publish tab read "locked · Not live yet" over a live
+        control that changes the board for every video in the channel. That is
+        the same contradiction the lock itself was lifted to remove, one
+        element further down, so it is settled the same way and with the same
+        predicate: `reached(stageKind, "scheduled")`, imported from the module
+        that decides what the tab says rather than recomputed here. Until then
+        the switch lives on any Scheduled or later video, and M7's settings
+        screen is where it stops depending on a video at all.
+      */}
+      {reached(props.stageKind, "scheduled") ? (
+        <RepurposedLane
+          stage={props.repurposed}
+          occupied={props.repurposedOccupied}
+          onChanged={() => router.refresh()}
+        />
+      ) : null}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ChangeEvent } from "react";
+import { useCallback, useId, useState, type ChangeEvent } from "react";
 
 import { CONCEPT_SKETCH_ACCEPT, MAX_SKETCH_LABEL, type ThumbnailRole } from "@/lib/storage";
 
@@ -27,6 +27,16 @@ import { ROLE_LABEL, ROLE_NOTE } from "./roles";
  *   pattern as `app/videos/[id]/concept-sketch.tsx` and
  *   `components/preview/youtube-preview.tsx`.
  *
+ * **`onError` alone is not enough, and that was a real hole.** On a
+ * server-rendered load the browser fetches the signed URL and fires `error`
+ * long before React attaches the handler, and React does not replay it — so an
+ * expired signature, a missing object or a storage 5xx left the slot reporting
+ * `ready` and painting a blank 16:9 rectangle with no text on it, which is
+ * precisely what the three states exist to prevent. The ref callback below
+ * reads the element as it mounts (`complete && naturalWidth === 0` is an image
+ * that has finished and decoded nothing) and puts it in the same `broken`
+ * state. `onError` stays, for failures that arrive after hydration.
+ *
  * All three are the same 16:9 rectangle at the same size, so nothing on the
  * page moves as a slot fills.
  *
@@ -52,6 +62,7 @@ export function VariantSlot({
   onFile,
   onShip,
   onRemove,
+  slotRef,
 }: {
   role: ThumbnailRole;
   /** A signed, cache-busted URL, or null — see the three states above. */
@@ -67,12 +78,32 @@ export function VariantSlot({
   /** This slot's own status line: an error, or what just happened. */
   message: { text: string; tone: "error" | "info" } | null;
   onFile: (file: File) => void;
-  onShip: () => void;
+  /** The button is handed back so the swap dialog can return focus to it. */
+  onShip: (button: HTMLElement | null) => void;
   onRemove: () => void;
+  /** Registers this slot's outer element, so a finished swap can focus it. */
+  slotRef?: (element: HTMLElement | null) => void;
 }) {
   const inputId = useId();
   const headingId = useId();
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+
+  /*
+    Catch an image that failed *before* React got here.
+
+    A ref callback runs on mount with the real element, which is the first
+    moment this component can ask the question at all. `complete` with a
+    `naturalWidth` of 0 is the browser saying "I finished with this and there
+    is no picture", which is exactly the blank-rectangle case. Keyed on the
+    current `url` so a re-signed URL is not written off by the previous one.
+  */
+  const watchImage = useCallback(
+    (element: HTMLImageElement | null) => {
+      if (!element || url === null) return;
+      if (element.complete && element.naturalWidth === 0) setBrokenUrl(url);
+    },
+    [url],
+  );
 
   const broken = url !== null && brokenUrl === url;
   const showing = url !== null && !broken;
@@ -90,11 +121,15 @@ export function VariantSlot({
 
   return (
     <section
+      ref={slotRef}
       aria-labelledby={headingId}
       data-testid="variant-slot"
       data-role={role}
       data-state={state}
       data-live={live ? "true" : "false"}
+      /* Not a tab stop — it is only ever focused programmatically, when a swap
+         lands and the button that started it has become "Shipped". */
+      tabIndex={-1}
       className={[
         "flex min-w-0 flex-col gap-2 rounded-card border p-3",
         live ? "border-accent bg-surface" : "border-border bg-surface/50",
@@ -136,6 +171,7 @@ export function VariantSlot({
             data-testid="variant-image"
             loading="lazy"
             decoding="async"
+            ref={watchImage}
             onError={() => setBrokenUrl(url)}
             className="h-full w-full object-cover"
           />
@@ -151,13 +187,20 @@ export function VariantSlot({
             {state === "empty"
               ? "No image yet"
               : state === "broken"
-                ? "This image would not load — the object may be gone. Upload it again."
+                ? "This image would not load. Reload the page first — the link to it expires. If it still will not load, upload the file again."
                 : "This image could not be reached — the app could not sign a URL for it."}
           </p>
         )}
       </div>
 
-      <p className="text-xs text-muted">{ROLE_NOTE[role]}</p>
+      {/* Labelled for what it is: the role's description, identical on every
+          video. Unlabelled it read as a note about *this* image, which is a
+          different thing — the per-variant sentence a person writes is the swap
+          reason, and that is the line below. */}
+      <p className="text-xs text-muted">
+        <span className="font-medium text-foreground">What this slot is for: </span>
+        {ROLE_NOTE[role]}
+      </p>
 
       {live && liveNote ? (
         <p data-testid="variant-live-note" className="text-xs text-foreground">
@@ -184,8 +227,18 @@ export function VariantSlot({
         <button
           type="button"
           data-testid="variant-ship"
+          /*
+            PLAN.md's M4 line says "shipped radio"; this is three buttons, one
+            per slot — see the deviation recorded in docs/MILESTONES.md. What a
+            radio group would have given for free is a distinct accessible name
+            per option, and three buttons all reading "Ship this one" is a
+            screen-reader elements list with three identical entries. The name
+            is spelled out here; the visible label stays short because the slot
+            it sits in is already headed with the role.
+          */
+          aria-label={live ? undefined : `Ship the ${label.toLowerCase()}`}
           disabled={busy !== null || live}
-          onClick={onShip}
+          onClick={(event) => onShip(event.currentTarget)}
           className="rounded-button border border-border bg-background px-2.5 py-1.5 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           {live ? "Shipped" : "Ship this one"}
@@ -204,8 +257,23 @@ export function VariantSlot({
         ) : null}
       </div>
 
+      {/*
+        One region, one role, for the life of the slot.
+
+        This used to be a single node whose `role` flipped between `status` and
+        `alert` on the same update that changed its text. A live region that is
+        created, or has its role changed, in the same update is announced
+        unreliably — assistive technology has to have been watching the region
+        under its final role before the mutation — and the refusals routed
+        through it ("Safe has no image yet — upload one before shipping it.")
+        are the ones that matter most. So the visible line is always
+        `role="status"`, and a second, always-present `role="alert"` node beside
+        it carries the refusals. Urgency is in the words and the colour, which
+        is where it was always readable anyway.
+      */}
       <p
-        role={message?.tone === "error" ? "alert" : "status"}
+        role="status"
+        aria-live="polite"
         data-testid="variant-status"
         className={[
           "min-h-4 text-xs",
@@ -221,6 +289,14 @@ export function VariantSlot({
               : busy === "removing"
                 ? "Removing…"
                 : (message?.text ?? "")}
+      </p>
+
+      <p
+        role="alert"
+        data-testid="variant-alert"
+        className="sr-only"
+      >
+        {message?.tone === "error" ? message.text : ""}
       </p>
 
       <p className="text-[11px] text-muted">

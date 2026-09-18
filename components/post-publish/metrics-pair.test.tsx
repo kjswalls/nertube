@@ -67,11 +67,22 @@ describe("MetricsPair", () => {
 
   it("keeps the two in one control, so they cannot be placed apart", () => {
     const html = render();
-    const pair = html.slice(
-      html.indexOf('data-testid="metrics-impressions-ctr"'),
-    );
-    // Both inputs are inside the element that opens at that marker, and that
-    // element is inside the one fieldset the component renders.
+    /*
+      Bounded on both sides, which is the whole assertion.
+
+      `String.prototype.slice` with one argument runs to the end of the
+      document, so the earlier version proved only that both inputs appear
+      somewhere *after* the marker — which they would even if the CTR box were
+      moved out of the pair entirely, as long as it stayed below it in source
+      order. The end of the slice is the next sibling the component renders
+      after the pair, so moving either input out of the pair fails this.
+    */
+    const start = html.indexOf('data-testid="metrics-impressions-ctr"');
+    const end = html.indexOf('data-testid="metrics-views"');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+
+    const pair = html.slice(start, end);
     expect(pair).toContain(IMPRESSIONS);
     expect(pair).toContain(CTR);
     expect(html.match(/<fieldset/g) ?? []).toHaveLength(1);

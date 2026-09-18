@@ -89,6 +89,28 @@ describe("the client-side check", () => {
     // A file the browser could not type at all still has to say something
     // readable rather than "a  file is not one".
     expect(describeSketchRejection(file({ type: "" }))).toMatch(/that file is not one/);
+
+    /*
+      The case a browser actually produces.
+
+      `File.type` is `""` only in contrived cases; a file with no recognisable
+      type arrives as `application/octet-stream`, which meant the branch written
+      for "the browser could not tell" never fired and the sentence read "a
+      octet-stream file is not one" instead.
+    */
+    expect(
+      describeSketchRejection(file({ type: "application/octet-stream" })),
+    ).toMatch(/that file is not one/);
+  });
+
+  it("picks the article from the word that follows it", () => {
+    // "a avif file" was the bug; any subtype starting with a vowel hit it.
+    expect(describeSketchRejection(file({ type: "video/avi" }))).toMatch(
+      /an avi file is not one/,
+    );
+    expect(describeSketchRejection(file({ type: "application/pdf" }))).toMatch(
+      /a pdf file is not one/,
+    );
   });
 
   it("names the limit when the file is too big", () => {

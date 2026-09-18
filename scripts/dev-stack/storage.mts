@@ -213,12 +213,28 @@ interface ObjectRow {
   updated_at: Date;
 }
 
-async function bucketExists(bucket: string): Promise<boolean> {
-  const row = await queryOne<{ id: string }>(
-    'select id from storage.buckets where id = $1',
+interface BucketRow {
+  id: string;
+  file_size_limit: string | number | null;
+  allowed_mime_types: string[] | null;
+}
+
+/**
+ * The bucket row, including the two columns that decide *what* may be written.
+ *
+ * The `thumbnails owner rw` policy decides who may write where and is enforced
+ * by Postgres on every request; the ceiling and the MIME list are the Storage
+ * service's own half of the rule, set on the bucket row by
+ * `0006_append_only_and_bucket_limits.sql`. The real service enforces them, so
+ * this stand-in has to as well — otherwise the harness would be a strictly more
+ * permissive database than the one it stands in for, which is the same argument
+ * `supabase/tests/shim.sql` makes about RLS on `storage.buckets`.
+ */
+async function readBucket(bucket: string): Promise<BucketRow | null> {
+  return queryOne<BucketRow>(
+    'select id, file_size_limit, allowed_mime_types from storage.buckets where id = $1',
     [bucket],
   );
-  return row !== null;
 }
 
 /**
@@ -461,13 +477,37 @@ async function upload(
   name: string,
   isUpdate: boolean,
 ): Promise<void> {
-  if (!(await bucketExists(bucket))) {
+  const bucketRow = await readBucket(bucket);
+  if (bucketRow === null) {
     await readBody(req).catch(() => Buffer.alloc(0));
     return sendStorageError(res, 404, 'NotFound', 'Bucket not found');
   }
 
   const body = await readBody(req);
   const part = uploadPayload(req, body);
+
+  // The bucket's own ceiling, in the service's own words and status codes.
+  const limit =
+    bucketRow.file_size_limit === null ? null : Number(bucketRow.file_size_limit);
+  if (limit !== null && part.bytes.byteLength > limit) {
+    return sendStorageError(
+      res,
+      413,
+      'EntityTooLarge',
+      'The object exceeded the maximum allowed size',
+    );
+  }
+
+  const allowed = bucketRow.allowed_mime_types;
+  const declared = part.contentType ?? 'application/octet-stream';
+  if (allowed !== null && allowed.length > 0 && !allowed.includes(declared)) {
+    return sendStorageError(
+      res,
+      415,
+      'InvalidMimeType',
+      `mime type ${declared} is not supported`,
+    );
+  }
 
   // PUT is an update and always replaces; POST replaces only with `x-upsert`.
   const upsertHeader = req.headers['x-upsert'];

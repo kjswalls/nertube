@@ -410,6 +410,28 @@ export function Board({
             },
           }));
           setAnnouncement(`Moved “${title}” to ${target.name}.`);
+
+          /*
+            PLAN.md's one soft warning: *Publish Prep → Scheduled with < 3
+            thumbnail paths is a soft warning only*. The move has already
+            happened, so this is deliberately an **info** toast with a way to
+            go and fix it, not the error tone a refusal takes — a warning that
+            looked like a refusal would read as the hard gate PLAN.md says this
+            must not be. The sentence itself is `moveVideo`'s, so the board,
+            the stage select and `/now` all say the same thing.
+          */
+          if (result.notice) {
+            toast.push({
+              tone: "info",
+              message: `“${title}” moved to ${target.name}. ${result.notice}`,
+              links: [
+                {
+                  label: "Open Thumbnails",
+                  href: `/videos/${card.id}?section=thumbnails`,
+                },
+              ],
+            });
+          }
         } else {
           // Snap back. The card returns to the column it was in; nothing is
           // left sitting where the database refused to put it.
@@ -448,7 +470,7 @@ export function Board({
         refocus.current = focusRole;
       }
     },
-    [channelSlug, focusRoleFor, showToast, stageById],
+    [channelSlug, focusRoleFor, showToast, stageById, toast],
   );
 
   // Runs after every render, and does nothing unless a move asked it to: the

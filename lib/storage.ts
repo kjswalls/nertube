@@ -79,9 +79,13 @@ export const MAX_SKETCH_LABEL = `${MAX_SKETCH_BYTES / (1024 * 1024)} MB`;
  * picking a PDF, picking a 40 MB file — is refused instantly and legibly,
  * instead of by an upload that spends a minute and then fails.
  *
- * (A per-bucket MIME/size limit on the bucket row would be the server-side half
- * of this. `0001_init.sql` does not set one; adding it is a schema change and
- * schema is not M1's to touch.)
+ * The server-side half of the *same* rule is on the bucket row itself:
+ * `0006_bucket_limits.sql` sets `storage.buckets.file_size_limit` to
+ * `MAX_SKETCH_BYTES` and `allowed_mime_types` to the keys of
+ * `CONCEPT_SKETCH_TYPES`, so Storage refuses a 20 MB `text/html` upload with
+ * the caller's own token whatever this function does. This one is still not
+ * security; it is the fast, legible half, and it is now the fast half of a rule
+ * that is actually enforced somewhere.
  */
 export function describeSketchRejection(
   file: {
@@ -101,8 +105,7 @@ export function describeSketchRejection(
   subject: string = "A concept sketch",
 ): string | null {
   if (!(file.type in CONCEPT_SKETCH_TYPES)) {
-    const what =
-      file.type === "" ? "that file" : `a ${file.type.replace(/^.*\//, "")} file`;
+    const what = describeFileType(file.type);
     return (
       `${subject} has to be an image — ${what} is not one. ` +
       `PNG, JPEG, WebP, GIF or AVIF.`
@@ -115,6 +118,28 @@ export function describeSketchRejection(
     return "That file is empty.";
   }
   return null;
+}
+
+/**
+ * What to call the thing that was picked, in the middle of a sentence.
+ *
+ * Two small truths about `File.type` that the first version got wrong:
+ *
+ * - **`application/octet-stream` means "I could not tell"**, and that is what a
+ *   browser hands back for a file with no recognisable type — *not* the empty
+ *   string, which is why the branch written for that case never fired. Both say
+ *   the same thing, so both get the same words.
+ * - **The article depends on the noun.** `a ${subtype}` produced "a
+ *   octet-stream file" and "a avif file". On a screen whose whole design
+ *   argument is that the copy is the product, that is the one sentence a person
+ *   sees when an upload is refused.
+ */
+function describeFileType(mimeType: string): string {
+  if (mimeType === "" || mimeType === "application/octet-stream") {
+    return "that file";
+  }
+  const subtype = mimeType.replace(/^.*\//, "");
+  return `${/^[aeiou]/i.test(subtype) ? "an" : "a"} ${subtype} file`;
 }
 
 function formatBytes(bytes: number): string {

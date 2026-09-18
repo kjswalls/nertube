@@ -74,11 +74,17 @@ grant execute on function auth.uid(), auth.role(), auth.email() to anon, authent
 create schema if not exists storage;
 grant usage on schema storage to anon, authenticated, service_role;
 
+-- `file_size_limit` and `allowed_mime_types` are Supabase's own columns on this
+-- table; a hosted project has them. They are here because `0006` sets them and
+-- `50_buckets.test.sql` asserts them — without them the harness would be
+-- testing a database with no ceiling while the real one has one.
 create table if not exists storage.buckets (
   id text primary key,
   name text not null,
   public boolean not null default false,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  file_size_limit bigint,
+  allowed_mime_types text[]
 );
 
 create table if not exists storage.objects (

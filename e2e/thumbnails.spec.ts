@@ -380,7 +380,18 @@ test('a non-image is refused in the browser, and never reaches storage', async (
 
   const status = slotStatus(page, 'wild_card');
   await expect(status).toHaveText(/wild card thumbnail has to be an image/);
-  await expect(status).toHaveAttribute('role', 'alert');
+  /*
+    The status line keeps `role="status"` for the life of the slot, and the
+    refusal is *also* written into a second, always-present `role="alert"` node
+    beside it. The line used to flip its own role from `status` to `alert` on
+    the same update that changed its text, and a live region whose role changes
+    in the update that fills it is announced unreliably — assistive technology
+    has to have been watching the region under its final role beforehand.
+  */
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(slot(page, 'wild_card').getByTestId('variant-alert')).toHaveText(
+    /wild card thumbnail has to be an image/,
+  );
 
   expect(storageWrites).toEqual([]);
   expect(await objectsFor(videoId)).toEqual([]);
@@ -565,4 +576,225 @@ test('a variant that cannot be loaded says so, rather than claiming nothing was 
 
   // It is still a *recorded* variant, so the app does not quietly forget it.
   expect((await thumbState(videoId)).safe).toBe(`${userId}/${videoId}/safe.png`);
+
+  /*
+    And again on a *fresh load*, which is the case that was actually broken.
+
+    Above, the `error` event fires while React is running, so `onError` catches
+    it. On a server-rendered page the browser fetches the signed URL and fires
+    `error` long before React attaches that handler, and React does not replay
+    it — so the slot reported `data-state="ready"`, drew an <img> with
+    `naturalWidth` 0, and painted a blank 16:9 rectangle with no text on it.
+    Every realistic cause lands here: an expired signature, an object whose
+    bytes are gone, a storage 5xx, a truncated upload seen on the next visit.
+    Without this reload the spec asserted only the case that already worked.
+  */
+  await page.reload();
+  await expect(page.getByTestId('thumbnails-section')).toBeVisible();
+
+  const safeAfterReload = slot(page, 'safe');
+  await expect(safeAfterReload).toHaveAttribute('data-state', 'broken');
+  await expect(safeAfterReload.getByTestId('variant-empty')).toHaveText(
+    /would not load/,
+  );
+
+  /*
+    The feed comparison draws the same three images through the same frames and
+    had the same hole. Two tiles, not one: the comparison collapses
+    "unreachable" and "broken" into one caption — it is a 360px card, and the
+    distinction between *the app could not sign a URL* and *the bytes would not
+    decode* is the slot's to draw — so the wild card whose object was deleted
+    above and the safe one that will not decode both land here. What matters is
+    that neither is a blank rectangle.
+  */
+  await expect(
+    page.locator('[data-testid="preview-comparison-thumb"][data-state="broken"]'),
+  ).toHaveCount(2);
+});
+
+test('scheduling with fewer than three variants warns, and still moves', async ({
+  page,
+}) => {
+  /*
+    PLAN.md, "Key UI behaviours": *One hard gate; Publish Prep → Scheduled with
+    < 3 thumbnail paths is a soft warning only*. There was no such warning
+    anywhere — the Thumbnails section asserted one ("it is a warning, not a
+    gate") that did not exist, and a video could be scheduled with one image and
+    nothing said at the moment it mattered. The move still happens; that is what
+    makes it soft.
+  */
+  const videoId = await capture('One image and a plan');
+  await setConcept(videoId, 'A hand, a timer, and one very bad decision.');
+  await db.query(
+    `update public.videos
+        set hooks = '[{"id":"h1","text":"The hook","chosen":true}]'::jsonb
+      where id = $1`,
+    [videoId],
+  );
+
+  await openThumbnails(page, videoId);
+  await upload(page, 'wild_card', WILD);
+
+  await page.goto(`/videos/${videoId}?section=schedule`);
+  await page.getByTestId('stage-select').selectOption({ label: 'Scheduled' });
+
+  const status = page.getByTestId('stage-select-status');
+  await expect(status).toContainText('Moved to Scheduled.');
+  await expect(status).toContainText('1 of 3 thumbnail variants');
+
+  // Soft: the row moved.
+  const moved = await db.query<{ kind: string }>(
+    `select s.kind from public.videos v join public.stages s on s.id = v.stage_id
+      where v.id = $1`,
+    [videoId],
+  );
+  expect(moved.rows[0].kind).toBe('scheduled');
+});
+
+test('a first ship from a stale tab asks for the reason instead of dead-ending', async ({
+  browser,
+}) => {
+  /*
+    The concurrency case the milestone's review list names, and the one hole
+    left in it.
+
+    Two tabs are opened while nothing is live. One ships moderate. The other
+    still believes nothing is live, so it calls the action as a *first* ship —
+    and the server, seeing a live role, refuses for want of a reason. The
+    recovery branch existed but tested the stale prop (`shippedRole`), which is
+    null by construction on every path that reaches it, so it could never run:
+    the slot printed "A swap needs a reason" with no textarea anywhere on
+    screen, and clicking again repeated it for ever. The refusal now carries the
+    role the server actually found.
+  */
+  const videoId = await capture('Two tabs, one thumbnail');
+
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  try {
+    await signIn(pageA);
+    await signIn(pageB);
+
+    await openThumbnails(pageA, videoId);
+    await upload(pageA, 'wild_card', WILD);
+    await upload(pageA, 'moderate', MODERATE);
+
+    // B loads the same page in the same state: two images, nothing live.
+    await openThumbnails(pageB, videoId);
+    await expect(pageB.getByTestId('thumbnails-section')).toHaveAttribute(
+      'data-shipped',
+      '',
+    );
+
+    // B ships moderate and settles. A is now stale.
+    await slot(pageB, 'moderate').getByTestId('variant-ship').click();
+    await expect(pageB.getByTestId('thumbnails-section')).toHaveAttribute(
+      'data-shipped',
+      'moderate',
+    );
+
+    // A clicks "Ship this one" on the wild card, believing it is the first.
+    await slot(pageA, 'wild_card').getByTestId('variant-ship').click();
+
+    // The dialog A could not previously reach, aimed at the right pair.
+    const dialog = pageA.getByTestId('swap-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleName(/moderate/i);
+    await expect(pageA.getByTestId('swap-notice')).toHaveText(/needs a reason/);
+
+    // And the section stops lying about the row while the dialog is open.
+    await expect(pageA.getByTestId('thumbnails-section')).toHaveAttribute(
+      'data-shipped',
+      'moderate',
+    );
+
+    // Typing the reason finishes the swap that A actually meant to make.
+    await pageA
+      .getByTestId('swap-reason-input')
+      .fill('Moderate landed first; the wild card is the better bet here');
+    await pageA.getByTestId('swap-confirm').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(pageA.getByTestId('thumbnails-section')).toHaveAttribute(
+      'data-shipped',
+      'wild_card',
+    );
+
+    // Both halves, in the database: the role and two log rows.
+    expect((await thumbState(videoId)).shipped_role).toBe('wild_card');
+    const rows = await swapRows(videoId);
+    expect(rows.map((row) => [row.from_role, row.to_role])).toEqual([
+      [null, 'moderate'],
+      ['moderate', 'wild_card'],
+    ]);
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test('the swap dialog gives focus back, on Escape, on Cancel and on a swap', async ({
+  page,
+}) => {
+  /*
+    WCAG 2.4.3. `Modal` records what had focus when it opened, but the dialog's
+    textarea carries `autoFocus`, which React applies during the commit phase —
+    *before* the modal's mount effect runs. So what it recorded was the textarea
+    inside itself, and on unmount that element is gone: focus fell to <body> on
+    all three exits. The opener is passed explicitly now, and the one exit where
+    the opener does not survive — a successful swap turns it into a disabled
+    "Shipped" — lands on the slot that went live instead.
+  */
+  const videoId = await capture('Where did the focus go');
+
+  await openThumbnails(page, videoId);
+  await upload(page, 'wild_card', WILD);
+  await upload(page, 'moderate', MODERATE);
+
+  await slot(page, 'wild_card').getByTestId('variant-ship').click();
+  await expect(page.getByTestId('thumbnails-section')).toHaveAttribute(
+    'data-shipped',
+    'wild_card',
+  );
+
+  const moderateShip = slot(page, 'moderate').getByTestId('variant-ship');
+
+  const activeTestId = () =>
+    page.evaluate(
+      () => document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? '',
+    );
+
+  // Escape.
+  await moderateShip.click();
+  await expect(page.getByTestId('swap-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('swap-dialog')).toHaveCount(0);
+  expect(await activeTestId()).toBe('variant-ship');
+
+  // Cancel.
+  await moderateShip.click();
+  await expect(page.getByTestId('swap-dialog')).toBeVisible();
+  await page.getByTestId('swap-cancel').click();
+  await expect(page.getByTestId('swap-dialog')).toHaveCount(0);
+  expect(await activeTestId()).toBe('variant-ship');
+
+  // And a swap that lands: the button it came from is now disabled, so focus
+  // goes to the slot that changed rather than to <body>.
+  await moderateShip.click();
+  await page
+    .getByTestId('swap-reason-input')
+    .fill('Wild card is not reading at tile size');
+  await page.getByTestId('swap-confirm').click();
+  await expect(page.getByTestId('swap-dialog')).toHaveCount(0);
+
+  const landed = await page.evaluate(() => {
+    const element = document.activeElement;
+    return {
+      testId: element?.getAttribute('data-testid') ?? element?.tagName ?? '',
+      role: element?.getAttribute('data-role') ?? '',
+    };
+  });
+  expect(landed).toEqual({ testId: 'variant-slot', role: 'moderate' });
 });

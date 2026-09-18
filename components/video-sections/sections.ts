@@ -129,8 +129,15 @@ export interface SectionFacts {
   readonly swapDecided?: boolean;
 }
 
-/** Has this video reached the stage a section belongs to? */
-function reached(stageKind: StageKind | null, sectionKind: StageKind | null): boolean {
+/**
+ * Has this video reached the stage a section belongs to?
+ *
+ * Exported because the Publish *panel* has to agree with the Publish *tab*
+ * about when the section holds anything: a tab that says "locked" over a live
+ * control is the contradiction this file's `publish` branch exists to remove,
+ * and a second copy of the comparison in the panel would put it straight back.
+ */
+export function reached(stageKind: StageKind | null, sectionKind: StageKind | null): boolean {
   if (sectionKind === null) return true;
   // An inert stage (`kind = null`) has no place in the order, so nothing can be
   // said about what it has passed. Locking every tab on such a video would be a

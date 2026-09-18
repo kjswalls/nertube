@@ -458,10 +458,31 @@ export function NowView({
               checklist: [],
             }));
             toast.push({ message: `Moved to ${toStageName}.` });
+            // PLAN.md's soft warning, in `moveVideo`'s own words so the row,
+            // the board and the stage select cannot disagree about it.
+            if (moved.notice) toast.push({ message: moved.notice });
             router.refresh();
             return;
           }
         }
+      } catch {
+        /*
+          One catch for all nine branches.
+
+          Every branch handles `!result.ok`, which is the server answering no.
+          This is the server not answering at all — a dropped connection, a
+          restarted dev server, an aborted POST — and without it the rejection
+          escaped `perform`, nothing was rendered, and the row sat there
+          looking exactly as it did before the click. The video page says so in
+          this case (`components/autosave.tsx` catches the same rejection and
+          prints "Could not reach the server, so this is not saved."); this is
+          the list saying it too. Nothing here is optimistic, so there is
+          nothing to roll back — the row is already showing the truth.
+        */
+        toast.push({
+          message: "Could not reach the server — nothing was saved. Try again.",
+          tone: "error",
+        });
       } finally {
         setBusyVideoId(null);
       }

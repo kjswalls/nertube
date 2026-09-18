@@ -2721,7 +2721,8 @@ same true thing.
 ## M4 — The first 24 hours, the swap prompt, and confirm live
 
 The post-publish half of M4. The thumbnail assets — three role slots, the feed
-strip, the shipped radio, the swap dialog and its log — are the other half and
+strip, one "Ship this one" per slot, the swap dialog and its log — are the
+other half and
 are written up separately; this section covers the Publish section of
 `/videos/[id]`, the reconciliation of `app/actions/metrics.ts`, and the
 Repurposed lane switch.
@@ -2760,7 +2761,7 @@ Repurposed lane switch.
 | **The median fallback needs two logged videos, not one.** PLAN.md says *median first24_ctr of the channel's last 10 published*. | The sample includes the video being judged (so does `lib/now-data.ts`, deliberately — it computes the fallback from the same rows the rules are about). With one sample that is the video compared with itself, and the prompt would read "at or above the 4.2% median of its last 1 logged video". Below one real comparison there is no expectation. This **agrees** with `/now` rather than diverging: with a one-video sample rule 3's `ctr < expectation` is false and the rule never fires, so silence there and "no verdict" here are the same claim. |
 | **The "cannot disable an occupied stage" rule is in the application, not the database.** Everywhere else in this app an invariant of that weight is in SQL. | `stages.is_enabled` is in the client's UPDATE grant on purpose, and `supabase/tests/20_column_privileges.test.sql` asserts that a client *can* disable a core stage. Moving the rule into the database means revoking that column and rewriting a passing test of a deliberate decision — M7's argument to have with the whole settings screen in front of it. The check is read-then-write, so a video moved into the lane between the two would be hidden; one user, one session. `app/actions/stages.ts` says all of this at the top. |
 | **The Repurposed switch is optimistic.** | It is a controlled checkbox whose state follows a round trip: without the optimistic step the box springs back the instant it is clicked and only moves when the server answers, which reads as "that did nothing". It rolls back on refusal and on a failed request, and the e2e polls the row rather than trusting the screen. |
-| **`components/video-sections/not-yet.tsx` is no longer used by the video page.** | Both tabs it stood in for are built. The component is left in place; nothing else imports it yet. |
+| **`components/video-sections/not-yet.tsx` is gone.** | Both tabs it stood in for are built, so it had no caller. It was deleted during integration — see item 3 of the integration section, which is the single statement of this. (This row previously said the file was left in place, which the tree contradicted.) |
 
 ### Honest limits
 
@@ -2917,6 +2918,17 @@ with the row; the cheapest way not to have an eighth was not to keep a copy.
    call sites, mechanical. `describeSketchRejection` gained an optional subject
    so a thumbnail slot does not say "a concept sketch has to be an image" on the
    one screen where concept and asset must not be blurred.
+5. **PLAN.md's "shipped radio" is one button per slot, not a radio group.**
+   Added in the review pass, because the slice shipped the change and did not
+   record it — and the summary above repeated PLAN.md's word for something that
+   does not exist. The reason for the change is that shipping is a *command*
+   with a round trip and a refusal, not a selection: a radio that moves on
+   arrow-key focus would fire a database write per arrow press, and "Ship this
+   one is deliberately not disabled on an empty slot" (decision 1 above) has no
+   meaning for a radio. What a radio group would have given for free is a
+   distinct accessible name per option, and three buttons all reading "Ship
+   this one" did not have that; each now carries `aria-label="Ship the wild
+   card"` and so on.
 
 ### What M4's own arrival broke, and what it cost
 
@@ -3090,3 +3102,431 @@ is drawn at full strength and says what it is in words instead.
   a variant happens in the slot above, where the button is, because a row whose
   job is "look at these" should not also be a place you can change what is live
   by accident.
+
+## M4 — Integration: one modal, one Thursday, and what the tabs may claim
+
+The three slices above landed concurrently against one page. This is the
+composition: what had to be reconciled between them, what the section tabs were
+told to stop claiming, the acceptance walk, and the two things that are still
+true and unfixed.
+
+### What was already right, and was checked rather than trusted
+
+Every claim in the three reports above was verified against the code before
+anything was changed here, because "the report says it calls the RPC" and "the
+only door is the RPC" are different sentences.
+
+- **One metrics write path.** `logMetrics` in `app/actions/metrics.ts`, parsing
+  `LogMetricsSchema` in `lib/metrics.ts`, and nothing else writes
+  `first24_*`/`metrics_logged_at`. Both surfaces reach it: `components/now/
+  now-view.tsx` (rule 2's row) and `components/post-publish/post-publish-block
+  .tsx`. M3's `components/now/metrics-pair.tsx` is gone; `/now` imports the
+  page's component and differs from it by a `density` prop.
+- **One storage module.** `lib/storage.ts` is still the only file that names the
+  bucket. The variant paths were added beside the sketch ones, not in a
+  component.
+- **Shipping has no UPDATE available to it.** `update (shipped_role)` is revoked
+  from `authenticated` in `0001_init.sql` (verified in the migration, not in a
+  comment), and `swap_thumbnail` inserts the log row *before* it updates the
+  role, so a refused update takes the insert with it. `e2e/thumbnails.spec.ts`
+  proves that from outside the app by counting `thumbnail_swaps` after a refusal.
+- **The CHECKs are the guard.** `videos_shipped_role_has_asset` and
+  `videos_ctr_needs_impressions` are in the schema; the app translates them into
+  sentences and does not re-implement them. "Ship this one" is deliberately not
+  disabled on an empty slot — pressing it asks Postgres.
+- **No migration.** Everything M4 needed was already in `0001_init.sql`. The
+  migration set is the same five files M3 left. `./scripts/verify-db.sh
+  m4_check` applies them and passes 13 SQL test files.
+
+### Reconciled here
+
+**1. There were two modals; there is one.** M1 built `components/capture/
+capture-modal.tsx` for the `c` capture box. The thumbnails slice built a second
+one — a native `<dialog>` with `showModal()` — for the swap reason. This is not
+a style disagreement: `lib/shortcuts.ts` keeps a **single** `keydown` listener on
+`document`, and the only thing that silences the page under a dialog is an
+`exclusive` registration. A native `<dialog>` is inert to clicks and focus, but
+its key events still reach `document` — so with focus on the swap dialog's
+Cancel button, `c` opened the capture box on top of the swap. The capture modal
+was already general (title, children, focus trap, focus return, backdrop close,
+Escape from inside a text field); it is now `components/modal.tsx` as `Modal`,
+it takes a `testId`, and both dialogs are it. The swap dialog kept every test id
+it had. `e2e/m4-acceptance.spec.ts` presses `c` with the swap dialog open and
+asserts no capture box appears.
+
+**2. The Publish tab may not read "locked" over the one thing it is holding.**
+`sectionReadiness` locked Publish whenever `published_at` was null — including
+for a Scheduled video, whose Publish section holds the confirm-live control that
+`/now`'s rule 5 ranks as **Ready**. A tab saying *nothing to do here* over the
+button the rest of the app is pointing at is the page contradicting the list.
+The lock now lifts at Scheduled and the tab goes quiet (no mark, no claim) until
+there is a number to count; everything before Scheduled still locks, because
+there is genuinely nothing in the section for a video that has not been queued
+up. Unit-tested in `components/video-sections/sections.test.ts` and walked in
+the acceptance spec.
+
+**3. `components/video-sections/not-yet.tsx` is deleted.** It existed to draw
+the "arrives in M4" empty states. Both tabs it stood in for are built, it had no
+caller, and a component for saying a section does not exist yet has no future
+caller either — the video page has five sections and all five are real. Left in
+place it is the first entry in a dead-code drawer.
+
+**4. One retry helper instead of a third copy of the same paragraph.** Three
+specs now have to interact with `/videos/[id]` immediately after a load; each
+had, or would have had, its own fifteen-line explanation of why. `e2e/
+hydration.ts` holds the explanation once and `untilTaken(act, proof)` is what
+the specs call. See "still true and unfixed" below for what it is about.
+
+**5. A redundant fragment around `PackagingBlock`** in the page's `panels` map,
+left over from the M3 shell. Removed; nothing else in the page changed.
+
+### Not reconciled, deliberately
+
+**The Thumbnails section does not use `components/autosave.tsx`.** Everything on
+that screen is a *command* — upload this file, ship this variant, clear this
+slot — not an edit: there is no draft to debounce and nothing to merge. It runs
+the action, adopts the returned `updated_at` into the page's shared version
+token, and calls `router.refresh()`. M2 and M3 produced seven blockers between
+them in optimistic-save code and every one was a local copy of state disagreeing
+with the row; the cheapest way not to have an eighth is not to keep a copy. The
+Publish section *does* use the queue, because its metrics form is a form. "One
+save queue" means one implementation, not one use of it everywhere — and both
+sections write through the same version token, which is the part that actually
+has to be shared.
+
+The visible cost is that a tab's counter moves a beat after the slot does: the
+mark is rendered from the row, so it changes when the server says so. The
+acceptance spec asserts that by polling rather than by sleeping, and says why.
+
+### The Thursday scenario, walked
+
+`e2e/m4-acceptance.spec.ts`, one test, ten seconds, against the real stack —
+real JWTs, real RLS, real Storage, real `swap_thumbnail`. Every step asserts
+three things: what the page says, what the **tabs** say, and what is in Postgres.
+
+1. A video scheduled for today, with two earlier published videos logged at 5.4%
+   and 5.0% so the channel has a bar at all. `channels.expected_ctr` is left null
+   on purpose — it has no UI until M7, so the median is the branch a real user
+   is on.
+2. Thumbnails opens quoting the written concept, tab reads `0/3`, Publish reads
+   *quiet* (not locked — it is Scheduled). Three uploads take it to `3/3`, still
+   without a tick: three files and nothing live means nobody knows which one is
+   on YouTube.
+3. Ship the wild card — one click, logged as "Chosen at launch." — and the tab
+   ticks.
+4. Confirm live with a URL. `published_at` lands on the **target date**, checked
+   in SQL as a UTC instant, because `published_at + 24h` is what the metrics
+   prompt counts from. Publish reads `0/2`.
+5. The numbers go in: 9,400 impressions, 2.1% CTR, views, a new-viewers note.
+   Publish reads `1/2` — logged, nothing decided.
+6. The prompt is `data-verdict="below"`, `data-urgent="true"`, prints
+   *"9,400 impressions · 2.1% click-through"* as one string, and names the bar it
+   used: *"the 5% median of its last 3 logged videos"* — the sample it actually
+   took, including this video, not a number it invented.
+7. "Swap the thumbnail…" lands on Thumbnails with the feed comparison rendered.
+   Shipping Moderate opens the dialog; an empty reason is refused and the log
+   still has one row; a typed reason writes both halves.
+8. Two rows in `thumbnail_swaps`, newest first on screen, the reason on the live
+   slot; Publish reads *done* with `swap_dismissed_at` still null (answered by
+   acting, not by dismissing); and the swap row is gone from `/now`.
+
+### Still true and unfixed
+
+- **A click or a keystroke in the first moments after `/videos/[id]` loads can
+  be swallowed.** All five sections stay mounted — M3's decision, asserted by
+  `e2e/preview.spec.ts`, and what makes switching sections free of consequences
+  for a half-typed field — and M4 turned two of the five from a heading and a
+  paragraph into real work. Hydration is one synchronous pass over the whole
+  tree, so a heavier page is a longer window in which a server-rendered control
+  has no handler. Two full-suite runs each produced one failure of this shape,
+  in a different spec, each passing in isolation: `e2e/m2-acceptance.spec.ts`
+  (the skip disclosure) and `e2e/packaging.spec.ts` (clearing the concept after
+  a reload). Both now retry, which is what a person whose click did nothing
+  does. **The honest fix if it gets worse is to make the sections lighter, not
+  to unmount the ones that are not showing** — that would trade a swallowed
+  first click for a lost draft, which is the worse of the two. Recorded here
+  rather than filed as a flake.
+- **A shipped role cannot be un-shipped.** `swap_thumbnail` takes a non-null
+  `p_to_role` and direct UPDATE is revoked, so once a video has a live thumbnail
+  it always has one; the only move is shipping a different variant. Nothing in
+  BRIEF.md asks for "no thumbnail" as a state, so no SQL was written for it.
+- **`confirmLive` is two round trips, not one transaction.** The URL is written
+  first, then `move_video`. If the move fails the link is saved and the video
+  has not moved, and the message says so in those words.
+- **The "stage holding non-archived videos cannot be disabled" rule is in
+  `app/actions/stages.ts`, not in SQL.** Read-then-write, so not race-proof, and
+  a direct PostgREST call bypasses it. Moving it into the database means
+  revoking `stages.is_enabled` from the client's UPDATE grant and rewriting a
+  passing test of a deliberate decision — M7's argument, with the settings
+  screen in front of it. Stated at the top of that file too.
+- **`channels.expected_ctr` still has no UI.** Until M7 the bar is always the
+  median.
+- **The React key warning reported against `PackagingBlock` was said here not to
+  reproduce. That was wrong, and it is fixed.** A full `npm run e2e` from this
+  tree, with the web server's stdout piped as `playwright.config.ts` already
+  configures, produced nine `Each child in a list should have a unique "key"
+  prop. Check the render method of `PackagingBlock`. It was passed a child from
+  VideoDetailPage.` The earlier check must have been a single-spec run: it takes
+  a video whose title the feed would cut, or a page re-rendered after a move, to
+  surface it. See the review log below for the cause and the fix.
+
+### Gates
+
+Run on an idle machine, from this tree, after the changes above:
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes, compiled |
+| `./scripts/verify-db.sh m4_check` | OK — migrations applied, 13 SQL test files |
+| `npm run test` | 221 tests in 11 files |
+| `npm run e2e` | 126 passed, 1 skipped, 0 failed (7.5 min) |
+
+The skip is `e2e/session-refresh.spec.ts`, which skips itself unless the stack
+was started with a short access-token TTL; `npm run e2e:refresh` is the command
+that runs it.
+
+## M4 — adversarial review, applied
+
+Twenty-eight findings. Every one was checked against the tree before anything
+was changed; two were wrong in part and are recorded as such. What follows is
+what was fixed, what was rejected and why, and what was deferred to a named
+milestone.
+
+### Blockers — fixed
+
+**1. A variant whose image failed before hydration reported `ready` and painted
+a blank rectangle.** (`components/thumbnails/variant-slot.tsx`,
+`components/preview/parts.tsx`.) The three-state frame only worked when the
+`error` event arrived *after* React attached `onError`. On a server-rendered
+load the browser fetches the signed URL and fires `error` long before that, and
+React does not replay it — so an expired signature, a missing object, a storage
+5xx or a truncated upload seen on the next visit all left the slot claiming
+`data-state="ready"` over an `<img>` with `naturalWidth` 0. The file's own doc
+comment said this was impossible. Both files now attach a ref callback that
+reads the element on mount (`complete && naturalWidth === 0`) and puts it in the
+same `broken` state; `onError` stays for failures that arrive later. The copy
+was wrong too — "the object may be gone. Upload it again." is bad advice for an
+expired signed URL, where a reload is the fix — and now says so.
+`e2e/thumbnails.spec.ts` reloads after the corrupt upload and re-asserts, and
+checks the feed comparison's tiles, which had the same hole.
+
+**2. The swap dialog never returned focus.** (`components/thumbnails/
+swap-dialog.tsx`.) It rendered `Modal` without `returnFocusRef` while its
+textarea carried `autoFocus`; React applies `autoFocus` during the commit phase,
+before the modal's mount effect, so the shell recorded the dialog's own textarea
+as the opener. On unmount that element is gone, `document.contains` is false,
+and focus fell to `<body>` on Escape, on Cancel and on a successful swap — WCAG
+2.4.3, and the one of the four things the dialog's header comment claimed it got
+from `Modal` that it was not getting. `ThumbnailsSection` now records the button
+that opened it and passes it through. The successful-swap exit needed more than
+a ref: that button becomes a disabled "Shipped", and `focus()` on a disabled
+button is a no-op, so `Modal` gained an `onClosed` callback and the section
+focuses the slot that went live instead. A spec reads `document.activeElement`
+after all three exits.
+
+### Majors — fixed
+
+**3. `confirmLive` leaked `move_video`'s raw `gate:<field>` token.**
+(`app/actions/metrics.ts`.) It was the only caller of that RPC that did not
+translate the refusal, and both surfaces printed it verbatim — the page's
+ConfirmLive block and `/now`'s toast. The packaging fields stay editable at
+every stage, so a video that reached Scheduled and then had its concept cleared
+hits it on the next confirm. `readGateField` moved from `app/actions/moves.ts`
+to `lib/packaging.ts`, beside `GATE_WORDING` — it could not simply be exported,
+because every export of a `"use server"` file must be an async function — and
+both actions import it. The "the URL is saved, only the move was refused" half
+of the sentence is kept. Covered in `e2e/post-publish.spec.ts`.
+
+**4. Shipping the first thumbnail from a stale tab dead-ended.**
+(`components/thumbnails/thumbnails-section.tsx`.) The recovery branch tested
+`shippedRole`, the page's prop, which is null by construction on every path that
+reaches it — so the branch was dead, and the slot printed "A swap needs a
+reason" with no textarea on screen and no `router.refresh()`, for ever.
+`shipThumbnail` now returns `currentRole` on a `needsReason` refusal — what the
+row actually held, which is the one thing the caller cannot work out — and the
+section opens the dialog from that and refreshes. A two-context spec ships from
+one tab and then clicks in the stale one.
+
+**5. The swap prompt stayed red after the swap had been made.**
+(`components/post-publish/swap-prompt.tsx`.) `swappedSinceMetrics` was accepted
+and used only to add a sentence, so the block kept the red border, the red
+heading and "Act now rather than in a week" directly above its own line saying a
+swap had already been logged — and still offered "Keep it", which would have
+written `swap_dismissed_at` for a thumbnail that was not kept. `/now` has always
+excluded a swap logged after the metrics, so the two surfaces disagreed in tone
+about the same video. `urgent` now includes the prop, the verdict drops its "act
+now" clause, the link reads "Swap again…", and the resting state is the
+already-swapped sentence rather than a third button.
+
+**6. Nothing warned when a video was scheduled with fewer than three variants,
+and the Thumbnails copy claimed a warning existed.** PLAN.md line 133 specifies
+it; no surface outside the Thumbnails tab read the three path columns at all.
+Built rather than deleted, because PLAN.md asks for it and the section was
+already asserting it: `describeThumbnailShortfall` in `lib/packaging.ts` owns
+the sentence, `moveVideo` counts the non-null paths on the row `move_video`
+returns and reads the destination's kind only when a warning is possible, and
+the sentence rides on the **ok** result as `notice` — a warning that arrived as
+a refusal would be the hard gate PLAN.md says this must not be. The board raises
+it as an info toast with a link to Thumbnails, the stage select prints it after
+"Moved to Scheduled.", and `/now`'s move row pushes it as a second toast.
+
+**7. The median fallback invented a verdict from a two-video sample.**
+(`lib/expectation.ts`, `lib/next-action.ts`.) `MIN_MEDIAN_SAMPLE` was 2, and the
+sample deliberately includes the video being judged — so, the median of two
+numbers being their mean, the worse of any two videos was *always* strictly
+below "expectation" and the better one always at or above, whatever the numbers
+were. A red prompt and an **Overdue** row manufactured out of one comparison,
+in the one place the product says act fast. The floor is now 3, which is the
+first size that survives the subject: the median is the middle value, so the
+judged video is either not it, or it is — and then `ctr < expectation` is false
+and nothing fires. The constant lives in `lib/next-action.ts` and
+`lib/expectation.ts` imports it, so `channelExpectation` applies the same floor
+and `/now` and the page keep agreeing. Unit-tested, and the post-publish spec
+now walks two-then-three.
+
+**8. A failed write on `/now` was swallowed silently.**
+(`components/now/now-view.tsx`.) `perform()` had try/finally and no catch:
+every branch handled `!result.ok`, but a rejected promise escaped, nothing was
+rendered, and the rejection went unhandled. One catch covers all nine branches
+and pushes an error toast. Covered by a spec that goes offline, saves the
+metrics row and asserts both the toast and that nothing was written.
+
+**9. PLAN.md's "shipped radio" was not built and the milestone said it was.**
+Recorded as a deviation with its reason (see the thumbnails slice's list, item
+5), the summary line corrected, and the real gap closed: the three buttons now
+carry distinct accessible names.
+
+**10. The milestone claimed the React key warning did not reproduce; it fires
+nine times in a full run.** It does, and the claim is replaced by what happened.
+The cause, bisected rather than guessed: the five element-valued props the
+*server* component `VideoDetailPage` hands to the client component
+`PackagingBlock` — the sketch, the truncation warning and the three assist
+pills — are validated by React as list entries, and none carried a key.
+Removing a slot silenced it; a key on that slot silenced it; one slot at a time
+until all five were named. All five now carry a key with the reason written at
+the call site, and a full run is clean.
+
+### Minors — fixed
+
+- **`thumbnail_swaps` was append-only against edits but not against forgery.**
+  Clients held a direct INSERT grant, so a row describing a swap that never
+  happened could be written without going through `swap_thumbnail` and without
+  `shipped_role` moving — and M4 is the first milestone to read that log as
+  truth, in `/now`'s rule 3 and on the live slot. `0006` revokes it and drops
+  the now-meaningless insert policy, leaving the security-definer function as
+  the only writer; `supabase/tests/20_column_privileges.test.sql` asserts the
+  refusal and re-plants its fixture row as the owner, and
+  `10_tenant_isolation.test.sql` now proves the composite FK from the owner's
+  side, which is where `swap_thumbnail` actually runs.
+- **The 5 MB / image-only rule was entirely client-side.** The bucket carried no
+  ceiling, so a user's own token could park 20 MB of `text/html` at a legitimate
+  variant path and the signed URL served it back with that type. `0006` sets
+  `file_size_limit` and `allowed_mime_types` on the bucket row — the same number
+  and the same list `MAX_SKETCH_BYTES` and `CONCEPT_SKETCH_TYPES` already hold —
+  guarded by a column check so it is a no-op where Supabase's own columns are
+  absent. `supabase/tests/shim.sql` gains the two columns and
+  `80_storage.test.sql` asserts the values; the local stack's storage server
+  enforces them too, so the harness is not a more permissive database than the
+  one it stands in for.
+- **"a octet-stream file is not one".** `application/octet-stream` — which is
+  what a browser reports for a file it cannot type — never hit the branch
+  written for it, and the article was hardcoded. Both fixed in
+  `describeFileType`, with the octet-stream case and the vowel case in
+  `lib/storage.test.ts`.
+- **`/now`'s swap row printed a bare "expected 5.2%".** The page distinguishes
+  "the 5% this channel expects" from "the 5.2% median of its last three logged
+  videos"; the row threw the qualification away and printed the derived number
+  in the face reserved for measured values. `NowChannel` now carries the source
+  and the sample size, the rule-3 payload carries them, and the row prints
+  "expected 5.2% (median of 3)" with the qualification outside the mono span,
+  because it is prose and not a measurement.
+- **The Packaging preview called the concept sketch "the thumbnail".** Now that
+  the same visual language draws the real shipped asset one tab along, the
+  preview says what it is holding — "your concept sketch, at tile size" — links
+  across to Thumbnails, names the live variant once one has shipped, and the
+  phone caption says "concept" rather than "thumbnail".
+- **"Keep it" reported its failure 180px away, in the metrics form's words.**
+  The one save queue is right; one status line for two controls was not. The
+  state is routed to whichever sub-block sent the patch, the swap prompt renders
+  its own `SaveStatus`, and a decision that never reached the server says "the
+  decision was not recorded" rather than "nothing you typed has been lost".
+- **The variant status line changed its ARIA role on the update that changed its
+  text.** It is now a stable `role="status"` for the life of the slot, with a
+  separate always-present `role="alert"` node beside it carrying refusals.
+- **The three slots were h4s directly under the concept brief's h3**, so the
+  outline filed the assets inside the concept — the one blur this section's
+  design rule forbids. They now sit under an h3 of their own, which also gives
+  the grid a name.
+- **The metrics-pair "one control" test asserted nothing about containment.**
+  `slice` with one argument runs to the end of the document, so it proved only
+  that both inputs appear somewhere below the marker. Bounded now by the next
+  sibling's marker, which fails if either input leaves the pair.
+- **The empty-title fallback was retyped in the thumbnails section** instead of
+  importing `UNTITLED` from `components/preview/parts.tsx`. Imported.
+- **`confirm-live` re-implemented the URL rule and its refusal sentence.**
+  `lib/video-fields.ts` now exports `describeUrlRejection`, built from the same
+  predicate and the same message `YoutubeUrlSchema` is built from, and the
+  component calls it — the shape `describeReasonRejection` already had.
+- **An internal source path was rendered as product copy** in the feed strip.
+  Removed, and removed from the packaging preview's heading too, which the
+  finding's evidence said was the only occurrence but was not.
+- **`video-sections.tsx` still said four of the five panels were a heading and a
+  paragraph.** Rewritten to state the M4 cost and point at `e2e/hydration.ts`,
+  which holds the argument.
+- **A channel-wide Repurposed switch rendered inside a Publish panel whose tab
+  said "locked".** The same contradiction the lock was lifted to remove, one
+  element further down. The lane now appears exactly when the tab stops claiming
+  there is nothing there, using `reached(stageKind, "scheduled")` exported from
+  the module that decides what the tab says rather than a second copy of the
+  comparison.
+- **`npm run e2e` silently reuses a running stack and the `/now` specs asserted
+  database-global counts.** Reproduced: `filtered-out` counts everything the
+  filters hide, including this file's channel chip, so a reused stack made two
+  specs fail with a number about the operator's previous session. Both now read
+  the counter as a number and assert the *difference* their own filter makes.
+
+### Rejected, with reasons
+
+- **"each with a note" should become a per-variant free-text field.** Partly
+  rejected. The substitution was already declared, and its reason stands: there
+  is no column, and neither BRIEF.md nor PLAN.md asks for one. The suggested
+  alternative — a `jsonb` column — is still a migration and a new editable field
+  on the one section that deliberately holds no draft state, which is what kept
+  M2's and M3's seven optimistic-save blockers from becoming an eighth. What was
+  real in the finding is that one word meant two things, and that is fixed: the
+  role's line is now labelled "What this slot is for", so nothing on the screen
+  presents it as a remark about that image. The per-variant sentence a person
+  actually writes is the swap reason, and the live slot prints it. PLAN.md was
+  not edited, per the repo rule.
+- **"The comparison row should show one broken tile."** The finding's spec
+  expectation was wrong: the comparison collapses *unreachable* and *broken*
+  into one caption, because at 360px the difference between "no URL could be
+  signed" and "the bytes would not decode" is the slot's to draw, not the feed
+  card's. Two tiles are correct in that fixture and the spec asserts two.
+
+### Deferred, with the milestone named
+
+- **Making `npm run e2e` refuse a stack it did not start.** The specs are now
+  fixture-local, which is the half that matters and the half that does not
+  depend on how the harness is invoked. Changing the harness's default is a
+  developer-workflow change with no user-visible behaviour; it belongs with
+  **M9**'s polish pass over the README and the scripts, where the reuse rule can
+  be documented in the one place a person reads before running the suite.
+- **`channels.expected_ctr` has no UI**, so the median is the only expectation a
+  user can produce. **M7**, as before.
+
+### Gates, re-run after every change above
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes, compiled |
+| `./scripts/verify-db.sh m4_final` | OK — 6 migrations applied, 13 SQL test files passed |
+| `npm run test` | 11 files, 223 tests passed |
+| `npm run e2e`, twice | 137 passed, 1 skipped, 0 failed, both times |
+
+The skip is `e2e/session-refresh.spec.ts`, which skips itself unless the stack
+was started with a short access-token TTL; `npm run e2e:refresh` runs it.

@@ -10,6 +10,7 @@ import {
   type NowStage,
   type NowVideo,
 } from "@/lib/next-action";
+import type { ExpectationSource } from "@/lib/metrics";
 import { readHooks } from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
 
@@ -263,14 +264,30 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
       .slice(0, EXPECTATION_SAMPLE)
       .map((entry) => entry.ctr);
 
+    const configured =
+      channel.expected_ctr === null ? null : Number(channel.expected_ctr);
+    const expectedCtr = channelExpectation(configured, recent);
+
+    /*
+      Where the number came from, carried alongside it.
+
+      `channelExpectation` answers "what is the bar"; the row also has to say
+      what kind of bar it is, because "the 5% this channel expects" and "the
+      5.2% median of its last three logged videos" are different claims. The
+      branch is the same `coalesce` the function makes: a configured
+      `expected_ctr` wins, and otherwise the value that came back is the median
+      — `lib/expectation.ts` reaches the identical answer for the video page.
+    */
+    const expectedCtrSource: ExpectationSource | null =
+      expectedCtr === null ? null : configured !== null ? "channel" : "median";
+
     return {
       id: channel.id,
       name: channel.name,
       slug: channel.slug,
-      expectedCtr: channelExpectation(
-        channel.expected_ctr === null ? null : Number(channel.expected_ctr),
-        recent,
-      ),
+      expectedCtr,
+      expectedCtrSource,
+      expectedCtrSample: expectedCtrSource === "median" ? recent.length : 0,
       stages: stagesByChannel.get(channel.id) ?? [],
     };
   });

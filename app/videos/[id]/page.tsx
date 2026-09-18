@@ -31,6 +31,7 @@ import {
   type ThumbnailVariantView,
 } from "@/components/thumbnails/thumbnails-section";
 import type { SwapEntry } from "@/components/thumbnails/swap-log";
+import { ROLE_LABEL } from "@/components/thumbnails/roles";
 import { PostPublishBlock } from "@/components/post-publish/post-publish-block";
 import { ScriptSection } from "@/components/video-sections/script-section";
 import {
@@ -454,7 +455,21 @@ export default async function VideoDetailPage({
                  and `videos.title` in one save, and two inputs bound to one
                  column on one page is a race, not a convenience. The sketch
                  goes in as a slot, next to the written concept it illustrates;
-                 so do the warning and the three inert assists. */
+                 so do the warning and the three inert assists.
+
+                 Every one of those slot elements carries a `key`, which looks
+                 odd on something that is not in a list and is not decoration.
+                 React validates these as list entries — a client component's
+                 element-valued props, created here in a *server* component, are
+                 handed to `PackagingBlock` and end up in a children position it
+                 checks for keys — and the result was a development warning on
+                 every video whose title the feed would cut, and again after a
+                 move: *Each child in a list should have a unique "key" prop.
+                 Check the render method of `PackagingBlock`. It was passed a
+                 child from VideoDetailPage.* Bisected, not guessed: removing a
+                 slot silenced it, and so does a key on that slot, one slot at a
+                 time. Keys are cheap and the warning is the kind that trains a
+                 reader to ignore real missing keys, so they stay. */
               packaging: (
                 <PackagingBlock
                   videoId={video.id}
@@ -468,6 +483,7 @@ export default async function VideoDetailPage({
                   }}
                   sketch={
                     <ConceptSketch
+                      key="concept-sketch"
                       videoId={video.id}
                       userId={user.id}
                       title={video.title}
@@ -477,6 +493,7 @@ export default async function VideoDetailPage({
                   }
                   titleWarning={
                     <TitleTruncationWarning
+                      key="title-truncation-warning"
                       savedTitle={video.title}
                       savedCandidates={candidates}
                     />
@@ -484,18 +501,21 @@ export default async function VideoDetailPage({
                   assist={{
                     candidates: (
                       <AssistPill
+                        key="assist-candidates"
                         verb="Generate 20"
                         what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
                       />
                     ),
                     concept: (
                       <AssistPill
+                        key="assist-concept"
                         verb="Suggest concepts"
                         what="Proposes thumbnail concepts for the chosen title."
                       />
                     ),
                     hooks: (
                       <AssistPill
+                        key="assist-hooks"
                         verb="Draft a third"
                         what="Writes the hooks you have not written yet, up to three."
                       />
@@ -642,6 +662,11 @@ export default async function VideoDetailPage({
                   // lie the person cannot act on.
                   hasSketch={video.thumbnail_concept_path !== null}
                   savedTitle={video.title}
+                  // The preview draws the *concept*; the shipped image files
+                  // are one tab along, and the rendering has to say which of
+                  // the two it is holding — BRIEF.md principle 2.
+                  thumbnailsHref={`/videos/${video.id}?section=thumbnails`}
+                  shippedLabel={shippedRole === null ? null : ROLE_LABEL[shippedRole]}
                 />
               ),
             }}

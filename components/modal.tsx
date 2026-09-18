@@ -61,6 +61,7 @@ export function Modal({
   title,
   returnFocusRef,
   onClose,
+  onClosed,
   testId,
   children,
 }: {
@@ -73,6 +74,16 @@ export function Modal({
    */
   returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
+  /**
+   * Run once this dialog has gone, after the focus return above.
+   *
+   * For the caller whose opener does not survive the dialog. The swap dialog's
+   * "Ship this one" becomes a disabled "Shipped" the moment the swap lands, and
+   * `focus()` on a disabled button is a no-op — so focus would land on `<body>`
+   * exactly when something *did* happen. The caller gets the last word about
+   * where focus goes; everything else about the return stays here.
+   */
+  onClosed?: () => void;
   /** A handle for the specs, on the dialog itself rather than on its content. */
   testId?: string;
   children: ReactNode;
@@ -89,6 +100,14 @@ export function Modal({
   useShortcuts(EMPTY, { exclusive: true });
   // What to give focus back to, fixed at mount.
   const opener = useRef<Element | null>(null);
+  // Read through a ref: the effect below is mount-only, so a callback captured
+  // in its closure would be the one this dialog opened with, for ever. Kept up
+  // to date in its own effect rather than in render — a ref written during
+  // render is a value React has not committed yet.
+  const closedRef = useRef(onClosed);
+  useEffect(() => {
+    closedRef.current = onClosed;
+  });
 
   useEffect(() => {
     opener.current = returnFocusRef?.current ?? document.activeElement;
@@ -105,6 +124,7 @@ export function Modal({
       if (previous instanceof HTMLElement && document.contains(previous)) {
         previous.focus();
       }
+      closedRef.current?.();
     };
     // Mount only: the opener is fixed for the life of one dialog.
     // eslint-disable-next-line react-hooks/exhaustive-deps

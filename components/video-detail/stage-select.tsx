@@ -72,7 +72,14 @@ export function StageSelect({
     name: currentStageName,
   });
   const [status, setStatus] = useState<
-    { kind: "idle" } | { kind: "moved"; name: string } | { kind: "error"; message: string }
+    | { kind: "idle" }
+    /**
+     * `notice` is `moveVideo`'s soft warning — today, PLAN.md's *Publish Prep →
+     * Scheduled with < 3 thumbnail paths*. It rides on a **successful** move
+     * and is therefore printed under "Moved to X.", not instead of it.
+     */
+    | { kind: "moved"; name: string; notice: string | null }
+    | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [pending, startTransition] = useTransition();
   const version = useVideoVersion();
@@ -104,7 +111,7 @@ export function StageSelect({
           // move the user made themselves.
           version.adopt(result.updatedAt);
           setCurrent({ id: result.stageId, name: target.name });
-          setStatus({ kind: "moved", name: target.name });
+          setStatus({ kind: "moved", name: target.name, notice: result.notice });
           onMoved(result.stageId);
         } else {
           // Snap back, and say the same thing the board says.
@@ -159,7 +166,8 @@ export function StageSelect({
         data-state={pending ? "moving" : status.kind}
         className={[
           "min-h-4 text-xs",
-          status.kind === "error"
+          status.kind === "error" ||
+          (status.kind === "moved" && status.notice !== null)
             ? "text-attention"
             : "text-muted",
         ].join(" ")}
@@ -168,7 +176,7 @@ export function StageSelect({
           {pending
             ? "Moving…"
             : status.kind === "moved"
-              ? `Moved to ${status.name}.`
+              ? `Moved to ${status.name}.${status.notice ? ` ${status.notice}` : ""}`
               : status.kind === "error"
                 ? status.message
                 : ""}

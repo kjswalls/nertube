@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import {
   recordThumbnailVariant,
@@ -18,6 +18,7 @@ import {
   uploadImage,
   type ThumbnailRole,
 } from "@/lib/storage";
+import { UNTITLED } from "@/components/preview/parts";
 import { createClient } from "@/lib/supabase/client";
 
 import { ConceptBrief } from "./concept-brief";
@@ -115,6 +116,34 @@ export function ThumbnailsSection({
   const [dialogBusy, setDialogBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
+  /**
+   * The control that opened the swap dialog, so focus has somewhere to go back
+   * to when it closes.
+   *
+   * `Modal` records `document.activeElement` at mount, but the dialog's own
+   * textarea has `autoFocus` and React applies that during the commit phase —
+   * before the modal's effect runs — so what it recorded was the textarea
+   * inside itself. On unmount that element is gone, `document.contains` is
+   * false, and focus fell to `<body>` on Escape, on Cancel and on a successful
+   * swap. `components/capture/capture-host.tsx` is the other caller and does
+   * exactly this; the parameter exists for this hazard and is documented as
+   * such in `components/modal.tsx`.
+   */
+  const opener = useRef<HTMLElement | null>(null);
+
+  /**
+   * Where focus goes after a swap that *worked*.
+   *
+   * The button it came from is the old live slot's, and shipping makes the new
+   * one live — so the opener is either disabled ("Shipped") or has changed
+   * meaning. The new live slot's heading is the thing that changed, and it is
+   * made programmatically focusable for exactly this.
+   */
+  const landedRef = useRef<HTMLElement | null>(null);
+
+  /** Each slot's outer element, by role — the target `landedRef` picks from. */
+  const slotRefs = useRef(new Map<ThumbnailRole, HTMLElement>());
+
   const byRole = new Map(variants.map((variant) => [variant.role, variant]));
   const ready = variants.filter((variant) => variant.hasAsset).length;
 
@@ -190,7 +219,9 @@ export function ThumbnailsSection({
     adopt(result);
   }
 
-  async function onShip(role: ThumbnailRole) {
+  async function onShip(role: ThumbnailRole, from?: HTMLElement | null) {
+    opener.current = from ?? null;
+
     // Something is already live: this is a swap, and a swap is explained.
     if (shippedRole !== null && shippedRole !== role) {
       setDialogError(null);
@@ -212,11 +243,24 @@ export function ThumbnailsSection({
     setBusy(null);
 
     if (!result.ok) {
-      // The row moved under us and something is live after all — ask for the
-      // reason rather than reporting a refusal the person cannot act on.
-      if (result.needsReason && shippedRole !== null) {
+      /*
+        The row moved under us: another tab shipped something between this
+        page's render and this click, so what looked like a first ship is a
+        swap and needs a reason.
+
+        The role is taken from the **server's answer**, not from `shippedRole`.
+        That prop is null on every path that reaches here — `onShip` only calls
+        the action when the page believes nothing is live — so testing it made
+        this branch unreachable, and the dead-end was real: the slot printed
+        "A swap needs a reason" with no textarea anywhere on screen, and
+        clicking again repeated it forever. `router.refresh()` goes with it,
+        because the section is still drawing `data-shipped=""` and no Live
+        badge for a video that has one.
+      */
+      if (result.needsReason && result.currentRole) {
         setDialogError(result.error);
-        setDialog({ from: shippedRole, to: role });
+        setDialog({ from: result.currentRole, to: role });
+        router.refresh();
         return;
       }
       say(role, { text: result.error, tone: "error" });
@@ -251,6 +295,10 @@ export function ThumbnailsSection({
 
     setDialog(null);
     say(role, { text: `${ROLE_LABEL[role]} is live`, tone: "info" });
+    // The button that opened this is about to become "Shipped" and disabled,
+    // so `Modal`'s own focus return has nowhere useful to go. The slot that
+    // just went live is what changed; focus lands there.
+    landedRef.current = slotRefs.current.get(role) ?? null;
     adopt(result);
   }
 
@@ -279,6 +327,26 @@ export function ThumbnailsSection({
 
   /** The most recent log entry that made a role live — its "why", on the slot. */
   const liveEntry = swaps.find((entry) => entry.toRole === shippedRole) ?? null;
+
+  /**
+   * Put focus where the swap landed, once the dialog has gone.
+   *
+   * Called from the dialog's unmount path rather than from `onConfirmSwap`,
+   * because `Modal`'s own cleanup restores focus as it unmounts and would
+   * otherwise win the race.
+   */
+  function restoreFocus() {
+    const landed = landedRef.current;
+    landedRef.current = null;
+    if (landed && document.contains(landed)) {
+      landed.focus();
+      return;
+    }
+    const previous = opener.current;
+    if (previous && document.contains(previous) && !previous.hasAttribute("disabled")) {
+      previous.focus();
+    }
+  }
 
   return (
     <section
@@ -315,11 +383,25 @@ export function ThumbnailsSection({
           ? "No variants yet. All three are meant to exist before launch."
           : ready === 3
             ? "All three ready."
-            : `${ready} of 3 ready. Moving to Scheduled with fewer is allowed — it is a warning, not a gate — but the point of three is that a swap takes minutes.`}
+            : `${ready} of 3 ready. Moving to Scheduled with fewer is allowed — the move says so and does not stop, because it is a warning and not a gate — but the point of three is that a swap takes minutes.`}
       </p>
+
+      {/*
+        The three slots get a heading of their own.
+
+        They are siblings of the concept brief, not parts of it — but as h4s
+        immediately after its h3 a screen-reader outline filed them *inside* the
+        concept, which is the one blur this section's design rule forbids. One
+        h3 here puts the assets beside the concept in the outline and gives the
+        grid a name in the landmark list.
+      */}
+      <h3 id="variants-heading" className="text-sm font-semibold">
+        The three variants
+      </h3>
 
       <div
         data-testid="variant-grid"
+        aria-labelledby="variants-heading"
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         {THUMBNAIL_ROLES.map((role) => {
@@ -345,8 +427,12 @@ export function ThumbnailsSection({
               title={title}
               busy={busy?.role === role ? busy.kind : null}
               message={messages[role] ?? null}
+              slotRef={(element) => {
+                if (element) slotRefs.current.set(role, element);
+                else slotRefs.current.delete(role);
+              }}
               onFile={(file) => void onFile(role, file)}
-              onShip={() => void onShip(role)}
+              onShip={(button) => void onShip(role, button)}
               onRemove={() => void onRemove(role)}
             />
           );
@@ -366,7 +452,7 @@ export function ThumbnailsSection({
           hasAsset: byRole.get(role)?.hasAsset ?? false,
           live: shippedRole === role,
         }))}
-        title={title.trim() === "" ? "Untitled — the working title shows here" : title}
+        title={title.trim() === "" ? UNTITLED : title}
         channelName={channelName}
       />
 
@@ -378,6 +464,14 @@ export function ThumbnailsSection({
           to={dialog.to}
           busy={dialogBusy}
           error={dialogError}
+          /*
+            What opened it. Without this `Modal` records the dialog's own
+            textarea — `autoFocus` moves focus during the commit phase, before
+            the modal's mount effect runs — and on close focus falls to
+            `<body>`, on Escape, on Cancel and on a successful swap alike.
+          */
+          returnFocusRef={opener}
+          onClosed={restoreFocus}
           onConfirm={(reason) => void onConfirmSwap(reason)}
           onCancel={() => {
             setDialog(null);

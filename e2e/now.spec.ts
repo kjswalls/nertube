@@ -286,6 +286,21 @@ async function openNow(page: Page): Promise<void> {
 
 const rows = (page: Page): Locator => page.getByTestId('now-row');
 
+/**
+ * How many rows the filters are currently hiding, as the page reports it.
+ *
+ * Zero when the counter is absent, which is what "nothing is hidden" looks
+ * like. Read as a number rather than asserted as a string because the channel
+ * chip this file always switches on hides whatever else is in the database, and
+ * that is not this file's business — every assertion here is a *difference*.
+ */
+async function hiddenCount(page: Page): Promise<number> {
+  const counter = page.getByTestId('filtered-out');
+  if ((await counter.count()) === 0) return 0;
+  const text = await counter.innerText();
+  return Number(/(\d+)/.exec(text)?.[1] ?? 0);
+}
+
 const rowFor = (page: Page, title: string): Locator =>
   rows(page).filter({ hasText: title });
 
@@ -349,6 +364,8 @@ test('"10 minutes or less" leaves only work that can actually be finished', asyn
   await openNow(page);
   await expect(rows(page)).toHaveCount(7);
 
+  const hiddenBefore = await hiddenCount(page);
+
   await page.getByTestId('quick-filter').click();
 
   /*
@@ -372,7 +389,19 @@ test('"10 minutes or less" leaves only work that can actually be finished', asyn
   await expect(
     page.locator('[data-testid="now-row"][data-section="waiting"]'),
   ).toHaveCount(0);
-  await expect(page.getByTestId('filtered-out')).toContainText('4 hidden');
+  /*
+    Counted against this fixture, not against the database.
+
+    `filtered-out` counts every row the filters removed, and the channel chip
+    this file switches on is one of them — so a suite run that reuses a stack
+    somebody left running (the harness reuses one by default, and a manual
+    browser walk leaves one behind) sees other channels' rows in that number
+    and this read "8 hidden" instead of "4". That is a failure about the
+    operator's previous session pointing at `/now`. What the test is actually
+    about is the four rows *this* filter hides, so it is the difference that is
+    asserted.
+  */
+  expect((await hiddenCount(page)) - hiddenBefore).toBe(4);
 
   await page.getByTestId('quick-filter').click();
   await expect(rows(page)).toHaveCount(7);
@@ -393,14 +422,21 @@ test('"Still waiting" sets a row aside without blaming the filters', async ({
 }) => {
   await openNow(page);
 
+  // Whatever the channel chip is already hiding — other channels' rows, which
+  // depend on what else is in the database — is the baseline. See the note on
+  // the quick-filter test above.
+  const hiddenBefore = await hiddenCount(page);
+
   const waiting = rowFor(page, TITLES.editing);
   await waiting.getByTestId('now-still-waiting').click();
 
   await expect(rowFor(page, TITLES.editing)).toHaveCount(0);
   await expect(rows(page)).toHaveCount(6);
 
-  // Not reported as a filter hiding something, because no filter is on.
-  await expect(page.getByTestId('filtered-out')).toHaveCount(0);
+  // Not reported as a filter hiding something: setting a row aside is not a
+  // filter, and folding the two into one subtraction is what printed "1 hidden"
+  // with no chip on.
+  expect(await hiddenCount(page)).toBe(hiddenBefore);
   await expect(page.getByTestId('set-aside')).toContainText('1');
   await expect(page.getByTestId('set-aside')).toContainText('set aside');
 });
@@ -510,6 +546,44 @@ test('four rows finished in ten minutes, without opening a single card', async (
   expect(unblocked.rows[0].waiting_on).toBeNull();
   // The CHECK pairs them: cleared together or not at all.
   expect(unblocked.rows[0].waiting_since).toBeNull();
+});
+
+test('a row that cannot reach the server says so instead of doing nothing', async ({
+  page,
+  context,
+}) => {
+  /*
+    `perform()` wrapped every row action in try/finally with no catch. Every
+    branch handled `!result.ok` — the server answering no — but a *rejected*
+    promise escaped: nothing was rendered, no toast was pushed, and the
+    rejection went unhandled. The row was byte-identical to before the click.
+    The video page has always said so in this case (`components/autosave.tsx`
+    catches the same rejection and prints "Could not reach the server, so this
+    is not saved."), and M4's claim about the metrics row is parity with that
+    page — so this covers the metrics branch specifically.
+  */
+  await openNow(page);
+
+  const publishedRow = rowFor(page, TITLES.published);
+  await publishedRow.getByTestId('metrics-impressions').fill('1000');
+  await publishedRow.getByTestId('metrics-ctr').fill('3.2');
+
+  await context.setOffline(true);
+  try {
+    await publishedRow.getByTestId('metrics-save').click();
+    await expect(page.getByTestId('toast')).toContainText(
+      'Could not reach the server',
+    );
+  } finally {
+    await context.setOffline(false);
+  }
+
+  // And nothing was written, which is the other half of the claim.
+  const row = await db.query<{ first24_impressions: number | null }>(
+    'select first24_impressions from public.videos where title = $1',
+    [TITLES.published],
+  );
+  expect(row.rows[0].first24_impressions).toBeNull();
 });
 
 test('a move row moves the video, and the database agrees', async ({ page }) => {

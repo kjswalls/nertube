@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 
 import { confirmLive } from "@/app/actions/metrics";
 import { useVideoVersion } from "@/components/video-version";
+import { describeUrlRejection } from "@/lib/video-fields";
 
 /**
  * "It is live" — the one gesture that turns a scheduled video into a published
@@ -60,19 +61,18 @@ export function ConfirmLive({
       setError("Paste the video's address first — that is what confirming records.");
       return;
     }
-    // The same shape the action's `YoutubeUrlSchema` accepts, checked here so
-    // the refusal does not cost a round trip. The host is deliberately not
-    // checked: youtu.be, a Studio link and a members-only link are all things a
-    // creator legitimately pastes.
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch {
-      setError("That is not a link. Paste the whole address, starting with https://.");
-      return;
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      setError("That is not a link. Paste the whole address, starting with https://.");
+    /*
+      The rule and its sentence come from `lib/video-fields.ts`, which is also
+      what `YoutubeUrlSchema` is built out of — so this check and the action's
+      cannot drift into disagreeing about what a link is, or into refusing the
+      same thing in two different words. Checked here only so the refusal does
+      not cost a round trip. The host is deliberately not checked: youtu.be, a
+      Studio link and a members-only link are all things a creator legitimately
+      pastes.
+    */
+    const rejection = describeUrlRejection(value);
+    if (rejection) {
+      setError(rejection);
       return;
     }
 

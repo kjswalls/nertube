@@ -5,7 +5,11 @@ import {
   type ChecklistItem,
 } from "./checklist";
 import { kindOrder, type StageKind } from "./defaults";
-import { formatCtr, formatImpressions } from "./metrics";
+import {
+  formatCtr,
+  formatImpressions,
+  type ExpectationSource,
+} from "./metrics";
 import { GATE_WORDING, packagingGate, type GateField } from "./packaging";
 
 /**
@@ -112,6 +116,33 @@ export const METRICS_DUE_AFTER_MS = 24 * 60 * 60 * 1000;
 /** Rule 3's fallback expectation looks at this many recent published videos. */
 export const EXPECTATION_SAMPLE = 10;
 
+/**
+ * How many logged videos the median fallback needs before it is an expectation
+ * at all.
+ *
+ * The sample deliberately includes the video being judged — `lib/now-data.ts`
+ * computes the fallback from the same rows the rules are about, and
+ * `lib/expectation.ts` matches it on purpose. That is fine at a real sample
+ * size and arithmetically dishonest at a small one:
+ *
+ * - **n = 1** is the video compared with itself.
+ * - **n = 2** is worse than it looks. The median of two numbers is their mean,
+ *   so the *worse* of any two videos is strictly below "expectation" and the
+ *   better one is at or above it — guaranteed, whatever the numbers are. A red
+ *   swap prompt and an **Overdue** `/now` row would then be manufactured out of
+ *   a single comparison, in the one place the product tells the user to act
+ *   fast.
+ * - **n = 3** is the first size that survives the subject. The median is the
+ *   middle value: if the judged video is the worst it is not the median, and if
+ *   it *is* the median then `ctr < expectation` is false and nothing fires.
+ *
+ * Below this, both surfaces return "no expectation" and say so — the prompt
+ * renders its *unknown* state and rule 3 never fires. One constant, imported by
+ * `lib/expectation.ts`, so the page and `/now` cannot draw the line in two
+ * different places.
+ */
+export const MIN_MEDIAN_SAMPLE = 3;
+
 /* -------------------------------------------------------------------------- */
 /* Input                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -136,6 +167,19 @@ export interface NowChannel {
   readonly name: string;
   readonly slug: string;
   readonly expectedCtr: number | null;
+  /**
+   * Where `expectedCtr` came from, and over how many videos.
+   *
+   * The number alone is not the claim. "the 5% this channel expects" and "the
+   * 5.2% median of its last three logged videos" are different sentences, and
+   * the video page's swap prompt has always said which one it means. `/now`
+   * printed the bare number, so the same video read with two different amounts
+   * of honesty depending on the screen — which is the drift this milestone
+   * exists to prevent. Both are null / 0 when there is no expectation.
+   */
+  readonly expectedCtrSource: ExpectationSource | null;
+  /** How many past videos the median was taken over. 0 when it was not one. */
+  readonly expectedCtrSample: number;
   readonly stages: readonly NowStage[];
 }
 
@@ -227,6 +271,9 @@ export type NowPayload =
       readonly impressions: number;
       readonly ctr: number;
       readonly expectation: number;
+      /** Where that number came from — the row prints "(median of 3)". */
+      readonly expectationSource: ExpectationSource | null;
+      readonly expectationSample: number;
     }
   | {
       readonly input: "move";
@@ -271,10 +318,11 @@ export interface NowRow {
  * the channel's last 10 published)`; none → rule skipped*.
  *
  * `recentCtrs` is the channel's most recent logged CTRs, newest first, already
- * limited by the caller. An empty list with no configured expectation returns
- * null, and rule 3 then does not fire at all — which is the right answer for a
- * new channel: "below expectation" is meaningless when there is no expectation,
- * and inventing one (say, 4%) would nag about a video nobody can judge yet.
+ * limited by the caller. Too short a list with no configured expectation
+ * returns null, and rule 3 then does not fire at all — which is the right
+ * answer for a new channel: "below expectation" is meaningless when there is no
+ * expectation, and inventing one (say, 4%) would nag about a video nobody can
+ * judge yet.
  */
 export function channelExpectation(
   expectedCtr: number | null,
@@ -287,7 +335,7 @@ export function channelExpectation(
     .slice(0, EXPECTATION_SAMPLE)
     .sort((a, b) => a - b);
 
-  if (sample.length === 0) return null;
+  if (sample.length < MIN_MEDIAN_SAMPLE) return null;
 
   const middle = sample.length >> 1;
   return sample.length % 2 === 1
@@ -535,6 +583,8 @@ export function nextAction(
         impressions: video.first24Impressions,
         ctr: video.first24Ctr,
         expectation: channel.expectedCtr,
+        expectationSource: channel.expectedCtrSource,
+        expectationSample: channel.expectedCtrSample,
       },
     );
   }

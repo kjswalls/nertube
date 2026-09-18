@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { ROLE_LABEL } from "@/components/thumbnails/roles";
 import { type ThumbnailRole } from "@/lib/storage";
@@ -64,6 +65,7 @@ export function SwapPrompt({
   busy,
   onKeep,
   onReopen,
+  status,
 }: {
   videoId: string;
   /** Both, always — this block never sees one without the other. */
@@ -79,9 +81,30 @@ export function SwapPrompt({
   busy: boolean;
   onKeep: () => void;
   onReopen: () => void;
+  /**
+   * This block's own save status line.
+   *
+   * "Keep it" used to report its refusal in the metrics form's status line,
+   * 180px above the button and in the metrics form's words. A control reports
+   * on itself.
+   */
+  status?: ReactNode;
 }) {
   const verdict = swapVerdict(ctr, expectation.value);
-  const urgent = verdict.kind === "below" && dismissedLabel === null;
+
+  /*
+    Urgency stands down once the swap has been made.
+
+    `swappedSinceMetrics` means the creator has already done the thing
+    BRIEF.md principle 8 asks for — looked at the numbers and swapped fast. A
+    block that keeps the red border, the red heading and "Act now rather than
+    in a week" directly above its own sentence saying a swap has been logged is
+    the page shouting at somebody who already acted. `/now` gets this right
+    (rule 3 excludes a swap logged after `metrics_logged_at`), and the two
+    surfaces are supposed to be one claim about one video.
+  */
+  const urgent =
+    verdict.kind === "below" && dismissedLabel === null && !swappedSinceMetrics;
 
   return (
     <section
@@ -116,7 +139,11 @@ export function SwapPrompt({
       </div>
 
       <p data-testid="swap-prompt-verdict" className="text-xs leading-5 text-muted">
-        <Verdict verdict={verdict} expectation={expectation} />
+        <Verdict
+          verdict={verdict}
+          expectation={expectation}
+          settled={swappedSinceMetrics}
+        />
       </p>
 
       {shippedRole === null ? (
@@ -161,10 +188,19 @@ export function SwapPrompt({
               : "border-border hover:border-accent",
           ].join(" ")}
         >
-          Swap the thumbnail…
+          {swappedSinceMetrics ? "Swap again…" : "Swap the thumbnail…"}
         </Link>
 
-        {dismissedLabel === null ? (
+        {/*
+          "Keep it" is not offered for a thumbnail that was not kept.
+
+          It writes `swap_dismissed_at`, which means *I looked and decided this
+          thumbnail is not the problem* — a claim nobody can make about a
+          thumbnail they have already replaced. The question has been answered
+          by acting, which is the better of the two answers, so the resting
+          state here is the sentence above rather than a third button.
+        */}
+        {swappedSinceMetrics ? null : dismissedLabel === null ? (
           <button
             type="button"
             data-testid="swap-prompt-keep"
@@ -187,6 +223,8 @@ export function SwapPrompt({
         )}
       </div>
 
+      {status}
+
       {dismissedLabel === null ? null : (
         <p
           data-testid="swap-prompt-dismissed"
@@ -206,9 +244,12 @@ export function SwapPrompt({
 function Verdict({
   verdict,
   expectation,
+  settled,
 }: {
   verdict: ReturnType<typeof swapVerdict>;
   expectation: Expectation;
+  /** A swap has already been logged since these numbers — nothing is urgent. */
+  settled: boolean;
 }) {
   if (verdict.kind === "unknown") {
     return (
@@ -231,11 +272,15 @@ function Verdict({
   if (verdict.kind === "below") {
     return (
       <>
-        <span className="font-medium text-over-limit">
+        <span
+          className={settled ? "font-medium" : "font-medium text-over-limit"}
+        >
           {formatCtr(verdict.shortfall)} points below
         </span>{" "}
-        {against}. Act now rather than in a week: a swap is worth most while
-        the video is still being shown.
+        {against}.{" "}
+        {settled
+          ? "That is what the swap was for."
+          : "Act now rather than in a week: a swap is worth most while the video is still being shown."}
       </>
     );
   }

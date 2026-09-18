@@ -377,11 +377,9 @@ test('it turns urgent below expectation, and offers no verdict when there is not
   );
 });
 
-test('the median of the last ten published videos is the fallback expectation', async ({
+test('the median fallback needs a sample the video cannot decide on its own', async ({
   page,
 }) => {
-  // No `expected_ctr`, but the channel has a second logged video at 8%. The
-  // median of {4.2, 8} is 6.1, and 4.2 is below it.
   await setExpectedCtr(null);
   await db.query(
     `update public.videos
@@ -390,13 +388,104 @@ test('the median of the last ten published videos is the fallback expectation', 
     [ids.published],
   );
 
-  await openPublish(page, ids.published);
+  /*
+    Two logged videos is not a sample, and the arithmetic is why.
 
+    The median of two numbers is their mean, and the sample deliberately
+    includes the video being judged — so the *worse* of any two videos is
+    always strictly below "expectation" and the better one is always at or
+    above, whatever the numbers are. A red prompt and an Overdue `/now` row
+    manufactured out of a single comparison, in the one place the product tells
+    you to act fast. At this point the channel has exactly two: this one at 4.2%
+    and the fixture's other at 8%.
+  */
+  await openPublish(page, ids.published);
+  await expect(page.getByTestId('swap-prompt')).toHaveAttribute(
+    'data-verdict',
+    'unknown',
+  );
+  await expect(page.getByTestId('swap-prompt-verdict')).toContainText(
+    'nothing to measure this against yet',
+  );
+
+  // A third gives a median that survives removing the subject: {4.2, 5.4, 8}
+  // has a middle value of 5.4, and 4.2 is below it.
+  const channel = await channelRow();
+  if (!channel) throw new Error('the fixture channel is missing');
+  await seedVideo(channel, {
+    title: 'A third, for the sample',
+    kind: 'published',
+    age: '60 days',
+    publishedAgo: '60 days',
+    metrics: { impressions: 30_000, ctr: 5.4 },
+  });
+
+  await page.reload();
   await expect(page.getByTestId('swap-prompt')).toHaveAttribute(
     'data-verdict',
     'below',
   );
-  await expect(page.getByTestId('swap-prompt-verdict')).toContainText('median');
+  await expect(page.getByTestId('swap-prompt-verdict')).toContainText(
+    'median of its last 3 logged videos',
+  );
+});
+
+test('the swap prompt stands down once the swap has been made', async ({ page }) => {
+  /*
+    BRIEF.md principle 8 asks the creator to look at the numbers and swap fast.
+    Having done exactly that, they were met with a block that kept the red
+    border, the red heading and "Act now rather than in a week" directly above
+    its own sentence saying a swap had already been logged — and still offered
+    "Keep it", which would have written `swap_dismissed_at` for a thumbnail
+    that was not kept. `/now` has always excluded a swap logged after the
+    metrics; the two surfaces are supposed to be one claim about one video.
+  */
+  await setExpectedCtr(6);
+  await db.query(
+    `update public.videos
+        set first24_impressions = 9400, first24_ctr = 2.1, metrics_logged_at = now()
+      where id = $1`,
+    [ids.published],
+  );
+
+  await openPublish(page, ids.published);
+  const prompt = page.getByTestId('swap-prompt');
+  await expect(prompt).toHaveAttribute('data-urgent', 'true');
+  await expect(prompt.getByTestId('swap-prompt-keep')).toBeVisible();
+
+  /*
+    A swap, logged after the metrics. Written as SQL for the same reason the
+    rest of this file's state is: `e2e/thumbnails.spec.ts` is where the
+    `swap_thumbnail` round trip is proved, and what this spec is about is what
+    the Publish section then *says*. The shapes are the ones the function
+    produces — the role moves and the log gains a row, in that order.
+  */
+  await db.query(
+    `update public.videos
+        set thumb_wild_card_path = 'seed/wild_card.png',
+            thumb_safe_path = 'seed/safe.png',
+            shipped_role = 'safe'
+      where id = $1`,
+    [ids.published],
+  );
+  await db.query(
+    `insert into public.thumbnail_swaps (user_id, video_id, from_role, to_role, reason)
+     select v.user_id, v.id, 'wild_card', 'safe', 'CTR 2.1% against an expected 6%'
+       from public.videos v where v.id = $1`,
+    [ids.published],
+  );
+
+  await page.reload();
+
+  await expect(prompt).toHaveAttribute('data-verdict', 'below');
+  await expect(prompt).toHaveAttribute('data-urgent', 'false');
+  await expect(prompt.getByTestId('swap-prompt-already-swapped')).toBeVisible();
+  await expect(page.getByTestId('swap-prompt-verdict')).not.toContainText(
+    'Act now rather than in a week',
+  );
+  // "Keep it" is not offered for a thumbnail that was not kept.
+  await expect(prompt.getByTestId('swap-prompt-keep')).toHaveCount(0);
+  expect((await readVideo(ids.published)).swap_dismissed_at).toBeNull();
 });
 
 /* -------------------------------------------------------------------------- */
@@ -512,6 +601,40 @@ test('confirming live moves the stage and records the URL', async ({ page }) => 
     [ids.scheduled],
   );
   expect(stamped.rows[0].same).toBe(true);
+});
+
+test('a confirm the packaging gate refuses names the missing field, not `gate:`', async ({
+  page,
+}) => {
+  /*
+    The packaging fields stay editable at every stage, so a video that reached
+    Scheduled and then had its concept cleared hits `move_video`'s gate the next
+    time somebody confirms it live. `confirmLive` was the one caller of that RPC
+    that did not translate the refusal, so what reached the screen — here and in
+    `/now`'s toast — was the raw `gate:thumbnail_concept` token. Nobody can act
+    on that, which is the whole reason `app/actions/moves.ts` has had wording
+    for it since M1.
+  */
+  await db.query(
+    `update public.videos set thumbnail_concept = null where id = $1`,
+    [ids.scheduled],
+  );
+
+  await openPublish(page, ids.scheduled);
+
+  const confirm = page.getByTestId('confirm-live');
+  await confirm.getByTestId('confirm-live-url').fill('https://youtu.be/qwertyuiop1');
+  await confirm.getByTestId('confirm-live-save').click();
+
+  const note = page.getByTestId('confirm-live-note');
+  await expect(note).toContainText('The URL is saved');
+  await expect(note).toContainText('a thumbnail concept written down');
+  await expect(note).not.toContainText('gate:');
+
+  // Both halves of the sentence are true: the link landed, the move did not.
+  const row = await readVideo(ids.scheduled);
+  expect(row.youtube_url).toBe('https://youtu.be/qwertyuiop1');
+  expect(row.stage_kind).toBe('scheduled');
 });
 
 /* -------------------------------------------------------------------------- */

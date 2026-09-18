@@ -327,7 +327,15 @@ export function PackagingBlock({
 }: {
   videoId: string;
   initial: PackagingInitial;
-  /** The concept sketch uploader, rendered beside the written concept. */
+  /**
+   * The concept sketch uploader, rendered beside the written concept.
+   *
+   * It, `titleWarning` and the three assists arrive as elements from
+   * `app/videos/[id]/page.tsx`, which is a server component — and React
+   * validates them here as list entries, so each of them carries a `key` at the
+   * call site. The comment there says why; it is not decoration and removing
+   * them brings back a development warning naming this component.
+   */
   sketch?: ReactNode;
   /**
    * The feed-truncation warning, rendered under the candidate list it is about.

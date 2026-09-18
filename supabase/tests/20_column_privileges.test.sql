@@ -168,14 +168,39 @@ begin
   if n <> 1 then raise exception 'FAILED: a core stage could not be renamed'; end if;
 end $$;
 
--- thumbnail_swaps is an append-only log: no client UPDATE or DELETE at all, and
--- swapped_at is not in the INSERT grant, so only the default now() sets it.
+-- thumbnail_swaps is an append-only log with exactly one writer.
+--
+-- 0006 revoked the client INSERT grant as well. Until then the table was
+-- append-only against *edits* but not against forgery: a client could write a
+-- row describing a swap that never happened, without going through
+-- swap_thumbnail and without shipped_role moving — and M4 reads this log as
+-- truth (`/now` stops asking when a swap is logged after the metrics, and the
+-- live slot prints its reason). The only writer now is swap_thumbnail, which is
+-- security definer and runs as the owner.
+do $$
+declare ok boolean := false; st text;
+begin
+  begin
+    insert into public.thumbnail_swaps (user_id, video_id, to_role, reason)
+    values (fx.user_a(), fx.video_a(), 'moderate', 'a swap that never happened');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client forged a swap log row'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
+end $$;
+
+-- The rest of the append-only claim, against a row the *owner* planted, since
+-- a client can no longer make one: no UPDATE, no DELETE, and swapped_at is not
+-- in any grant, so only the default now() can set it.
+reset role;
+insert into public.thumbnail_swaps (user_id, video_id, to_role, reason)
+values (fx.user_a(), fx.video_a(), 'safe', 'first ship');
+set local role authenticated;
+
 do $$
 declare ok boolean; st text; ts timestamptz;
 begin
-  insert into public.thumbnail_swaps (user_id, video_id, to_role, reason)
-  values (fx.user_a(), fx.video_a(), 'safe', 'first ship');
-
   ok := false;
   begin
     update public.thumbnail_swaps set reason = 'rewritten' where video_id = fx.video_a();
@@ -194,6 +219,9 @@ begin
   if not ok then raise exception 'FAILED: the swap log was erased'; end if;
   if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
 
+  -- Refused twice over now: swapped_at was never in the column list, and since
+  -- 0006 there is no client INSERT grant on the table at all. Kept because the
+  -- column-list half is the one a future re-grant could quietly undo.
   ok := false;
   begin
     insert into public.thumbnail_swaps (user_id, video_id, to_role, reason, swapped_at)

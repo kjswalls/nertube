@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { GATE_WORDING, type GateField } from "@/lib/packaging";
+import {
+  describeThumbnailShortfall,
+  GATE_WORDING,
+  readGateField,
+  type GateField,
+} from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
@@ -50,6 +55,15 @@ export type MoveVideoResult =
        * look like a conflict. See `components/video-version.tsx`.
        */
       updatedAt: string | null;
+      /**
+       * A non-blocking remark about the move that just happened, or null.
+       *
+       * Today there is exactly one: PLAN.md's *Publish Prep → Scheduled with
+       * < 3 thumbnail paths is a soft warning only*. It rides on the **ok**
+       * result on purpose — the move succeeded, and a warning that arrived as
+       * a refusal would be the hard gate PLAN.md says this must not be.
+       */
+      notice: string | null;
     }
   | {
       ok: false;
@@ -111,16 +125,6 @@ export type MoveVideoInput = z.input<typeof MoveInput>;
  * it is exactly how "the sketch is the concept" got believed the first time.
  */
 
-/**
- * `move_video` raises `gate:title`, `gate:thumbnail_concept` or `gate:hook`.
- * PostgREST hands that back as the error message, sometimes with its own
- * prefix, so this matches rather than compares.
- */
-function readGateField(message: string): GateField | null {
-  const match = /gate:(title|thumbnail_concept|hook)/.exec(message);
-  return match ? (match[1] as GateField) : null;
-}
-
 export async function moveVideo(
   input: MoveVideoInput,
 ): Promise<MoveVideoResult> {
@@ -178,11 +182,34 @@ export async function moveVideo(
   // a hard refresh, or another tab.
   revalidatePath(`/c/${parsed.data.slug}/board`);
 
+  /*
+    The soft warning. `move_video` returns the whole row, so the three path
+    columns are already here; the only thing missing is the destination's kind,
+    and that read is skipped entirely when all three variants exist, because
+    then there is nothing to warn about whatever the stage is.
+  */
+  let notice: string | null = null;
+  const ready = [
+    data.thumb_wild_card_path,
+    data.thumb_moderate_path,
+    data.thumb_safe_path,
+  ].filter((path) => path !== null).length;
+
+  if (ready < 3) {
+    const { data: stage } = await supabase
+      .from("stages")
+      .select("kind")
+      .eq("id", parsed.data.stageId)
+      .maybeSingle();
+    if (stage?.kind === "scheduled") notice = describeThumbnailShortfall(ready);
+  }
+
   return {
     ok: true,
     videoId: data.id,
     stageId: data.stage_id,
     stageEnteredAt: data.stage_entered_at,
     updatedAt: data.updated_at,
+    notice,
   };
 }

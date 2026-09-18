@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
 
 import { Modal } from "@/components/modal";
 import type { ThumbnailRole } from "@/lib/storage";
@@ -51,6 +51,8 @@ export function SwapDialog({
   to,
   busy,
   error,
+  returnFocusRef,
+  onClosed,
   onConfirm,
   onCancel,
 }: {
@@ -60,6 +62,19 @@ export function SwapDialog({
   busy: boolean;
   /** What the server refused with, if it did. */
   error: string | null;
+  /**
+   * The control this was opened from.
+   *
+   * Passed straight through to `Modal`. Without it the shell records
+   * `document.activeElement` at mount — which, because the textarea below has
+   * `autoFocus` and React applies that during the commit phase, is the
+   * textarea inside this dialog. On unmount that element is gone and focus
+   * falls to `<body>`. `components/modal.tsx` documents the hazard and this
+   * parameter is the answer to it; this dialog simply was not passing one.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Run after the dialog has gone, for the caller to place focus itself. */
+  onClosed?: () => void;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
 }) {
@@ -83,6 +98,8 @@ export function SwapDialog({
     <Modal
       title={`Swap ${ROLE_LABEL[from].toLowerCase()} → ${ROLE_LABEL[to].toLowerCase()}`}
       testId="swap-dialog"
+      returnFocusRef={returnFocusRef}
+      onClosed={onClosed}
       onClose={onCancel}
     >
       <form
