@@ -1,0 +1,33 @@
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_$ACTION_REF_1"
+
+
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_$ACTION_1:0"
+
+{"id":"60385220a99578ad7c331367a8390634dba7843dac","bound":"$@1"}
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_$ACTION_1:1"
+
+[null]
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_$ACTION_KEY"
+
+k706dd3c393329b2247a57b287f82afcd
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_next"
+
+/
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_email"
+
+dev@nertube.test
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="_1_password"
+
+nertube-dev-password
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc
+Content-Disposition: form-data; name="0"
+
+[null,"$K1"]
+------WebKitFormBoundaryHNeQ9qhnFCOHRbwc--

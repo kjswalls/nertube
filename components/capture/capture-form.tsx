@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { captureVideoAction, type CaptureState } from "@/app/actions/videos";
+import { CaptureBuckets } from "@/components/ideas/assign/capture-buckets";
 
 import { readLastChannel, writeLastChannel } from "./last-channel";
 
@@ -29,15 +30,20 @@ export interface CaptureChannel {
  * drift. `variant` changes what happens *after* a save — the modal closes, the
  * page clears itself and waits for the next idea — and nothing else.
  *
- * The fast path is one field. Hook, notes and tags live behind a disclosure
- * that is closed until asked for, so nothing between `c` and Enter can be
- * mistaken for something that wants filling in.
+ * The fast path is one field. Hook, notes, tags and the two content buckets
+ * live behind a disclosure that is closed until asked for, so nothing between
+ * `c` and Enter can be mistaken for something that wants filling in. The
+ * buckets are the newest thing behind it and the one most able to break that
+ * promise: they are two menus whose options have to be *fetched*, so they are
+ * mounted only while the disclosure is open and ask for nothing until they are
+ * — see `components/ideas/assign/capture-buckets.tsx`.
  */
 export function CaptureForm({
   channels,
   initialChannelId,
   preferLastUsed,
   variant,
+  prefill,
   onSaved,
   autoFocus = true,
 }: {
@@ -51,6 +57,26 @@ export function CaptureForm({
    */
   preferLastUsed: boolean;
   variant: "modal" | "page";
+  /**
+   * Both content buckets, already chosen — the matrix's empty cell filling in
+   * the one thing it knows about an idea that does not exist yet.
+   *
+   * They ride as hidden inputs, so the no-JavaScript post carries them too, and
+   * they are stated on screen: a form that silently files an idea somewhere is
+   * worse than one that does not file it at all. Both axes or neither — a cell
+   * is an intersection, and half of one is not a thing the matrix can offer.
+   *
+   * The pair belongs to `initialChannelId`'s channel, and the composite foreign
+   * key in `0001_init.sql` binds a video's bucket to its own channel and axis —
+   * so a caller that passes these must not also offer a channel switch. The
+   * matrix passes one channel for exactly that reason.
+   */
+  prefill?: {
+    verticalId: string;
+    verticalName: string;
+    horizontalId: string;
+    horizontalName: string;
+  };
   /** Modal variant: called once a capture has been written. */
   onSaved?: (saved: { id: string; title: string; channelName: string }) => void;
   autoFocus?: boolean;
@@ -87,6 +113,18 @@ export function CaptureForm({
   const [title, setTitle] = useState("");
   const [more, setMore] = useState(false);
   /**
+   * The two content buckets, as ids or `""`.
+   *
+   * Held here rather than inside the pickers because the form owns every other
+   * field's value and because they have to survive the disclosure being closed
+   * and reopened — and because changing channel has to clear them, which is a
+   * fact about the *form*, not about either menu. A prefilled pair (the
+   * matrix's empty cell) is simply their initial value: one source for the
+   * choice, whether it was made in the grid or in the menu.
+   */
+  const [verticalId, setVerticalId] = useState(prefill?.verticalId ?? "");
+  const [horizontalId, setHorizontalId] = useState(prefill?.horizontalId ?? "");
+  /**
    * The empty-title refusal, decided here: it must never cost a round trip,
    * and `required` alone cannot see that "   " is empty.
    */
@@ -112,6 +150,7 @@ export function CaptureForm({
   const notesId = `${ids}-notes`;
   const tagsId = `${ids}-tags`;
   const moreId = `${ids}-more`;
+  const bucketsHintId = `${ids}-buckets-hint`;
   const hintId = `${ids}-hint`;
 
   /**
@@ -161,6 +200,10 @@ export function CaptureForm({
     setMore(false);
     setClientError(null);
     setConfirmationHidden(false);
+    // Back to the pair the form started with: none, or the cell's if this form
+    // is the matrix's, which is still the cell the person is filling.
+    setVerticalId(prefill?.verticalId ?? "");
+    setHorizontalId(prefill?.horizontalId ?? "");
     formRef.current?.reset();
     // `reset()` also resets the radios to their *rendered* `defaultChecked`,
     // and the channel is React state, so put it back.
@@ -185,11 +228,28 @@ export function CaptureForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outcome]);
 
+  /**
+   * Aim the capture at a channel, forgetting any buckets chosen for the last
+   * one.
+   *
+   * A bucket belongs to a channel — `videos` binds each slot to its own
+   * channel's bucket of the right axis through a three-column foreign key — so
+   * a vertical picked for one channel is not a value the next channel has.
+   * Carrying it over would post an id the database refuses; the honest thing is
+   * to start that channel's filing from nothing.
+   */
+  function aimAt(nextChannelId: string): void {
+    if (nextChannelId === channelId) return;
+    setChannelId(nextChannelId);
+    setVerticalId("");
+    setHorizontalId("");
+  }
+
   /** Aim the capture at the nth channel (1-based), if there is one. */
   function retarget(position: number): boolean {
     const channel = channels[position - 1];
     if (!channel) return false;
-    setChannelId(channel.id);
+    aimAt(channel.id);
     return true;
   }
 
@@ -317,13 +377,41 @@ export function CaptureForm({
         />
         <p id={hintId} className="text-xs text-muted">
           Enter saves it as an idea
-          {current ? ` in ${current.name}` : ""}. Shift+Enter adds a hook, notes
-          and tags.
+          {current ? ` in ${current.name}` : ""}. Shift+Enter adds a hook, notes,
+          tags and the two buckets.
           {channels.length > 1
             ? " Alt+1–9, or the chips below, pick the channel."
             : ""}
         </p>
+
+        {prefill ? (
+          <p data-testid="capture-prefill" className="text-xs text-muted">
+            Filing it under{" "}
+            <span className="text-foreground">{prefill.verticalName}</span> ·{" "}
+            <span className="text-foreground">{prefill.horizontalName}</span>.
+          </p>
+        ) : null}
       </div>
+
+      {/*
+        The buckets, when the disclosure is closed: hidden inputs, so the
+        browser posts them whether or not this component's own submit handler
+        ever runs — and so a matrix cell's pair survives a no-JavaScript post.
+
+        **Exactly one control per name.** When the disclosure is open the
+        pickers below carry these names instead; rendering both would put two
+        `verticalId` entries in the FormData, and `formData.get` answers with
+        the first, which would be whichever one the JSX happened to render
+        earlier. The value is the same state either way, so opening the
+        disclosure shows the cell's pair already selected rather than replacing
+        it.
+      */}
+      {!more && (verticalId !== "" || horizontalId !== "") ? (
+        <>
+          <input type="hidden" name="verticalId" value={verticalId} />
+          <input type="hidden" name="horizontalId" value={horizontalId} />
+        </>
+      ) : null}
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="text-sm font-medium">Channel</legend>
@@ -346,7 +434,7 @@ export function CaptureForm({
                   name="channelId"
                   value={channel.id}
                   checked={checked}
-                  onChange={() => setChannelId(channel.id)}
+                  onChange={() => aimAt(channel.id)}
                   className="sr-only"
                 />
                 {index < 9 ? (
@@ -419,6 +507,20 @@ export function CaptureForm({
                 placeholder="comma, separated"
               />
             </div>
+
+            {/* The two content buckets. One of each axis, this channel's only,
+                and nothing is asked of the server until this disclosure is
+                open. */}
+            <CaptureBuckets
+              channelId={channelId}
+              vertical={verticalId}
+              horizontal={horizontalId}
+              hintId={bucketsHintId}
+              onChange={(axis, value) => {
+                if (axis === "vertical") setVerticalId(value);
+                else setHorizontalId(value);
+              }}
+            />
           </div>
         ) : null}
       </div>

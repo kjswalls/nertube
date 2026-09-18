@@ -1,0 +1,61 @@
+2:I["[project]/node_modules/next/dist/next-devtools/userspace/app/segment-explorer-node.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"SegmentViewNode"]
+4:"$Sreact.fragment"
+18:I["[project]/components/toast.tsx [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"ToastProvider"]
+1a:I["[project]/node_modules/next/dist/client/components/layout-router.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"default"]
+1c:I["[project]/node_modules/next/dist/client/components/render-from-template-context.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"default"]
+39:I["[project]/node_modules/next/dist/lib/framework/boundary-components.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"OutletBoundary"]
+3b:"$Sreact.suspense"
+48:I["[project]/node_modules/next/dist/lib/framework/boundary-components.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"ViewportBoundary"]
+52:I["[project]/node_modules/next/dist/lib/framework/boundary-components.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"MetadataBoundary"]
+:HL["/_next/static/chunks/%5Broot-of-the-server%5D__0tvyzzh._.css","style"]
+7:D"$11"
+7:D"$8"
+7:D"$13"
+1e:D"$20"
+1e:D"$1f"
+1e:D"$22"
+1e:D"$21"
+1e:D"$23"
+1e:[["$","title",null,{"children":"404: This page could not be found."},"$21","$24",1],["$","div",null,{"style":{"fontFamily":"system-ui,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\"","height":"100vh","textAlign":"center","display":"flex","flexDirection":"column","alignItems":"center","justifyContent":"center"},"children":["$","div",null,{"children":[["$","style",null,{"dangerouslySetInnerHTML":{"__html":"body{color:#000;background:#fff;margin:0}.next-error-h1{border-right:1px solid rgba(0,0,0,.3)}@media (prefers-color-scheme:dark){body{color:#fff;background:#000}.next-error-h1{border-right:1px solid rgba(255,255,255,.3)}}"}},"$21","$27",1],["$","h1",null,{"className":"next-error-h1","style":{"display":"inline-block","margin":"0 20px 0 0","padding":"0 23px 0 0","fontSize":24,"fontWeight":500,"verticalAlign":"top","lineHeight":"49px"},"children":404},"$21","$28",1],["$","div",null,{"style":{"display":"inline-block"},"children":["$","h2",null,{"style":{"fontSize":14,"fontWeight":400,"lineHeight":"49px","margin":0},"children":"This page could not be found."},"$21","$2a",1]},"$21","$29",1]]},"$21","$26",1]},"$21","$25",1]]
+7:["$","html",null,{"lang":"en","suppressHydrationWarning":true,"className":"h-full newsreader_a0021b2f-module__2hl-lq__variable instrument_sans_b61b5a58-module__DJSMya__variable jetbrains_mono_e0fb6517-module__7Kdvta__variable roboto_5d0fa9bc-module__XD2MtG__variable","children":[["$","head",null,{"children":["$","script",null,{"dangerouslySetInnerHTML":{"__html":"(function(){try{var d=document.documentElement,v=localStorage.getItem(\"nertube-theme\");if(v!==\"light\"&&v!==\"dark\")v=\"system\";d.setAttribute(\"data-theme-choice\",v);if(v===\"system\"){d.removeAttribute(\"data-theme\")}else{d.setAttribute(\"data-theme\",v)}}catch(e){}})()"}},"$8","$15",1]},"$8","$14",1],["$","body",null,{"className":"min-h-full bg-background font-sans text-foreground antialiased","children":["$","$L18",null,{"children":["$","$L1a",null,{"parallelRouterKey":"children","error":"$undefined","errorStyles":"$undefined","errorScripts":"$undefined","template":["$","$L1c",null,{},null,"$1b",1],"templateStyles":"$undefined","templateScripts":"$undefined","notFound":["$","$L2","c-not-found",{"type":"not-found","pagePath":"__next_builtin__not-found.js","children":["$1e",[]]},null,"$1d",0],"forbidden":"$undefined","unauthorized":"$undefined","segmentViewBoundaries":[["$","$L2",null,{"type":"boundary:not-found","pagePath":"__next_builtin__not-found.js@boundary"},null,"$2b",1],"$undefined","$undefined",["$","$L2",null,{"type":"boundary:global-error","pagePath":"__next_builtin__global-error.js"},null,"$2c",1]]},null,"$19",1]},"$8","$17",1]},"$8","$16",1]]},"$8","$12",1]
+2f:D"$33"
+2f:D"$30"
+34:D"$36"
+34:D"$35"
+34:D"$38"
+34:["$","$L39",null,{"children":["$","$3b",null,{"name":"Next.MetadataOutlet","children":"$@3c"},"$35","$3a",1]},"$35","$37",1]
+3e:D"$41"
+3e:D"$3f"
+3e:D"$42"
+3e:null
+43:D"$45"
+43:D"$44"
+43:D"$47"
+49:D"$4b"
+49:D"$4a"
+43:["$","$L48","da367d33v",{"children":"$L49"},"$44","$46",1]
+4c:D"$4e"
+4c:D"$4d"
+4c:D"$50"
+54:D"$56"
+54:D"$55"
+4c:["$","div","da367d33m",{"hidden":true,"children":["$","$L52",null,{"children":["$","$3b",null,{"name":"Next.Metadata","children":"$L54"},"$4d","$53",1]},"$4d","$51",1]},"$4d","$4f",1]
+0:{"f":[[["",{"children":["__PAGE__",{},"$undefined","$undefined",4096]},"$undefined","$undefined",4112],[["$","$L2","layout",{"type":"layout","pagePath":"layout.tsx","children":["$","$4","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/_next/static/chunks/%5Broot-of-the-server%5D__0tvyzzh._.css","precedence":"next_static/chunks/[root-of-the-server]__0tvyzzh._.css","crossOrigin":"$undefined","nonce":"$undefined"},null,"$5",0],["$","script","script-0",{"src":"/_next/static/chunks/_00_6dgw._.js","async":true,"nonce":"$undefined"},null,"$6",0]],"$7"]},null,"$3",1]},null,"$1",0],{"children":[["$","$4","c",{"children":[["$","$L2","c-page",{"type":"page","pagePath":"page.tsx","children":"$L2f"},null,"$2e",1],null,"$34"]},null,"$2d",0],{},null,false,null]},null,false,null],["$","$4","h",{"children":["$3e","$43","$4c"]},null,"$3d",0],false]],"q":"","i":true,"S":false,"h":null,"r":"$undefined","b":"development"}
+49:D"$57"
+49:[["$","meta","0",{"charSet":"utf-8"},"$35","$58",0],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"},"$35","$59",0]]
+60:I["[project]/node_modules/next/dist/lib/metadata/generate/icon-mark.js [app-client] (ecmascript)",["/_next/static/chunks/_00_6dgw._.js"],"IconMark"]
+3c:D"$5a"
+3c:null
+54:D"$5b"
+54:[["$","title","0",{"children":"NerTube"},"$35","$5c",0],["$","meta","1",{"name":"description","content":"A YouTube production pipeline: idea to published."},"$35","$5d",0],["$","link","2",{"rel":"icon","href":"/favicon.ico?favicon.2vob68tjqpejf.ico","sizes":"256x256","type":"image/x-icon"},"$35","$5e",0],["$","$L60","3",{},"$35","$5f",0]]
+2f:D"$64"
+2f:D"$66"
+2f:D"$67"
+2f:D"$6b"
+2f:D"$6d"
+2f:D"$6e"
+2f:D"$7b"
+2f:D"$7d"
+2f:D"$7e"
+2f:D"$81"
+2f:E{"digest":"NEXT_REDIRECT;replace;/now;307;","name":"Error","message":"NEXT_REDIRECT","stack":[["Home","/home/user/nertube/.next/dev/server/chunks/ssr/[root-of-the-server]__0d81gcj._.js",44,203,38,1,false]],"env":"Server","owner":"$30"}

@@ -19,6 +19,7 @@ import {
   THUMBNAIL_ROLES,
   type ThumbnailRole,
 } from "@/lib/storage";
+import type { BucketChoices, BucketOption } from "@/lib/buckets";
 import { readExpectation } from "@/lib/expectation";
 import { formatPublishDate } from "@/lib/next-action";
 import { requireUser } from "@/lib/supabase/require-user";
@@ -41,6 +42,7 @@ import {
   type SectionFacts,
 } from "@/components/video-sections/sections";
 import { VideoSections } from "@/components/video-sections/video-sections";
+import { FilingBlock } from "@/components/ideas/assign/filing-block";
 import { FlowFields, type FlowStage } from "@/components/video-detail/flow-fields";
 import { formatAge } from "@/components/video-detail/age";
 import { PackagingBlock } from "@/components/packaging/packaging-block";
@@ -116,7 +118,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -150,6 +152,8 @@ export default async function VideoDetailPage({
     { data: stageRows },
     { data: checklistRows },
     { data: swapRows },
+    { data: bucketRows },
+    { data: tagRows },
     sketchUrls,
   ] = await Promise.all([
     supabase
@@ -199,6 +203,38 @@ export default async function VideoDetailPage({
       .select("id, swapped_at, from_role, to_role, reason")
       .eq("video_id", id)
       .order("swapped_at", { ascending: false }),
+    /*
+      The channel's content buckets, both axes, in position order.
+
+      Read here rather than fetched by the picker (which is what capture's
+      modal does, and for the opposite reason): this page is already reading
+      the row that names two of them, in the same request, so a second round
+      trip would only widen the window in which the menus disagree with the
+      columns.
+
+      The picker is handed these split by axis, and that split is the whole of
+      why it cannot express an invalid choice — see `lib/buckets.ts`.
+    */
+    supabase
+      .from("buckets")
+      .select("id, axis, name, position")
+      .eq("channel_id", video.channel_id)
+      .order("position", { ascending: true }),
+    /*
+      Every tag this channel's videos already carry.
+
+      The tag editor offers them so the vocabulary converges instead of
+      sprawling (BRIEF.md wants tags so an idea can be *found again*, which is a
+      property of the whole bank). It is one column over one channel's rows —
+      PLAN.md's sizing is one user and hundreds of rows — counted in memory
+      below rather than by a `group by`, because PostgREST has no `unnest` and a
+      SQL function for a chip row would be a migration nobody needs.
+    */
+    supabase
+      .from("videos")
+      .select("tags")
+      .eq("channel_id", video.channel_id)
+      .limit(2000),
     // Four paths in one request: the concept sketch and the three variants.
     // `createSignedUrls` is batched for exactly this reason — see the helper.
     signedUrlsFor(supabase, [
@@ -293,6 +329,44 @@ export default async function VideoDetailPage({
     video.metrics_logged_at !== null &&
     swaps.length > 0 &&
     Date.parse(swaps[0].swappedAt) >= Date.parse(video.metrics_logged_at);
+
+  /*
+    The buckets, split by axis.
+
+    Two lists and not one with an `axis` field: a picker that is handed one
+    list has to filter it, and a picker that filters is a picker that can filter
+    wrongly. This is the only place the split happens.
+  */
+  const bucketChoices: BucketChoices = {
+    verticals: (bucketRows ?? [])
+      .filter((bucket) => bucket.axis === "vertical")
+      .map((bucket): BucketOption => ({ id: bucket.id, name: bucket.name })),
+    horizontals: (bucketRows ?? [])
+      .filter((bucket) => bucket.axis === "horizontal")
+      .map((bucket): BucketOption => ({ id: bucket.id, name: bucket.name })),
+  };
+
+  /*
+    The channel's tag vocabulary, most-used first.
+
+    Most-used first because the suggestion row is short and the tags worth
+    converging on are the ones already doing the work. Counted
+    case-insensitively — `Tutorial` and `tutorial` are one tag, which is what
+    `TagListSchema` says when either is written — and shown in the spelling that
+    is most common, because that is the one the bank's filter chips draw.
+  */
+  const tagCounts = new Map<string, { label: string; count: number }>();
+  for (const row of tagRows ?? []) {
+    for (const tag of row.tags ?? []) {
+      const key = tag.toLocaleLowerCase();
+      const seen = tagCounts.get(key);
+      if (seen) seen.count += 1;
+      else tagCounts.set(key, { label: tag, count: 1 });
+    }
+  }
+  const tagVocabulary = [...tagCounts.values()]
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .map((entry) => entry.label);
 
   const displayTitle = video.title.trim() === "" ? "Untitled" : video.title;
 
@@ -471,57 +545,73 @@ export default async function VideoDetailPage({
                  time. Keys are cheap and the warning is the kind that trains a
                  reader to ignore real missing keys, so they stay. */
               packaging: (
-                <PackagingBlock
-                  videoId={video.id}
-                  initial={{
-                    title: video.title,
-                    thumbnailConcept: video.thumbnail_concept,
-                    titleCandidates: video.title_candidates,
-                    hooks: video.hooks,
-                    packagingSkippedAt: video.packaging_skipped_at,
-                    packagingSkipReason: video.packaging_skip_reason,
-                  }}
-                  sketch={
-                    <ConceptSketch
-                      key="concept-sketch"
-                      videoId={video.id}
-                      userId={user.id}
-                      title={video.title}
-                      url={sketchUrl}
-                      hasSketch={video.thumbnail_concept_path !== null}
-                    />
-                  }
-                  titleWarning={
-                    <TitleTruncationWarning
-                      key="title-truncation-warning"
-                      savedTitle={video.title}
-                      savedCandidates={candidates}
-                    />
-                  }
-                  assist={{
-                    candidates: (
-                      <AssistPill
-                        key="assist-candidates"
-                        verb="Generate 20"
-                        what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+                <>
+                  <PackagingBlock
+                    videoId={video.id}
+                    initial={{
+                      title: video.title,
+                      thumbnailConcept: video.thumbnail_concept,
+                      titleCandidates: video.title_candidates,
+                      hooks: video.hooks,
+                      packagingSkippedAt: video.packaging_skipped_at,
+                      packagingSkipReason: video.packaging_skip_reason,
+                    }}
+                    sketch={
+                      <ConceptSketch
+                        key="concept-sketch"
+                        videoId={video.id}
+                        userId={user.id}
+                        title={video.title}
+                        url={sketchUrl}
+                        hasSketch={video.thumbnail_concept_path !== null}
                       />
-                    ),
-                    concept: (
-                      <AssistPill
-                        key="assist-concept"
-                        verb="Suggest concepts"
-                        what="Proposes thumbnail concepts for the chosen title."
+                    }
+                    titleWarning={
+                      <TitleTruncationWarning
+                        key="title-truncation-warning"
+                        savedTitle={video.title}
+                        savedCandidates={candidates}
                       />
-                    ),
-                    hooks: (
-                      <AssistPill
-                        key="assist-hooks"
-                        verb="Draft a third"
-                        what="Writes the hooks you have not written yet, up to three."
-                      />
-                    ),
-                  }}
-                />
+                    }
+                    assist={{
+                      candidates: (
+                        <AssistPill
+                          key="assist-candidates"
+                          verb="Generate 20"
+                          what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+                        />
+                      ),
+                      concept: (
+                        <AssistPill
+                          key="assist-concept"
+                          verb="Suggest concepts"
+                          what="Proposes thumbnail concepts for the chosen title."
+                        />
+                      ),
+                      hooks: (
+                        <AssistPill
+                          key="assist-hooks"
+                          verb="Draft a third"
+                          what="Writes the hooks you have not written yet, up to three."
+                        />
+                      ),
+                    }}
+                  />
+
+                  {/* The idea-bank fields, on the tab a bare `/videos/[id]`
+                    opens at: where this video sits in its channel's matrix and
+                    how it will be found again. See
+                    `components/ideas/assign/filing-block.tsx` for why they are
+                    here rather than under Schedule. */}
+                  <FilingBlock
+                    videoId={video.id}
+                    choices={bucketChoices}
+                    verticalId={video.vertical_id}
+                    horizontalId={video.horizontal_id}
+                    tags={video.tags ?? []}
+                    vocabulary={tagVocabulary}
+                  />
+                </>
               ),
 
               script: (
@@ -666,7 +756,9 @@ export default async function VideoDetailPage({
                   // are one tab along, and the rendering has to say which of
                   // the two it is holding — BRIEF.md principle 2.
                   thumbnailsHref={`/videos/${video.id}?section=thumbnails`}
-                  shippedLabel={shippedRole === null ? null : ROLE_LABEL[shippedRole]}
+                  shippedLabel={
+                    shippedRole === null ? null : ROLE_LABEL[shippedRole]
+                  }
                 />
               ),
             }}

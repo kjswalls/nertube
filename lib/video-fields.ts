@@ -195,6 +195,78 @@ export const NotesSchema = NullableText.refine(
   },
 );
 
+/* -------------------------------------------------------------------------- */
+/* Tags, and the two bucket slots                                              */
+/* -------------------------------------------------------------------------- */
+
+/** How many tags one video may carry, and how long each may be. */
+export const MAX_TAGS = 20;
+export const MAX_TAG_LENGTH = 40;
+
+/**
+ * The tag list, as the editor sends it and as capture's comma box becomes.
+ *
+ * Trimmed, emptied entries dropped, **case-insensitively de-duplicated keeping
+ * the first spelling**. The de-duplication is the point of the field: BRIEF.md
+ * asks for tags so an idea can be found again, and a bank holding `Tutorial`,
+ * `tutorial` and `tutorial ` has three vocabularies and no way to filter by any
+ * of them. The first spelling wins rather than a lower-cased one, because the
+ * tag a person typed is the tag they will recognise in a filter chip.
+ *
+ * The order is the order they were added; the editor renders them that way and
+ * `videos.tags` is a `text[]`, which preserves it.
+ */
+export const TagListSchema = z
+  .array(z.string())
+  .transform((tags) => {
+    const seen = new Set<string>();
+    const kept: string[] = [];
+    for (const raw of tags) {
+      const tag = raw.trim();
+      if (tag === "") continue;
+      const key = tag.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      kept.push(tag);
+    }
+    return kept;
+  })
+  .refine((tags) => tags.length <= MAX_TAGS, {
+    message: `Keep it to ${MAX_TAGS} tags or fewer.`,
+  })
+  .refine((tags) => tags.every((tag) => tag.length <= MAX_TAG_LENGTH), {
+    message: `Each tag has to be ${MAX_TAG_LENGTH} characters or fewer.`,
+  });
+
+/**
+ * The comma-separated tag box capture has always had:
+ * `"tutorial, behind the scenes,,tutorial"` → `["tutorial", "behind the scenes"]`.
+ *
+ * One schema behind two shapes, so the box and the editor cannot disagree about
+ * what a tag is.
+ */
+export const TagTextSchema = z
+  .string()
+  .transform((value) => value.split(","))
+  .pipe(TagListSchema);
+
+/**
+ * One of the two bucket slots: a bucket id, or nothing.
+ *
+ * `""` is what an unset `<select>` and an untouched hidden input both post, and
+ * it means *not filed* — the same as `null`. Anything else has to be a uuid,
+ * because the only thing this column may hold is `buckets.id`.
+ *
+ * What is **not** here is any check that the bucket belongs to this channel or
+ * sits on this axis. That is the three-column composite foreign key in
+ * `0001_init.sql`, and duplicating it in zod would be a second opinion that can
+ * drift — the picker is built so the question cannot arise, and the database is
+ * what makes that true rather than what trusts it (`lib/buckets.ts`).
+ */
+export const BucketSlotSchema = z
+  .union([z.literal(""), z.uuid("That is not a bucket."), z.null()])
+  .transform((value) => (value === "" ? null : value));
+
 export const WaitingOnSchema = NullableText.refine(
   (value) => value === null || value.length <= MAX_WAITING_ON_LENGTH,
   {
@@ -229,6 +301,19 @@ const FIELDS = {
   youtubeUrl: YoutubeUrlSchema.optional(),
   notes: NotesSchema.optional(),
   waitingOn: WaitingOnSchema.optional(),
+  /**
+   * The two content buckets, one per axis. `null` unfiles the video from that
+   * axis; absent leaves it alone.
+   *
+   * They are two keys and not one pair because they are two columns and either
+   * can be set on its own: filing an idea as a `tutorial` before knowing which
+   * pillar it belongs to is an ordinary half-decision, and a pair would force
+   * the picker to re-send the other axis on every change.
+   */
+  verticalId: BucketSlotSchema.optional(),
+  horizontalId: BucketSlotSchema.optional(),
+  /** The whole tag list, absolute like every other value this page sends. */
+  tags: TagListSchema.optional(),
   /**
    * Archive (`true`) or restore (`false`). Not a stage and not a delete: the
    * row keeps its stage, its dates and its notes, and the board's queries

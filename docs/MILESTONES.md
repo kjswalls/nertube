@@ -3530,3 +3530,338 @@ the call site, and a full run is clean.
 
 The skip is `e2e/session-refresh.spec.ts`, which skips itself unless the stack
 was started with a short access-token TTL; `npm run e2e:refresh` runs it.
+
+## M5 — The content-bucket matrix
+
+### What this slice delivers
+
+- **`/c/[slug]/ideas?view=matrix`** — pillars down, formats across, every
+  intersection drawn. The route file branches on `?view=` immediately after the
+  channel lookup and hands everything past that branch to
+  `components/ideas/matrix/**`, so a request for the grid never pays for the
+  bank's reads and the two halves of M5 share one URL and one channel lookup.
+- **The empty cell as a prompt.** BRIEF.md's sentence about this feature is
+  *"Matrix view where each empty cell is a prompt for a new idea"*, so the empty
+  cell is the component with the most care in it. It is a real
+  `<a href="/capture?c=…&vertical=…&horizontal=…">` — it works with no
+  JavaScript, opens in a new tab, can be copied — and a plain left-click is
+  intercepted to open the same capture form in a dialog without leaving the
+  grid. What it writes really carries both bucket ids.
+- **Quota progress**, `n of q`, counted exactly as PLAN.md defines it: videos
+  whose `target_publish_date` falls in the current month, per bucket. A bucket
+  with `monthly_quota null` gets a count and **no bar**.
+- **The honest empty.** `lib/defaults.ts` seeds the eight formats and leaves the
+  verticals empty on purpose, so the first visit to this page is guaranteed to
+  be the one where half the grid does not exist. It says what is missing in the
+  brief's own words, still shows the axis it does have as a labelled strip, and
+  names the bucket editor as M7 on a disabled control rather than in a tooltip.
+- **Reading at a glance, never by colour alone** — a count in the mono face, a
+  weight bar whose *length* is that count against the busiest cell, and a `●n`
+  mark for how many have been published. A legend says what all three mean,
+  including that an absent dot is the "never published here" signal.
+- **The drill-down.** `?cell=<verticalId>:<horizontalId>` opens the list of
+  exactly those videos under the grid, each with the stage it is sitting in.
+- **`components/ideas/matrix/tally.ts`** — the arithmetic, pure and unit-tested
+  (`tally.test.ts`, 15 cases): the UTC month window, what falls inside it, the
+  per-cell and per-bucket counts, and the two bar widths.
+- **`e2e/matrix.spec.ts`** — five claims, run against the real app and the real
+  database.
+
+### What it counts, and why it is not only ideas
+
+The cell count is **every non-archived video in the channel at that
+intersection**, at whatever stage — not only the rows still in the Idea stage
+that `components/ideas/list/**` calls the bank.
+
+The reason is the question the matrix is for: *where am I over-invested, and
+where have I never published*. A pillar with six published videos and no ideas
+left is the most invested pillar on the channel; counting only unstarted ideas
+would draw it as empty and invite a seventh. Archived rows are excluded for the
+mirror-image reason — a shelved idea is not an investment.
+
+The consequence is stated on the page rather than left to be discovered: a cell
+says "3 videos", not "3 ideas", its drill-down names the stage each one is in,
+and the two views are reached from one switch so nobody has to reconcile them
+from memory. The number in a cell is therefore **not** the number of rows the
+bank shows for the same two buckets.
+
+### The quota, and the number beside it
+
+Two different questions get two different numbers in every axis header:
+
+- **the bucket total** — how many videos carry this bucket at all, which is the
+  over-investment reading;
+- **`n of q` this month** — PLAN.md's quota count, and only when there is a
+  quota to be `of`.
+
+They are deliberately not the same number and neither is the sum of the row's
+cells: a video with a pillar and no format is an investment in that pillar and
+sits in no cell. Rather than let the arithmetic look broken, the page states the
+difference underneath the grid — *"2 videos are not on the grid: they are
+missing a pillar, a format, or both"* — which is also, quietly, a prompt.
+
+"Met" is a word before it is a hue, and an over-quota bar fills rather than
+overflowing its track; the words beside it say by how much.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| A cell counts every non-archived video, not only Idea-stage rows. | Count the bank only. Rejected: it makes "where have I never published" unanswerable from the grid, which is half of what BRIEF.md asks the matrix for. |
+| An axis header's total is the whole bucket (independent of the other axis), with an explicit off-grid line under the grid. | An extra "No pillar" row and "No format" column. Rejected: two more headers and eight more cells to make the sum work, on a page whose point is the gaps. |
+| An empty cell opens capture **in place**, over a link that still works without JavaScript. | Always navigate to `/capture`. Rejected: filling a hole and carrying on reading the grid is the whole interaction, and a full-page form loses the place. |
+| A prefilled capture shows one channel and no channel chips. | Let `1`..`9` retarget and clear the buckets. Rejected: the composite foreign key binds a bucket to its own channel, so the choice would be offered and then refused by the database. |
+| The populated cell drills down into a panel on the matrix (`?cell=`). | Link into the bank's bucket filters. Deferred rather than rejected: the two slices landed in parallel, and a link into a filter that may not filter yet is the dead-link mistake M1 and M3 both filed. The integration pass can add it. |
+| "This month" is the UTC calendar month, compared as `YYYY-MM-DD` strings. | The server's local month. Rejected: `target_publish_date` is a zoneless `date`, the board already formats target dates in UTC, and string comparison of zero-padded ISO dates is exact. |
+| Archived videos are excluded from every count. | Include them, or offer a toggle. Rejected for now: a shelved idea is not an investment, and a toggle is the bank's job. |
+
+### Deviations from PLAN.md, stated plainly
+
+- **`?cell=` is not in PLAN.md.** Its M5 line says the matrix has "counts +
+  quota progress" and that an empty cell prefills capture; the task brief adds
+  that a populated cell should "list or link to" its videos. The panel is how
+  that is satisfied without depending on another slice's filters. It is one
+  parameter, server-rendered, and costs the grid no client JavaScript.
+- **`captureVideo` grew two optional fields.** PLAN.md's capture line already
+  says the disclosure reveals "hook, notes, tags, vertical, horizontal"; M1
+  shipped it without the last two because there was nothing to pick them from.
+  This is that line arriving, from the matrix rather than from a disclosure —
+  and the pair is checked against the channel and the axis *before* the video is
+  created, so a stale id refuses the capture instead of creating an idea it then
+  fails to file.
+- **`p` promote** (PLAN.md's M5 list) belongs to the idea-bank slice and is not
+  built here.
+- **No migration.** The schema already had all of it: `buckets` with
+  `monthly_quota int null check (> 0)`, `videos.vertical_id` /
+  `horizontal_id` bound by three-column composite foreign keys through the
+  pinned axis columns, and both columns already in the client's `UPDATE` grant
+  in `0001_init.sql`. Nothing here weakens any of that; the pre-flight check in
+  `captureVideo` is about *when* a bad pair is refused, not *whether*.
+
+### Honest limits
+
+- **There is still no way to create or rename a bucket in the product.** The
+  matrix says so, on the control, and names M7. The e2e fixture writes the three
+  pillars in SQL for exactly that reason.
+- **A video's buckets can only be set at capture time.** `captureVideo` is the
+  only writer of `vertical_id` / `horizontal_id` in the application; a video
+  captured without them cannot be filed from the matrix, from the bank or from
+  the video page. That is the off-grid line's real cost, and it wants a picker
+  on the video page or in the bank — the list slice or M7.
+- **The quota is per bucket, not per cell**, which is what PLAN.md defines. A
+  cell shows no quota and cannot.
+- **"Never published" is the absence of a mark.** It is stated in the legend and
+  in every cell's accessible description, but a reader who does not read the
+  legend sees only that some cells have a dot.
+- **Eight formats fit; twelve will scroll.** The grid's strip scrolls sideways
+  by itself rather than letting a wide table reach the viewport, and the mobile
+  pass is M9.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | 8 routes, compiled |
+| `npm test` | 13 files, 250 tests passed |
+| `./scripts/verify-db.sh nertube_matrix_verify` | OK — migrations applied, 13 SQL test files passed |
+| `npx playwright test matrix.spec` | 5 passed |
+| `npx playwright test` (whole suite) | 144 passed, 1 skipped |
+
+Two notes on how the suite was run, because both are honest caveats rather than
+footnotes. It was run on its own ports and its own database
+(`E2E_REUSE=0 E2E_PORT=3117 DEV_STACK_PORT=54371 DEV_STACK_POSTGREST_PORT=54372
+NERTUBE_DEV_DB=nertube_matrix`): the idea-bank slice was building in the same
+working tree at the same time, and two Playwright runs sharing one dev stack,
+one app port and one `test-results/` directory interfere in ways that look like
+product bugs. And on the first full run two `e2e/m2-review.spec.ts` cases failed
+inside the video page's hydration window under that load; re-run alone, all
+thirteen of that file's cases pass. The skip is `session-refresh`, which skips
+itself unless the stack was started with a short token TTL.
+
+## M5 — Filing an idea: the two buckets, and the tags
+
+### What this slice delivers
+
+- **A bucket picker that cannot express an invalid choice.**
+  `components/ideas/assign/bucket-select.tsx` is one native `<select>` per axis,
+  handed one channel's buckets *on that axis* and nothing else. The three ways
+  an assignment can be wrong are all answered by construction: a select without
+  `multiple` holds one value (and `videos.vertical_id` is one column, so the
+  database agrees); the options come from one `channel_id`; and the two axes are
+  two controls, because `BucketChoices` is two lists precisely so no caller can
+  filter one wrongly. The composite foreign keys enforce all three anyway —
+  which is the point of doing it in this order.
+- **The bucket fields in capture's disclosure.** Shift+Enter still reveals hook,
+  notes and tags, and now the two menus as well. Everything about them is on the
+  far side of the fast path: they are *unmounted* until the disclosure opens,
+  and their options are not fetched until they mount (`app/actions/buckets.ts`).
+  `c`, type, Enter is byte-for-byte the interaction it was, and costs the same
+  zero queries it did.
+- **The filing block on `/videos/[id]`** —
+  `components/ideas/assign/filing-block.tsx`, under the packaging block on the
+  tab a bare video URL opens at. This closes the hole the matrix slice filed as
+  its first honest limit: *"a video's buckets can only be set at capture time …
+  it wants a picker on the video page"*. An idea captured in ten seconds can now
+  be filed afterwards, which is the only way the matrix's empty cells ever get
+  filled by anything other than a new capture.
+- **A real tag editor.** Chips with a remove button, an input that takes Enter,
+  a comma or a blur, Backspace-at-empty to drop the last one, and **the
+  channel's existing vocabulary offered as one-click chips plus the input's own
+  `<datalist>`**. BRIEF.md asks for tags so an idea can be found again, which is
+  a property of the vocabulary rather than of any one video: converging has to
+  be the path of least effort or it does not happen.
+- **One rule for what a tag is**, `TagListSchema` in `lib/video-fields.ts`:
+  trimmed, empties dropped, **de-duplicated case-insensitively keeping the first
+  spelling**, twenty of at most forty characters. Capture's comma box is that
+  same schema behind a `split(",")`; it used to be a second copy in
+  `app/actions/videos.ts` that did not fold `Tutorial` into `tutorial`.
+- **The database's refusal, in words.** `describeBucketRefusal` in
+  `lib/buckets.ts` turns a `23503` naming
+  `videos_vertical_id_channel_id_vertical_axis_fkey` into a sentence about what
+  happened and what to do, and `updateVideo` reports it as a **conflict** — the
+  page is holding ids the row has moved past, so a Reload is the only honest
+  offer, not a Retry.
+- **`supabase/tests/55_bucket_assignment.test.sql`** and
+  **`e2e/buckets.spec.ts`**, described below.
+
+### Where the block went, and why
+
+The Packaging tab, under the gate, in a bordered `Filing` section.
+
+The alternative was the Schedule tab, where the other idea-bank field (`notes`)
+lives. It was rejected because what a video *is* — this channel's money pillar,
+done as a review, tagged `index funds` — is the same kind of fact as its title
+and its thumbnail concept, and a different kind from its target date. Packaging
+is also the tab a bare `/videos/[id]` opens at and therefore the first screen an
+idea is ever opened on; filing belongs where you land, not a tab along. A sixth
+section was the other alternative and would have been a tab with two fields in
+it.
+
+### The picker's promise, stated exactly
+
+There is no application-level check anywhere in this slice that a bucket belongs
+to the video's channel or sits on the right axis, and that is deliberate. The
+guarantee is the three-column composite foreign key in `0001_init.sql`; a second
+opinion in TypeScript is a thing that can drift from it, and the drift would be
+silent. What the application owes the user is two things the database cannot do:
+never offer a choice the key would refuse, and explain the refusal if one ever
+arrives anyway (a stale tab, a hand-made POST). Both are built; neither is a
+re-derivation of the constraint.
+
+### Changing channel is not a thing — what was actually found
+
+The task asked whether a video can move channel. It cannot, in four independent
+ways, and the SQL test now pins all of them:
+
+1. **No UI offers it.** `VideoPatchSchema` has no `channelId` key, so
+   `updateVideo` cannot write the column; `moveVideo` goes through `move_video`,
+   which only ever touches `stage_id`; `captureVideo` is the only writer of
+   `videos.channel_id`, at creation.
+2. **The stage would not come with it.** `foreign key (stage_id, channel_id)
+   references stages (id, channel_id)` means a bare `update videos set
+   channel_id` is refused with `23503` even when both bucket slots are null.
+3. **A client cannot bring the stage along either.** `UPDATE (stage_id)` is
+   revoked from `authenticated`, so writing the pair fails with `42501` before
+   any constraint is consulted.
+4. **With buckets set, the bucket keys refuse it too.** Run as a role that
+   *does* hold the grant, moving the row to another channel fails `23503` until
+   both slots are cleared in the same statement — which is the database
+   insisting on exactly the rule this slice's UI would have to implement if a
+   channel switcher ever existed.
+
+So the pickers do not need to clear anything on a channel change, because there
+is no channel change. The one place a channel *can* change under a bucket choice
+is capture, where the chips retarget the form — and there both choices are reset
+to "not filed" and the menus reload, because a bucket picked for one channel is
+not a value the next channel has.
+
+### What was run
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm test` | see the integration pass — unchanged by this slice |
+| `./scripts/verify-db.sh nertube_m5_buckets` | OK — migrations applied, **14** SQL test files passed |
+| `npx playwright test buckets` | see below |
+
+### The SQL test, and what it adds to `50_buckets`
+
+`50_buckets.test.sql` (M0) already proves the vertical slot refuses another
+channel's bucket, the wrong axis and another tenant's bucket.
+`55_bucket_assignment.test.sql` is about the picker's own promises:
+
+- **One slot per axis, asserted against the catalogue.** Exactly two foreign
+  keys from `videos` into `buckets`; each on three columns; each pointing at
+  `(id, channel_id, axis)`; each keyed on `(slot, channel_id, matching axis)`;
+  and both slots plain `uuid` columns. "At most one vertical" is the *shape* of
+  the schema, not a rule any code checks, so the shape is what is tested — a
+  third bucket column added later would fail this without a line of application
+  code changing.
+- **The horizontal slot, refused all three ways** (wrong axis, another channel,
+  and the pinned `horizontal_axis` rewritten — `23503`, `23503`, `23514`), with
+  a follow-up read proving no refused write left anything behind. 50 only ever
+  exercises the vertical slot, so a key written with the wrong axis column on
+  the other slot would have gone unnoticed there.
+- **Clearing** one axis and then both, with the row and the other axis intact.
+- **The four channel-move refusals** above.
+- **`tags`**: in `authenticated`'s `UPDATE` grant (so the editor needs no RPC),
+  persists, and empties to `{}` rather than to NULL.
+
+### Deviations from PLAN.md, stated plainly
+
+- **No migration, again.** Everything this slice writes was already in
+  `0001_init.sql`, including both bucket columns and `tags` in the client's
+  `UPDATE` grant. Nothing here weakens the composite keys; the only thing added
+  around them is a translation of their refusal.
+- **PLAN.md's M5 line does not mention a tag editor or a bucket picker on the
+  video page.** BRIEF.md does ask for both, in the idea-bank section ("An idea
+  can be tagged with one of each") and in quick capture ("title, one-line hook,
+  notes, tags"), and M5 is the milestone where buckets exist at all. The matrix
+  slice's own honest-limits list named the video-page picker as the missing
+  piece.
+- **Capture's buckets are fetched, not rendered with the page.** Every other
+  option list in the app comes down with its server render. This one does not,
+  because the `c` modal is mounted by the sidebar on *every* signed-in route,
+  and handing it the buckets would mean a query per page load for a dialog that
+  is usually never opened. See `app/actions/buckets.ts`.
+- **`app/actions/buckets.ts` is a new action file** holding one read. PLAN.md's
+  action list has `updateBuckets` for M7; this is its file arriving early with
+  the read half.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| Filing lives on the Packaging tab, under the gate. | A sixth "Idea" section, or the Schedule tab beside `notes`. Rejected: a tab for two fields, and filing is about what a video *is*, not when it goes out. |
+| A native `<select>` per axis. | A chips-and-menu combobox. Rejected: no dependency budget, and a select is already one tab stop, keyboard-operable, type-to-find and native on a phone — for a list of three to twelve words there is nothing to gain. |
+| The empty option reads "— not filed —". | "None". Rejected: a video with no pillar has not been assigned nothing, it is one nobody has filed yet, and the matrix counts it nowhere. |
+| Tags de-duplicate case-insensitively, first spelling wins. | Keep both spellings, or lower-case everything. Rejected: four spellings of one tag is what makes the bank's tag filter useless, and lower-casing rewrites what the person typed under them. |
+| The tag input commits on blur as well as Enter. | Enter only. Rejected: a typed tag that vanishes because you clicked elsewhere is the small betrayal that stops people using a field. |
+| Suggestions are this channel's tags, most-used first, capped at twelve, with the whole vocabulary in a `<datalist>`. | Every tag as a chip. Rejected: a channel with sixty tags would draw sixty buttons above the field it is meant to help. |
+| Capture's pickers fetch their options when the disclosure opens. | Read the buckets in `AppShell` for every signed-in route. Rejected: a query per page load for a dialog usually never opened is the same friction in a different currency. |
+| A refused bucket is reported as a conflict with a Reload. | A Retry. Rejected: the same patch would be refused the same way; what is stale is the page's idea of the channel's buckets. |
+| The bucket menus grey out while a save is in flight. | Let a second pick queue behind the first. Rejected: the queue parks work behind a failure rather than sending it, so a second pick made during a failing save could sit on screen having never been written. |
+
+### Honest limits
+
+- **Still no way to create, rename or delete a bucket in the product** — that is
+  M7, and a channel's pillars are still empty until someone writes them. The
+  vertical picker says so in place rather than rendering an empty menu.
+- **The tag vocabulary is one query over the channel's videos** (`select tags …
+  limit 2000`), counted in memory. That is right for PLAN.md's sizing — one
+  user, hundreds of rows — and would want a `group by` over an `unnest` if a
+  channel ever held tens of thousands.
+- **A tag added here appears in this page's suggestion row immediately, but the
+  bank's filter chips only after that route re-renders.** `updateVideo` now
+  revalidates `/c/[slug]/ideas`, so a navigation is enough; a second open tab is
+  not told.
+- **The capture pickers do not suggest tags.** Capture's tag box is still the
+  comma-separated one, deliberately: it is behind the disclosure on the
+  fastest path in the product, and the channel can still change underneath it.
+- **Two writes, two status lines.** The bucket row and the tag editor each have
+  their own queue and their own line, as every other pair of controls on this
+  page does. They share the page's one version token, so a save in one does not
+  make the other report a conflict.

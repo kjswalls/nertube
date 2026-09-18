@@ -122,11 +122,11 @@ export async function AppShell({
     */
     <div className="flex min-h-dvh w-full overflow-x-clip">
       {/*
-        The bypass block (WCAG 2.4.1). The sidebar is nine tab stops on a
-        two-channel account — wordmark, Capture, Now, Board, each channel, +
-        New channel, Theme, Sign out — and it renders before the page on every
-        signed-in route, so without this a keyboard user walks all of it to
-        reach the first thing on the page, every time.
+        The bypass block (WCAG 2.4.1). The sidebar is ten tab stops on a
+        two-channel account — wordmark, Capture, Now, Board, Ideas, Calendar,
+        each channel, + New channel, Theme, Sign out — and it renders before
+        the page on every signed-in route, so without this a keyboard user
+        walks all of it to reach the first thing on the page, every time.
 
         Off-screen until focused rather than `display: none`, because a hidden
         element is not focusable and a skip link that cannot be focused is not a

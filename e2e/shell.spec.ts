@@ -219,10 +219,7 @@ test('the sidebar is a real nav, 224px wide, and says where you are without colo
     'aria-current',
     'page',
   );
-  for (const [name, milestone] of [
-    ['Calendar', 'M6'],
-    ['Ideas', 'M5'],
-  ] as const) {
+  for (const [name, milestone] of [['Calendar', 'M6']] as const) {
     const item = sidebar.getByRole('button', { name: `${name} ${milestone}`, exact: true });
     // `aria-disabled`, not `disabled`: it says "unavailable" *and* stays in the
     // tab order, so the explanation is reachable without a mouse.
@@ -237,14 +234,22 @@ test('the sidebar is a real nav, 224px wide, and says where you are without colo
     await expect(item).toBeFocused();
   }
 
-  // `/now` was one of those three until M3 built it. It is a link now, and it
-  // has to be a working one — the rule the disabled controls exist to keep is
-  // "no dead links in the sidebar", not "no links".
+  // `/now` was one of those three until M3 built it, and Ideas was one until M5
+  // did. Both are links now, and they have to be working ones — the rule the
+  // disabled controls exist to keep is "no dead links in the sidebar", not "no
+  // links". Ideas is the one M3's review filed as unreachable by keyboard and
+  // explained only by a tooltip; building the page it points at is the fix.
+  const ideasLink = sidebar.getByRole('link', { name: 'Ideas', exact: true });
+  await expect(ideasLink).toHaveAttribute('href', '/c/personal/ideas');
+  await expect(ideasLink).not.toHaveAttribute('aria-current', /.*/);
+
   const nowLink = sidebar.getByRole('link', { name: 'Now', exact: true });
   await expect(nowLink).toHaveAttribute('href', '/now');
   await expect(nowLink).not.toHaveAttribute('aria-current', /.*/);
 
-  // Nothing in the sidebar points at a route that does not exist.
+  // Nothing in the sidebar points at a route that does not exist. `/calendar`
+  // is M6 and is still a disabled control, not a link; the idea bank lives
+  // under its channel (`/c/[slug]/ideas`), never at a bare `/ideas`.
   const hrefs = await sidebar.getByRole('link').evaluateAll((links) =>
     links.map((link) => (link as HTMLAnchorElement).getAttribute('href') ?? ''),
   );

@@ -11,9 +11,11 @@ import {
   type Hook,
   type TitleCandidate,
 } from "@/lib/packaging";
+import { describeBucketRefusal } from "@/lib/buckets";
 import {
   CHANGED_ELSEWHERE,
   NullableText,
+  TagTextSchema,
   VideoPatchSchema,
   type VideoPatchInput,
 } from "@/lib/video-fields";
@@ -41,10 +43,6 @@ import { requireUser } from "@/lib/supabase/require-user";
 /* Input                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** How many tags one capture may carry, and how long each may be. */
-const MAX_TAGS = 20;
-const MAX_TAG_LENGTH = 40;
-
 /**
  * A single-line value from the capture form: trimmed, and `undefined` when it
  * is empty, so the key is simply left out of the follow-up update.
@@ -56,27 +54,16 @@ const MAX_TAG_LENGTH = 40;
 const OptionalText = NullableText.transform((value) => value ?? undefined);
 
 /**
- * The comma-separated tag box. `"tutorial, behind the scenes,,tutorial"` →
- * `["tutorial", "behind the scenes"]`.
+ * The comma-separated tag box.
+ *
+ * `TagTextSchema` is the detail page's tag rules — trim, drop the empties,
+ * de-duplicate case-insensitively, twenty of at most forty characters — reached
+ * through a comma-split. Capture and the tag editor on `/videos/[id]` write the
+ * same column, so they get the same answer to "what is a tag"; this file used
+ * to carry its own copy, and the copy did not de-duplicate `Tutorial` against
+ * `tutorial`.
  */
-const Tags = z
-  .string()
-  .transform((value) =>
-    Array.from(
-      new Set(
-        value
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter((tag) => tag !== ""),
-      ),
-    ),
-  )
-  .refine((tags) => tags.length <= MAX_TAGS, {
-    message: `Keep it to ${MAX_TAGS} tags or fewer.`,
-  })
-  .refine((tags) => tags.every((tag) => tag.length <= MAX_TAG_LENGTH), {
-    message: `Each tag has to be ${MAX_TAG_LENGTH} characters or fewer.`,
-  });
+const Tags = TagTextSchema;
 
 /**
  * The capture payload.
@@ -103,6 +90,16 @@ const CaptureInput = z.object({
   oneLineHook: OptionalText.optional(),
   notes: OptionalText.optional(),
   tags: Tags.optional(),
+  /**
+   * The two content buckets, when the capture came from somewhere that already
+   * knows them — the matrix's empty cell (`components/ideas/matrix/**`).
+   *
+   * Optional and independent in the schema, checked against the channel below.
+   * `""` is the shape an untouched hidden input posts, and it means "not sent"
+   * rather than "a bucket with an empty id".
+   */
+  verticalId: z.union([z.uuid(), z.literal("")]).optional(),
+  horizontalId: z.union([z.uuid(), z.literal("")]).optional(),
 });
 
 export type CaptureVideoInput = z.input<typeof CaptureInput>;
@@ -151,6 +148,8 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
     return { ok: false, error: parsed.error.issues[0].message };
   }
   const { channelId, title, oneLineHook, notes, tags } = parsed.data;
+  const verticalId = parsed.data.verticalId || undefined;
+  const horizontalId = parsed.data.horizontalId || undefined;
 
   const { supabase } = await requireUser();
 
@@ -165,6 +164,51 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
 
   if (!channel) {
     return { ok: false, error: "That channel does not exist any more." };
+  }
+
+  /*
+    The buckets, checked *before* the video is created.
+
+    `videos`' three-column composite foreign keys already make a bucket from
+    another channel or from the wrong axis impossible — that is the guarantee,
+    and it is in the database. What this adds is *when* the refusal happens: the
+    extras are a second round trip after `capture_video`, so without this a
+    stale bucket id would create the idea and then fail to file it, and the
+    person would be told their capture half-worked. Checking first means the
+    only failure left is a real one.
+  */
+  if (verticalId !== undefined || horizontalId !== undefined) {
+    const wanted = [verticalId, horizontalId].filter(
+      (id): id is string => id !== undefined,
+    );
+    const { data: buckets, error: bucketsError } = await supabase
+      .from("buckets")
+      .select("id, axis")
+      .eq("channel_id", channel.id)
+      .in("id", wanted);
+
+    if (bucketsError) {
+      return {
+        ok: false,
+        error: `Could not check those buckets: ${bucketsError.message}`,
+      };
+    }
+
+    const axisOf = new Map((buckets ?? []).map((bucket) => [bucket.id, bucket.axis]));
+    if (verticalId !== undefined && axisOf.get(verticalId) !== "vertical") {
+      return {
+        ok: false,
+        error:
+          "That topic pillar is not one of this channel's — it may have been renamed or removed. Reload the matrix.",
+      };
+    }
+    if (horizontalId !== undefined && axisOf.get(horizontalId) !== "horizontal") {
+      return {
+        ok: false,
+        error:
+          "That format is not one of this channel's — it may have been renamed or removed. Reload the matrix.",
+      };
+    }
   }
 
   const { data: video, error } = await supabase.rpc("capture_video", {
@@ -183,6 +227,8 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
     ...(oneLineHook === undefined ? {} : { one_line_hook: oneLineHook }),
     ...(notes === undefined ? {} : { notes }),
     ...(tags === undefined || tags.length === 0 ? {} : { tags }),
+    ...(verticalId === undefined ? {} : { vertical_id: verticalId }),
+    ...(horizontalId === undefined ? {} : { horizontal_id: horizontalId }),
   };
 
   if (Object.keys(extras).length > 0) {
@@ -199,10 +245,12 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
     }
   }
 
-  // The board is the page that grows a card. `/capture` and the modal both read
-  // only the channel list, which this does not change. `/c/[slug]/ideas` is M5;
-  // it will be revalidated by the same call once the route exists.
+  // The two pages that grow a row. `/capture` and the modal both read only the
+  // channel list, which this does not change. The ideas route is revalidated
+  // for both of its views — the bank gains a row and the matrix loses a hole,
+  // and the matrix is the one that just sent the capture.
   revalidatePath(`/c/${channel.slug}/board`);
+  revalidatePath(`/c/${channel.slug}/ideas`);
 
   return {
     ok: true,
@@ -232,6 +280,8 @@ export async function captureVideoAction(
     oneLineHook: field("oneLineHook"),
     notes: field("notes"),
     tags: field("tags"),
+    verticalId: field("verticalId"),
+    horizontalId: field("horizontalId"),
   });
 }
 
@@ -294,6 +344,10 @@ export interface VideoState {
   /** When `waiting_on` was first set; paired with it by a CHECK. */
   readonly waitingSince: string | null;
   readonly archivedAt: string | null;
+  /* filing — the idea-bank columns the Packaging section's Filing block writes */
+  readonly verticalId: string | null;
+  readonly horizontalId: string | null;
+  readonly tags: readonly string[];
   /**
    * The row's new version stamp. The page hands it back as the precondition on
    * its next write — see `components/video-version.tsx`.
@@ -316,7 +370,7 @@ export type UpdateVideoResult =
 
 /** The columns every write reads back. `channel_id` is for the revalidation. */
 const VIDEO_COLUMNS =
-  "channel_id, updated_at, title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at";
+  "channel_id, updated_at, title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, vertical_id, horizontal_id, tags";
 
 interface VideoRow {
   channel_id: string;
@@ -334,6 +388,9 @@ interface VideoRow {
   waiting_on: string | null;
   waiting_since: string | null;
   archived_at: string | null;
+  vertical_id: string | null;
+  horizontal_id: string | null;
+  tags: string[] | null;
 }
 
 /**
@@ -364,6 +421,11 @@ function stateOf(row: VideoRow): VideoState {
     waitingOn: row.waiting_on,
     waitingSince: row.waiting_since,
     archivedAt: row.archived_at,
+    verticalId: row.vertical_id,
+    horizontalId: row.horizontal_id,
+    // `videos.tags` is `not null default '{}'`, so the null branch is only for
+    // a row selected by something that did not ask for the column.
+    tags: row.tags ?? [],
     updatedAt: row.updated_at,
   };
 }
@@ -409,6 +471,21 @@ export async function updateVideo(
   }
   if (fields.youtubeUrl !== undefined) patch.youtube_url = fields.youtubeUrl;
   if (fields.notes !== undefined) patch.notes = fields.notes;
+  /*
+    The two bucket slots and the tag list.
+
+    One column each, written independently: the picker changes one axis at a
+    time and the tag editor sends the whole list. Nothing here checks that a
+    bucket belongs to this video's channel or sits on the right axis — the
+    three-column composite foreign keys do that, and a second opinion in
+    TypeScript is one that can drift from them. What this file owes the user is
+    the *refusal*, in words, and that is `describeBucketRefusal` below.
+  */
+  if (fields.verticalId !== undefined) patch.vertical_id = fields.verticalId;
+  if (fields.horizontalId !== undefined) {
+    patch.horizontal_id = fields.horizontalId;
+  }
+  if (fields.tags !== undefined) patch.tags = [...fields.tags];
   if (fields.archived !== undefined) {
     patch.archived_at = fields.archived ? new Date().toISOString() : null;
   }
@@ -464,10 +541,22 @@ export async function updateVideo(
     .maybeSingle<VideoRow>();
 
   if (error) {
-    // The database's own refusals reach the user as themselves: the hooks CHECK
-    // (a fourth hook that somehow got past zod) and the skip-reason CHECK are
-    // the two that can realistically fire, and both are worth seeing verbatim
-    // rather than as "that did not save".
+    /*
+      A refused bucket is the one refusal whose own wording helps nobody:
+      Postgres names the constraint and the person reads
+      `videos_vertical_id_channel_id_vertical_axis_fkey`. It is translated —
+      once, in `lib/buckets.ts` — into what actually happened and what to do.
+      It is also reported as a conflict, because it is one: this page is holding
+      bucket ids the database has moved past, and the only useful next step is
+      to look at what it holds now.
+    */
+    const refusal = describeBucketRefusal(error.code, error.message);
+    if (refusal) return { ok: false, error: refusal, conflict: true };
+
+    // Every other refusal reaches the user as itself: the hooks CHECK (a fourth
+    // hook that somehow got past zod) and the skip-reason CHECK are the two
+    // that can realistically fire, and both are worth seeing verbatim rather
+    // than as "that did not save".
     return { ok: false, error: `That did not save: ${error.message}` };
   }
   if (!data) {
@@ -511,6 +600,9 @@ export async function updateVideo(
 
   if (channel) {
     revalidatePath(`/c/${channel.slug}/board`);
+    // The bank and the matrix both draw the buckets and the tags this action
+    // can change, and the matrix's counts are the filing itself.
+    revalidatePath(`/c/${channel.slug}/ideas`);
   }
 
   return { ok: true, video: stateOf(data) };

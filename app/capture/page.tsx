@@ -35,10 +35,20 @@ export const metadata = { title: "Capture · NerTube" };
 export default async function CapturePage({
   searchParams,
 }: {
-  searchParams: Promise<{ c?: string | string[] }>;
+  searchParams: Promise<{
+    c?: string | string[];
+    /**
+     * Both bucket ids, from the matrix's empty cell. That link is what this
+     * page answers when JavaScript is not running — see
+     * `components/ideas/matrix/capture-cell.tsx`, which otherwise intercepts
+     * the click and opens the same form in a dialog without leaving the grid.
+     */
+    vertical?: string | string[];
+    horizontal?: string | string[];
+  }>;
 }) {
   const { supabase } = await requireUser();
-  const { c } = await searchParams;
+  const { c, vertical, horizontal } = await searchParams;
 
   const { data: channels, error } = await supabase
     .from("channels")
@@ -54,10 +64,58 @@ export default async function CapturePage({
     redirect("/c/new");
   }
 
-  const wanted = Array.isArray(c) ? c[0] : c;
+  const wanted = one(c);
   const routeChannel = wanted
     ? channels.find((channel) => channel.slug === wanted)
     : undefined;
+
+  const target = routeChannel ?? channels[0];
+
+  /*
+    The bucket pair, resolved against the target channel rather than trusted.
+
+    Both or neither: a cell is an intersection, and half of one is not a thing
+    the matrix can have offered. The ids are read back as names as well, so the
+    form can *say* where it is filing the idea — and looking them up here is
+    also the check that they are this channel's and on the axis they claim,
+    which is what stops a hand-typed query filing an idea into a bucket nobody
+    chose. (The composite foreign key would refuse it too; this refuses it
+    before the row exists.)
+  */
+  let prefill:
+    | {
+        verticalId: string;
+        verticalName: string;
+        horizontalId: string;
+        horizontalName: string;
+      }
+    | undefined;
+
+  const verticalId = one(vertical);
+  const horizontalId = one(horizontal);
+  if (verticalId && horizontalId) {
+    const { data: buckets } = await supabase
+      .from("buckets")
+      .select("id, axis, name")
+      .eq("channel_id", target.id)
+      .in("id", [verticalId, horizontalId]);
+
+    const verticalBucket = (buckets ?? []).find(
+      (bucket) => bucket.id === verticalId && bucket.axis === "vertical",
+    );
+    const horizontalBucket = (buckets ?? []).find(
+      (bucket) => bucket.id === horizontalId && bucket.axis === "horizontal",
+    );
+
+    if (verticalBucket && horizontalBucket) {
+      prefill = {
+        verticalId: verticalBucket.id,
+        verticalName: verticalBucket.name,
+        horizontalId: horizontalBucket.id,
+        horizontalName: horizontalBucket.name,
+      };
+    }
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-col gap-5 px-4 py-6">
@@ -66,7 +124,7 @@ export default async function CapturePage({
           Capture an idea
         </h1>
         <Link
-          href={`/c/${(routeChannel ?? channels[0]).slug}/board`}
+          href={`/c/${target.slug}/board`}
           className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
         >
           Board
@@ -74,11 +132,23 @@ export default async function CapturePage({
       </div>
 
       <CaptureForm
-        channels={channels}
-        initialChannelId={(routeChannel ?? channels[0]).id}
-        preferLastUsed={!routeChannel}
+        /*
+          A prefilled pair belongs to one channel: the composite foreign keys
+          bind a video's buckets to its own channel and axis, so offering the
+          channel chips here would be offering a choice the database refuses.
+          Without a pair this is the full list, exactly as before.
+        */
+        channels={prefill ? [target] : channels}
+        initialChannelId={target.id}
+        preferLastUsed={!routeChannel && !prefill}
         variant="page"
+        prefill={prefill}
       />
     </main>
   );
+}
+
+/** One value from a query parameter Next hands back as `string | string[]`. */
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
@@ -772,13 +773,21 @@ export function Board({
               onDrop={(event) => onDrop(stage, event)}
               footer={
                 overflow > 0 ? (
-                  <p
+                  /*
+                    The cap's way out. The Idea column shows ten and counts the
+                    rest (PLAN.md), which until M5 meant the count *was* the
+                    whole of it: a number with nowhere to go. It is a link now,
+                    and it goes to the bank the number is counting.
+                  */
+                  <Link
+                    href={`/c/${channelSlug}/ideas`}
                     data-testid="idea-overflow"
-                    className="px-1 py-2 text-[11px] text-muted"
-                    title="The idea bank lives on /c/[slug]/ideas, which is M5. Until then the count is the whole of it."
+                    draggable={false}
+                    title="Open the idea bank: every idea in this channel, with filters and promote."
+                    className="block rounded-button px-1 py-2 text-[11px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
                   >
                     +{overflow} more in Ideas
-                  </p>
+                  </Link>
                 ) : null
               }
             >

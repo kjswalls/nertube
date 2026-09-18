@@ -7,7 +7,7 @@ import { ShortcutHints } from "@/components/shortcut-hints";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /** Which entry in the sidebar the route being rendered corresponds to. */
-export type SidebarSection = "board" | "now";
+export type SidebarSection = "board" | "now" | "ideas";
 
 export interface SidebarChannel {
   readonly id: string;
@@ -41,8 +41,11 @@ export interface SidebarChannel {
  *
  * ## Why the unbuilt sections are disabled buttons and not links
  *
- * `/calendar` and `/ideas` do not exist yet (`/now` does, as of M3, and is a
- * link like any other). M1's review caught this exact mistake on the
+ * `/calendar` does not exist yet. `/now` (M3) and `/c/[slug]/ideas` (M5) do,
+ * and are links like any other — M3's reviewers filed the Ideas row as
+ * unreachable by keyboard and explained only by a tooltip, and the fix was
+ * never a better tooltip: it was building the page it pointed at. M1's review
+ * caught this exact mistake on the
  * gate-refusal toast — a link to a fragment on a page that had no such field —
  * and the answer was the same then: an affordance that says what it will do and
  * refuses to pretend it does it yet. Each one names the milestone it arrives
@@ -184,12 +187,21 @@ export function AppSidebar({
                 </SidebarDisabled>
               )}
             </li>
+            <li>
+              {boardChannel ? (
+                <SidebarLink
+                  href={`/c/${boardChannel.slug}/ideas`}
+                  current={section === "ideas" ? "page" : false}
+                >
+                  Ideas
+                </SidebarLink>
+              ) : (
+                <SidebarDisabled title="Create a channel first — an idea bank is a bank of one channel's ideas.">
+                  Ideas
+                </SidebarDisabled>
+              )}
+            </li>
             <SectionItem label="Calendar" milestone="M6" />
-            <SectionItem
-              label="Ideas"
-              milestone="M5"
-              note="with the idea bank"
-            />
           </ul>
         </div>
 
@@ -333,10 +345,12 @@ function SectionItem({
  *
  * `aria-disabled` and **not** `disabled`. A `disabled` button is removed from
  * the tab order, so a keyboard or screen-reader user never landed on Calendar
- * or Ideas at all — the row was visible, its explanation was in a tooltip they
- * could not summon, and the whole point of drawing it (the shape of the product
- * is visible) applied to mouse users only. `aria-disabled` keeps it in the tab
- * order and announces it as unavailable, which is the honest pair.
+ * at all — the row was visible, its explanation was in a tooltip they could not
+ * summon, and the whole point of drawing it (the shape of the product is
+ * visible) applied to mouse users only. `aria-disabled` keeps it in the tab
+ * order and announces it as unavailable, which is the honest pair. M5 retired
+ * the other user of this: Ideas is a real link now, which is the only complete
+ * fix for a row nobody could reach.
  *
  * There is no click handler, which is what makes it do nothing. Nothing to
  * intercept, nothing to hydrate: this stays a Server Component.
