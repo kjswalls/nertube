@@ -6484,3 +6484,15 @@ page is untouched; `e2e/flow-fields.spec.ts` was already proving the field.
   a profile setting, not a channel one (`lib/calendar-dates.ts` still
   interprets dates in the server's zone), and none of the three slices took
   it; it is filed for M9's polish pass with the rest of the empty states.
+
+### Gates for this pass
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled; 19 routes, `/settings` and the eight section routes among them |
+| `./scripts/verify-db.sh m7_check` | OK — 7 migrations applied, 15 SQL test files passed; **no migration added by this pass** |
+| `npm test` | 22 files, 376 tests passed (none added: this pass wrote no new rule) |
+| `npx playwright test m7-acceptance settings-stages settings-checklists settings-channel matrix post-publish m2-review shell` (every spec this pass touched, own ports and database) | **58 passed, 1 failed** (5.1m): the failure was the new acceptance spec opening the video page without `?section=schedule`, where the stage select is not visible; fixed, then `m7-acceptance` alone **3 passed** (33s). `m2-review.spec.ts:476` passed on the first attempt with the hydration wait. |
+| `npm run e2e` (full suite, own ports and database) | **218 passed, 0 failed, 1 skipped** (16.9m), exit 0. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`, by design. This is the first M7 full run with no failure: `m2-review.spec.ts:476` passed with the hydration wait, and the `m6-acceptance` and `packaging` fixes the stages slice made held. The run was made with no other Playwright run sharing the checkout (`DEV_STACK_PORT=54371`, `NERTUBE_DEV_DB=nertube_e2e_m7i`, `E2E_PORT=3151`, `--output` into a private directory), which is the other reason it is clean where the slices' runs were not. |
