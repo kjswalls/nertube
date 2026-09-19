@@ -281,7 +281,14 @@ test('renaming Packaging relabels the board column and changes nothing about the
   // Into the renamed stage: never gated — the gate guards the stages after it.
   await dragCardTo(page, cardIn(page, 'Idea', 'Rename me not'), 'Packaging & hook');
   await expect(cardIn(page, 'Packaging & hook', 'Rename me not')).toBeVisible();
-  expect(await videoStageId(ideaId)).toBe(packaging.id);
+  // The card moves optimistically; the row moves when `move_video` lands, and
+  // the card stays `aria-busy` until the answer is back — a drop on a busy
+  // card is ignored, so the next drag waits for it.
+  await expect.poll(() => videoStageId(ideaId)).toBe(packaging.id);
+  await expect(cardIn(page, 'Packaging & hook', 'Rename me not')).not.toHaveAttribute(
+    'aria-busy',
+    'true',
+  );
 
   // Out of it with an empty concept and no hook: refused, by kind. The toast
   // names the column by its new label and the missing field by the gate's
@@ -566,7 +573,11 @@ test('an added stage gets a column, moves between core stages, holds a video, an
   await expect(cardIn(page, 'Sponsor review', 'Needs a sponsor read')).toBeVisible();
   await expect(page.getByTestId('toast')).toHaveCount(0);
   const sponsor = (await stagesOf(channel.id)).find((stage) => stage.name === 'Sponsor review')!;
-  expect(await videoStageId(ideaId)).toBe(sponsor.id);
+  await expect.poll(() => videoStageId(ideaId)).toBe(sponsor.id);
+  await expect(cardIn(page, 'Sponsor review', 'Needs a sponsor read')).not.toHaveAttribute(
+    'aria-busy',
+    'true',
+  );
 
   // Removing it while the video is in it is refused, with a link to the board;
   // switching it off is refused the same way.
@@ -587,6 +598,8 @@ test('an added stage gets a column, moves between core stages, holds a video, an
   await openBoard(page, CHANNEL.slug);
   await dragCardTo(page, cardIn(page, 'Sponsor review', 'Needs a sponsor read'), 'Idea');
   await expect(cardIn(page, 'Idea', 'Needs a sponsor read')).toBeVisible();
+  const idea = await stageByKind(channel.id, 'idea');
+  await expect.poll(() => videoStageId(ideaId)).toBe(idea.id);
 
   await openSettings(page, CHANNEL.slug);
   await rowByName(page, 'Sponsor review').getByTestId('stage-remove').click();

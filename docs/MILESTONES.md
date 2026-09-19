@@ -5878,3 +5878,194 @@ to it. The other channel's Packaging is asserted unchanged in the same test.
   somewhere shared, this page's import moves with it.
 - **The timezone question** deferred to M7 by M6's review is not answered by
   this slice; it is a channel-or-profile setting, not a stage one.
+
+---
+
+## M7 — Checklist templates: the editor behind the snapshot boundary
+
+`/settings/checklists/[slug]`, one editor per stage of one channel. Its files:
+`app/settings/checklists/page.tsx` (the bare route, a redirect to the first
+channel), `app/settings/checklists/[slug]/page.tsx`,
+`components/settings/checklists/**`, `app/actions/checklist-templates.ts`,
+`lib/checklist-templates.ts` with its unit test, and
+`e2e/settings-checklists.spec.ts`. **No migration.**
+
+### What this slice delivers
+
+- **Add, rename, re-estimate, reorder, remove** a row of any stage's template,
+  for every stage of the channel — the switched-off ones included, marked as
+  such, because a lane's template is still the lane's and the place to edit it
+  should not vanish with the column. Text and minutes save on blur or Enter
+  through the one save queue (`components/autosave.tsx`), with the one status
+  line and one Retry. Reordering is a pair of arrows per row; the first row's
+  "up" and the last row's "down" are disabled rather than hidden so the
+  controls never move.
+- **The cost of the stage**, beside its name: `8 items · about 1 h 10 · 6 of
+  8 fit ten minutes`. The total is the sum of `est_minutes`; the second number
+  is how many rows `/now`'s "10 minutes or less" would let through, computed by
+  the same two tests `matchesFilters` makes (`lib/checklist-templates.ts`
+  imports `QUICK_MINUTES` and `NEEDS_A_BLOCK` from `lib/next-action.ts` rather
+  than restating either). Filming and Editing print *none fit ten minutes* and
+  a sentence saying why, instead of a zero.
+- **Occupancy, said before the edit.** Each stage says how many non-archived
+  videos are in it now and that they keep the lists they were given; a removal
+  is followed by a sentence naming the row and repeating exactly which videos
+  it did not touch. That sentence is the product's decision (PLAN.md open
+  question 2) made visible at the one place it is not obvious.
+- **A stage with no template** (Idea and Scheduled are seeded empty) can be
+  given one, and `capture_video` copies it on the next capture the way
+  `move_video` copies it on the next move — the spec proves that pairing.
+
+### The boundary, and how it is proved
+
+Nothing in this slice touches `checklist_items`. A template edit is a write to
+`checklist_templates` and nothing else; the copy on a video has no reference
+back and no trigger reaches across. That is true by construction, and a
+reviewer would be right to say "by construction" is a claim, so
+`e2e/settings-checklists.spec.ts` proves **both halves** in one test:
+
+1. A video is moved into Packaging, one of its eight rows is ticked, and the
+   rows are read as a snapshot. The template is then renamed, re-estimated,
+   shortened by one row and lengthened by another, through the page. The
+   video's rows are read again and compared **for deep equality with the
+   snapshot** — text, position, estimate and `checked_at`.
+2. A second video is then moved into Packaging by `move_video` and its rows are
+   compared with the edited template — the same texts, the same positions (with
+   the gap the removal left), the same estimates — and the first video is read
+   a third time to show it is still not the second.
+
+The third test does the same for the number that matters most: a video that
+entered before an estimate changed keeps `15`, one that entered afterwards
+gets `5`, and on `/now` — same channel, same next action by name — the quick
+filter hides the first and lists the second.
+
+### Reorder is one statement, and the reason it is an upsert
+
+PLAN.md: *swaps run as one `update … set position = case …` statement* against
+`unique (stage_id, position) deferrable initially deferred`. The deferral only
+helps inside one transaction, and for PostgREST a transaction is a request —
+so a swap done as two `.update()` calls is refused halfway through, which the
+spec demonstrates from the database side (the same swap as a sequence of
+client writes fails with `23505`).
+
+supabase-js cannot express a `case`, and a SQL function for it would be a
+fifth `security definer` function where `90_schema_contract.test.sql` pins
+four. So the one statement is an **upsert**: `reorderTemplateItems` reads the
+stage's rows through RLS, refuses unless the ids it was handed are *exactly*
+that set (`isPermutationOf` — a missing row, a duplicate, or an id from another
+stage all fail before any position is touched), renumbers 1..n in the order
+given and writes every row back with `insert … on conflict (id) do update`.
+One request, one statement, one transaction, the unique checked once at
+commit after every row has moved. It was tried by hand as the `authenticated`
+role against the fixture database before a line of the action was written.
+The text and estimate ride along because an upsert must be a valid insert;
+they are the values read a moment earlier, not values the caller supplied.
+
+A removed row leaves a **gap** in the positions on purpose. Positions are order,
+not a count; nothing reads them as one; closing the gap would be a multi-row
+write for nothing, and the next add goes after the last row (`max + 1`) rather
+than into the hole. The spec asserts `[1, 2, 3, 5, 6, 7, 8, 9]` after a removal
+and an add.
+
+### Decisions taken without the user
+
+1. **The route is `/settings/checklists/[slug]`**, with the bare
+   `/settings/checklists` redirecting to the first channel by the sidebar's
+   Board rule. PLAN.md's table names `/c/[slug]/settings`; the settings screens
+   of this milestone were built in parallel under `app/settings/**`, and this
+   one matches the stages editor's `[slug]` shape so the two read as one
+   screen. Recorded as a deviation below.
+2. **A new template row goes at the end**, not at the top like a custom item
+   on a video. A video's custom item is the thing you have just decided to do
+   next; a template row is a step in a procedure, and a procedure is written
+   in order. The arrows are one click away.
+3. **An estimate is 1–480 whole minutes.** `est_minutes` is `not null` and
+   `/now` compares it against ten, so a template row cannot be saved without
+   one; the box defaults to the same ten that a null estimate on a video reads
+   as (`DEFAULT_EST_MINUTES`, imported, not restated). The ceiling is a working
+   day — anything longer is not an estimate of a checklist item.
+4. **Removal has no confirmation dialog.** It is future videos only, which is
+   the safest kind of delete this app has, and the sentence after it says so.
+   A modal would be the seventh mechanism the reviewers have been policing
+   against.
+5. **The arrows wait for the wire; the text does not.** A move is stored as
+   "this row, up" and resolved into a complete order at send time against the
+   list the server has confirmed by then — so an add in flight cannot leave a
+   `temp:` id in an order the server would refuse. While anything is in flight
+   the arrows are disabled; typing into a row never is.
+6. **Disabled stages are shown, marked, and editable.** Hiding them would make
+   a lane's template unreachable for exactly as long as the lane is off.
+7. **The sidebar's Settings entry is the stages editor's, not this slice's.**
+   `app-sidebar.tsx` is outside this slice's files; the stages editor added the
+   row (it opens `/settings/stages/[slug]`) and the `"settings"` section, and
+   this page reports itself as that section so the row is marked current on
+   it. How a person gets from the stages editor to this page — a tab strip
+   across the settings screens — is the integration pass's, because it needs
+   both routes to exist.
+
+### What a screenshot walk changed
+
+Two things, both copy. The line under every add box — *ten minutes or less is
+what /now counts as a quick job* — was printed nine times on one page, once per
+stage, when the page's opening paragraph already says it once; it is gone. And
+the idle hint under a stage with nothing in it read *"the ones already there
+keep theirs"*, which is a sentence about nobody; it now has three forms, for
+none, one and several. The Next dev overlay's "1 Issue" on that walk was a
+hydration mismatch on `style="caret-color: transparent"`, which is the inline
+style Playwright's `screenshot()` injects to hide carets — the spec run, which
+takes no screenshots, logs no hydration warning.
+
+### Deviations from PLAN.md, stated plainly
+
+| PLAN.md | Here | Why |
+|---|---|---|
+| `/c/[slug]/settings` | `/settings/checklists/[slug]` | Built in parallel with the stages editor under `app/settings/**`; one address shape for both. |
+| `update … set position = case …` | `insert … on conflict (id) do update`, one statement | supabase-js has no `case`; a fifth SQL function is pinned out by `90_schema_contract.test.sql`. Same transaction, same deferred unique, same guarantee. |
+| `updateTemplates` (one action) | four actions: add, edit, remove, reorder | Each is one row or one statement with its own refusal; a single "replace the template" action would have to be a delete-and-reinsert, which is a different set of ids and a bigger window. |
+
+### Honest limits
+
+- **Read-then-write, again.** `reorderTemplateItems` reads the rows and writes
+  them back; a row removed in another tab in between is re-inserted by the
+  upsert. One user, one session — the same window `setStageEnabled` documents,
+  and the same answer.
+- **Positions grow.** Gaps are never closed except by a reorder, which
+  renumbers. Nothing depends on density.
+- **The occupancy count is at page load.** A video moved into the stage in
+  another tab is not counted until the page is reloaded; the sentence is about
+  what the page saw, and the boundary it describes holds regardless.
+- **No undo for a removal.** The row's text is printed in the note; typing it
+  back is one add.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled; 14 routes, `/settings/checklists` and `/settings/checklists/[slug]` among them |
+| `./scripts/verify-db.sh m7_checklists_check` | OK — migrations applied, 15 SQL test files passed, **no migration added by this slice** |
+| `npm test` | 20 files, 354 tests passed (12 of them new, `lib/checklist-templates.test.ts`) |
+| `npx playwright test settings-checklists` (alone, isolated ports) | **4 passed** (1.5m), first run |
+| `npm run e2e` (full suite, isolated ports and databases) | **195 passed, 3 failed, 1 skipped** (16.0m) — see below |
+| Re-run of the three failed files plus this one, alone (38 cases) | **32 passed, 2 failed** (3.1m): `board.m1` clean, `m2-review:476` and `m6-acceptance:456` again |
+| `npx playwright test m2-review` alone | **12 passed, 1 failed** (1.5m): `:476` again |
+
+The skip is `session-refresh`, which only runs under `npm run e2e:refresh` — by
+design and unchanged since M0. The four new cases all passed inside the full
+run (7.2s, 4.7s, 3.8s, 4.8s).
+
+The three failures are reported rather than rounded off, and none is in a file
+this slice touches:
+
+- `board.m1.spec.ts:713` failed with `browserContext.close: ENOENT … test-results/.playwright-artifacts-0/traces/…` — its trace file was deleted under it. The stages editor was being built in the same tree at the same time, and a Playwright run it started cleans `test-results/` on launch. That is two suites sharing one artifact directory, not the board.
+- `m2-review.spec.ts:476` (a target date saved without a blur) is the hydration-window race this file has had on record since M4 — but it lost four times out of four today, alone included, where M6 saw it pass alone three times running. Two things are worth writing down. First, **the retry in that test cannot recover from the race it exists for**: once the first `fill` lands before hydration, the input already holds `2026-12-01`, React's value tracker adopts that DOM value when it hydrates, and every later fill of the *same* date fires no `onChange` — so the twenty seconds of `untilTaken` are twenty seconds of the same no-op. Second, why today: two agents were building M7 in one tree on one machine, and a page's hydration window is a function of CPU. The same field saved on blur is `e2e/flow-fields.spec.ts`, which passed in both full runs, so the page is not broken; the test's first fill is racing hydration and losing. The fix is in that spec — fill a different date on retry, or wait for a hydration marker before the first fill — and it is not this slice's file, so it is filed here beside M4's note about the page's weight.
+- `m6-acceptance.spec.ts:456` (the calendar chip for the essay's publish date) is a **calendar defect in that fixture, and it will fail again tomorrow.** The spec derives `SHOOT = today + 10` and `PUBLISH = today + 12`, opens the grid for `SHOOT`'s month and expects both chips on it. This run happened on 2026-09-19: the shoot is 29 September, the publish date is 1 October, and the October chip is not on the September grid. It reproduces in the stages editor's own full run taken an hour later, and it reproduces for anyone running the suite on the 19th–21st of a 30-day month. The file is not this slice's, so the fix — derive `PUBLISH` inside `SHOOT`'s month, or open `PUBLISH`'s grid for that assertion — is filed here for the integration pass rather than made in passing.
+
+This slice's own runs were made on their own ports and databases
+(`DEV_STACK_PORT=54341`, `NERTUBE_DEV_DB=nertube_e2e_m7c`, `E2E_PORT=3121`) so
+they could not share a stack with the parallel build — but Next allows one
+`next dev` per directory, so the two suites still had to take turns, and one
+attempt of this one was refused at start-up for exactly that reason and
+restarted.
+
