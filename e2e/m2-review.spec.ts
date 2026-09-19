@@ -485,13 +485,20 @@ test('picking a target date saves it without waiting for a blur', async ({ page 
     what the whole interaction looks like — and the value sat unsaved, with the
     status line saying nothing, until something else happened to move focus.
 
-    Wrapped in `untilTaken` because the first fill can land inside the video
-    page's hydration window, where the input takes the value and React has not
-    attached the `onChange` that saves it — `e2e/hydration.ts` describes that
-    property at length. Re-filling the same date is idempotent and does not
-    move focus, so the retry is exactly what a person whose first attempt did
-    nothing would do, and the assertion stays about the outcome.
+    The first fill waits for the app's own hydration signal (the sidebar's
+    `c` binding going live) because a fill that lands inside the video page's
+    hydration window is worse than swallowed: the input takes the value, React
+    adopts it as the field's value when it hydrates, and every later fill of
+    the *same* date fires no `onChange` — so the `untilTaken` retry below,
+    which re-fills the same date, could never recover from the one race it was
+    written for. M7's three slices each watched it lose under load for exactly
+    that reason. `e2e/hydration.ts` describes the window; the retry stays for
+    the rarer case where the date picker's own handler is the one not yet
+    attached, and the assertion stays about the outcome.
   */
+  await expect(
+    page.locator('button[aria-keyshortcuts="c"][data-shortcut-ready="true"]'),
+  ).toBeVisible();
   await untilTaken(
     async () => {
       await field.focus();

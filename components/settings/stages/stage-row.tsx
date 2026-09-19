@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useId, useState, type KeyboardEvent, type RefObject } from "react";
 
 import { renameStage, removeStage, setStageEnabled } from "@/app/actions/stages";
 import { SaveStatus, useAutosave } from "@/components/autosave";
+import { MoveButton } from "@/components/settings/move-button";
+import { Refusal } from "@/components/settings/refusal";
 import { INERT_NOTE, KIND_NOTES, STAGE_NAME_MAX, type MoveVerdict } from "@/lib/stage-settings";
 
 import type { SettingsStage } from "./types";
@@ -18,12 +19,10 @@ import type { SettingsStage } from "./types";
  * The four things on this row are not four equal settings, and the row is
  * laid out to say so:
  *
- * - **The arrows** move the column on the board and nothing else. They are
- *   disabled — not hidden — where the move would carry a core stage across
- *   another core stage, and the button's title says which pair keeps its
- *   order. Disabled rather than absent so the row's shape never changes and a
- *   keyboard user finds the arrows where they were; the explanation is one
- *   sentence in the header of the list, and again on each disabled button.
+ * - **The arrows** (`MoveButton`, the area's one reorder control) move the
+ *   column on the board and nothing else. They are disabled — not hidden —
+ *   where the move would carry a core stage across another core stage, and
+ *   the button says which pair keeps its order.
  * - **The name** is a label. It saves on blur or Enter through `useAutosave`,
  *   the same hook every field on the video page uses, so a failed rename is
  *   the same failure line with the same retry. The sentence under it — what
@@ -31,7 +30,8 @@ import type { SettingsStage } from "./types";
  * - **The switch** changes the board's shape. It flips optimistically, because
  *   a controlled checkbox that springs back until the round trip lands reads
  *   as "the click did nothing", and it is put back with the reason when the
- *   database refuses. The refusal names the count and links to the videos.
+ *   database refuses. The refusal (`Refusal`, the area's one refusal line)
+ *   names the count and links to the videos.
  * - **Remove** exists only on an inert stage, behind a second click.
  */
 export function StageRow({
@@ -186,17 +186,19 @@ export function StageRow({
       <div className="flex flex-col gap-1 pt-0.5">
         <MoveButton
           direction="up"
-          stageName={stage.name}
+          subject={stage.name}
           verdict={upVerdict}
           onClick={() => onMove("up")}
           buttonRef={moveButtonRef("up")}
+          testIdPrefix="stage"
         />
         <MoveButton
           direction="down"
-          stageName={stage.name}
+          subject={stage.name}
           verdict={downVerdict}
           onClick={() => onMove("down")}
           buttonRef={moveButtonRef("down")}
+          testIdPrefix="stage"
         />
       </div>
 
@@ -236,25 +238,12 @@ export function StageRow({
         <SaveStatus state={name.state} testId="stage-name-status" />
 
         {refusal ? (
-          <p
-            role="alert"
-            data-testid="stage-refusal"
-            className="text-[12px] leading-5 text-over-limit"
-          >
-            {refusal.message}
-            {refusal.href && refusal.label ? (
-              <>
-                {" "}
-                <Link
-                  href={refusal.href}
-                  data-testid="stage-refusal-link"
-                  className="underline decoration-over-limit/50 underline-offset-2 hover:decoration-over-limit"
-                >
-                  {refusal.label}
-                </Link>
-              </>
-            ) : null}
-          </p>
+          <Refusal
+            testId="stage-refusal"
+            message={refusal.message}
+            href={refusal.href}
+            label={refusal.label}
+          />
         ) : null}
       </div>
 
@@ -295,7 +284,7 @@ export function StageRow({
                 type="button"
                 data-testid="stage-remove-yes"
                 onClick={() => void remove()}
-                className="rounded-button border border-over-limit/50 px-2 py-0.5 text-over-limit outline-none hover:bg-over-limit/10 focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-button border border-attention/50 px-2 py-0.5 text-attention outline-none hover:bg-attention/10 focus-visible:ring-2 focus-visible:ring-accent"
               >
                 Yes, remove
               </button>
@@ -321,45 +310,5 @@ export function StageRow({
         ) : null}
       </div>
     </li>
-  );
-}
-
-/**
- * One arrow. `disabled` carries the verdict's reason as its title and as
- * visually hidden text, so the *why* is in the accessible name of the thing
- * that cannot be pressed, not only in a tooltip a keyboard user cannot summon.
- */
-function MoveButton({
-  direction,
-  stageName,
-  verdict,
-  onClick,
-  buttonRef,
-}: {
-  direction: "up" | "down";
-  stageName: string;
-  verdict: MoveVerdict;
-  onClick: () => void;
-  buttonRef: RefObject<HTMLButtonElement | null>;
-}) {
-  const word = direction === "up" ? "up" : "down";
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      data-testid={`stage-move-${direction}`}
-      data-offered={verdict.ok ? "true" : "false"}
-      disabled={!verdict.ok}
-      onClick={onClick}
-      title={verdict.ok ? `Move ${stageName} ${word}` : verdict.reason}
-      aria-label={
-        verdict.ok
-          ? `Move ${stageName} ${word}`
-          : `Move ${stageName} ${word} — not available. ${verdict.reason}`
-      }
-      className="flex size-6 items-center justify-center rounded-button border border-border font-mono text-[11px] leading-none outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30"
-    >
-      <span aria-hidden="true">{direction === "up" ? "▲" : "▼"}</span>
-    </button>
   );
 }

@@ -1,16 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  createRef,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type RefObject,
-} from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { addStage, moveStage } from "@/app/actions/stages";
+import { IN_FLIGHT, useMoveFocus } from "@/components/settings/move-button";
+import { Refusal } from "@/components/settings/refusal";
 import { STAGE_NAME_MAX, canMove } from "@/lib/stage-settings";
 
 import { StageRow } from "./stage-row";
@@ -46,11 +41,9 @@ import type { SettingsChannel, SettingsStage } from "./types";
  * as a broken screen. Add a stage and its arrows light up, and so do the
  * arrows of the core stages either side of it.
  *
- * ## Focus after a move
- *
- * The arrow that was pressed may be disabled by its own success (an inert
- * stage moved to the top has no "up" left). Focus follows the stage: the same
- * arrow if it is still offered, otherwise the other one, otherwise the name.
+ * Focus after a move is `useMoveFocus`'s job, shared with the other two
+ * editors: the same arrow if it is still offered, otherwise the other one,
+ * otherwise the name.
  */
 export function StagesEditor({
   channel,
@@ -72,48 +65,10 @@ export function StagesEditor({
   const [moving, setMoving] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
 
-  /* --------------------------------------------------------------- focus -- */
-
-  const buttons = useRef(new Map<string, RefObject<HTMLButtonElement | null>>());
-  function buttonRef(stageId: string, direction: "up" | "down") {
-    const key = `${stageId}:${direction}`;
-    let ref = buttons.current.get(key);
-    if (!ref) {
-      ref = createRef<HTMLButtonElement>();
-      buttons.current.set(key, ref);
-    }
-    return ref;
-  }
-
-  /**
-   * Where focus should land once the list has re-rendered after a move. A ref
-   * and not state: it is written just before the list changes and read once,
-   * in the effect that runs after that change commits, so there is nothing to
-   * render from and no second render to cause.
-   */
-  const focusRequest = useRef<{ stageId: string; direction: "up" | "down" } | null>(null);
-
-  useEffect(() => {
-    const request = focusRequest.current;
-    if (!request) return;
-    focusRequest.current = null;
-    const { stageId, direction } = request;
-    const other = direction === "up" ? "down" : "up";
-    const candidates = [
-      buttons.current.get(`${stageId}:${direction}`)?.current,
-      buttons.current.get(`${stageId}:${other}`)?.current,
-    ];
-    const target = candidates.find((button) => button && !button.disabled) ?? null;
-    if (target) {
-      target.focus();
-    } else {
-      document
-        .querySelector<HTMLInputElement>(
-          `[data-stage-id="${stageId}"] [data-testid="stage-name"]`,
-        )
-        ?.focus();
-    }
-  }, [list, moving]);
+  const focus = useMoveFocus(
+    [list, moving],
+    (stageId) => `[data-stage-id="${stageId}"] [data-testid="stage-name"]`,
+  );
 
   /* ---------------------------------------------------------------- moves -- */
 
@@ -131,7 +86,7 @@ export function StagesEditor({
         return;
       }
       const positions = new Map(result.order.map((row) => [row.id, row.position]));
-      focusRequest.current = { stageId, direction };
+      focus.requestFocus(stageId, direction);
       setList((current) =>
         [...current]
           .map((stage) => ({ ...stage, position: positions.get(stage.id) ?? stage.position }))
@@ -173,11 +128,7 @@ export function StagesEditor({
         </p>
       </div>
 
-      {moveError ? (
-        <p role="alert" data-testid="stage-move-error" className="text-[12px] leading-5 text-over-limit">
-          {moveError}
-        </p>
-      ) : null}
+      {moveError ? <Refusal testId="stage-move-error" message={moveError} /> : null}
 
       <ol data-testid="stage-list" aria-label="Stages, in board order" className="flex flex-col gap-2">
         {list.map((stage, index) => (
@@ -186,16 +137,8 @@ export function StagesEditor({
             stage={stage}
             index={index}
             total={list.length}
-            upVerdict={
-              moving !== null
-                ? { ok: false, reason: "A move is in flight." }
-                : canMove(list, index, "up")
-            }
-            downVerdict={
-              moving !== null
-                ? { ok: false, reason: "A move is in flight." }
-                : canMove(list, index, "down")
-            }
+            upVerdict={moving !== null ? IN_FLIGHT : canMove(list, index, "up")}
+            downVerdict={moving !== null ? IN_FLIGHT : canMove(list, index, "down")}
             onMove={(direction) => void move(stage.id, direction)}
             onRenamed={(name) => {
               patch(stage.id, { name });
@@ -209,7 +152,7 @@ export function StagesEditor({
               setList((current) => current.filter((other) => other.id !== stage.id));
               router.refresh();
             }}
-            moveButtonRef={(direction) => buttonRef(stage.id, direction)}
+            moveButtonRef={(direction) => focus.buttonRef(stage.id, direction)}
           />
         ))}
       </ol>
@@ -286,6 +229,8 @@ function AddStageForm({
     }
   }
 
+  const refused = error ?? (duplicate ? `${channel.name} already has a stage called “${trimmed}”.` : null);
+
   return (
     <form
       onSubmit={(event) => void submit(event)}
@@ -302,13 +247,12 @@ function AddStageForm({
           data-testid="add-stage-name"
           value={name}
           maxLength={STAGE_NAME_MAX}
-          disabled={busy}
           onChange={(event) => {
             setName(event.target.value);
             setError(null);
           }}
           placeholder="e.g. Sponsor review"
-          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
         />
         <button
           type="submit"
@@ -319,16 +263,15 @@ function AddStageForm({
           {busy ? "Adding…" : "Add stage"}
         </button>
       </div>
-      <p
-        role={error ? "alert" : undefined}
-        data-testid="add-stage-status"
-        className={["text-[12px] leading-5", error ? "text-over-limit" : "text-muted"].join(" ")}
-      >
-        {error ??
-          (duplicate
-            ? `${channel.name} already has a stage called “${trimmed}”.`
-            : "It lands at the end of the board, switched on, with no behaviour: no gate, no badge, no template, and not on /now’s path. Move it with the arrows.")}
-      </p>
+      {refused ? (
+        <Refusal testId="add-stage-status" message={refused} />
+      ) : (
+        <p data-testid="add-stage-status" className="text-[12px] leading-5 text-muted">
+          It lands at the end of the board, switched on, with no behaviour: no
+          gate, no badge, no template, and not on /now&rsquo;s path. Move it
+          with the arrows.
+        </p>
+      )}
     </form>
   );
 }

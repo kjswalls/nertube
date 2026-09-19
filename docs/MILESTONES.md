@@ -6069,3 +6069,418 @@ they could not share a stack with the parallel build — but Next allows one
 attempt of this one was refused at start-up for exactly that reason and
 restarted.
 
+
+### What the existing suite needed
+
+Two existing specs failed in every full run of this tree, and both were the
+suite's own timing rather than the stages editor:
+
+- **`e2e/packaging.spec.ts:520`** clicked the skip disclosure straight after a
+  direct `goto` of `/videos/[id]`. A small Playwright script against the same
+  server put the numbers on it: `goto` returns at ~830ms, the click lands at
+  ~1095ms, the sidebar's hydration signal arrives at ~1104ms — the click was
+  inside the window M4 documented and `e2e/hydration.ts` exists for, by about
+  ten milliseconds, four runs out of four. The click now goes through
+  `untilTaken`, exactly as the hook editor's first click in the same file
+  already does. Why the window moved by the few milliseconds that made a
+  sometimes-flake a certainty is not established; the remedy M4 and M6 both
+  named — fewer components in that page's hydration pass — is still the real
+  one and is still not this slice's to take.
+- **`e2e/m6-acceptance.spec.ts`** set the essay's publish date to `TODAY + 12`
+  and opened the calendar on the *shoot's* month (`TODAY + 10`). On 19
+  September those are September and October: the chip was on the next grid,
+  not missing. The publish date is now two days either side of the shoot,
+  whichever keeps it on the month the test opens.
+
+Neither change touches what either spec proves.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm run build` | compiled; 14 routes, `/settings/stages` and `/settings/stages/[slug]` among them |
+| `./scripts/verify-db.sh m7_stages` | OK — 7 migrations applied, **15 SQL test files passed** (`35_stage_settings.test.sql` is new; 20, 30, 40 and 90 were updated for the grant and the two functions) |
+| `npm test` | 20 files, 354 tests passed (`lib/stage-settings.test.ts` adds 17) |
+| `npx playwright test settings-stages` | 6 passed, three times over (alone, and inside both full runs below) |
+| `npm run e2e` (first full run) | 200 passed, 4 failed, 1 skipped, 4 did not run (17.0m) — see below |
+| `npm run e2e` (second full run) | **207 passed, 1 failed, 1 skipped** (16.6m) |
+| `npx playwright test m2-review`, alone, after it | 13 passed (1.1m) |
+
+Both full runs were made while another workflow's Playwright runs shared the
+same checkout, which is worth naming because it explains most of the first
+run's shape: Playwright empties `test-results/` when it starts, so a run that
+began mid-way through this one deleted its trace files from under it —
+`browserContext.close: ENOENT … .playwright-artifacts-2/…` on
+`settings-stages.spec.ts` and `packaging.spec.ts:485` are that, not a failed
+assertion, and the "4 did not run" is the serial `m6-acceptance` file stopping
+after the `TODAY + 12` failure described above. The second run used `--output`
+into a private directory. Its one failure is `m2-review.spec.ts:476` — the
+hydration-window flake on record since M4, named again in M6's review, and
+passing alone straight afterwards, exactly as it did then. The skip is
+`session-refresh`, which only runs under `npm run e2e:refresh`, by design.
+
+The runs are slower than M6's (16–17 minutes against 12) for the same reason:
+two suites on one machine.
+
+---
+
+## M7 — Buckets, quotas, and the channel's own settings
+
+> Scope: `/settings/buckets/[slug]` and `/settings/channel/[slug]`,
+> `components/settings/channel/**`, `lib/bucket-settings.ts` and
+> `lib/channel-settings.ts` with their unit tests, the settings halves of
+> `app/actions/buckets.ts` and `app/actions/channels.ts`, and
+> `e2e/settings-channel.spec.ts`. **No migration.**
+
+### What this slice delivers
+
+- **`/settings/buckets/[slug]`** — one channel's two axes, pillars above
+  formats, each a list of rows with arrows, a name, a quota box, what is filed
+  under it, and Remove; and an add form at the end of each axis. The heading
+  of each axis says where it stands against the brief's shape (*3 topic
+  pillars — within the 3–5 the brief suggests*; *No topic pillars yet — the
+  brief suggests 3–5*), so a channel is told on its first visit what the
+  matrix is waiting for, and told when it has it. The add form goes into the
+  brief's shape at the end: pillars 1..n become the matrix's rows, formats its
+  columns, and a bucket added here is on the matrix and in the capture and
+  video-page pickers on their next render.
+- **Names.** `unique (channel_id, axis, name)` is case-sensitive; the rule
+  here is not. The add form refuses a duplicate *before* the button can be
+  pressed, with the sentence under the box, and `renameBucket`/`addBucket`
+  refuse it again on the server (`bucketNameTaken`), with 23505 mapped to the
+  same sentence as the backstop. A rename is a label change and nothing else:
+  videos carry the bucket's id.
+- **Quotas.** The box is a number or nothing. Nothing is *no quota* — a count
+  on the matrix and no bar — and is the only way to clear one. Zero,
+  negatives and fractions are refused in the row's own status line before a
+  request exists (`parseQuotaInput`), refused again by `QuotaSchema` in the
+  action, and `check (monthly_quota > 0)` is behind both; the spec proves all
+  three layers and that a change here is the `n of quota` the matrix draws.
+- **Removal** — see the decision below. The count of non-archived videos filed
+  under a bucket is on its row (the matrix's own number), the second click
+  says in a sentence what removal does to them, and the note afterwards says
+  what it did.
+- **Reorder** — arrows, one step, one round trip, one statement: the whole
+  axis renumbered 1..n and written back as `insert … on conflict (id) do
+  update`, the same upsert the checklist-template editor uses against the
+  same kind of deferrable unique. Tried by hand as the `authenticated` role
+  before the action was written: the swap lands, and the same swap as two
+  statements is refused with 23505 at the first commit point. The spec
+  repeats both.
+- **`/settings/channel/[slug]`** — the voice guide, the script template and
+  the three thresholds, each saving on blur through `useAutosave` (the one
+  save queue) with the one status line, and each with a line of prose saying
+  what it changes and where (`SETTING_NOTES` in `lib/channel-settings.ts`,
+  unit-tested to quote the same sample sizes `/now` uses).
+  - The **voice guide** is a 12-row textarea in the reading face, and the
+    note says plainly that nothing reads it yet and that M8's brainstorm will
+    be handed it verbatim.
+  - The **script template** is a textarea in the measured face, because it is
+    markdown source. It is the user's shape: the only rule is that it is not
+    empty (`not null`, and a blank template writes blank scripts). A template
+    without `{{hook}}` is **allowed and warned about**, in a line under the
+    box, because `lib/defaults.ts` promised exactly that ("settings warns if
+    it is removed") and because refusing it would be the app prescribing a
+    shape BRIEF.md says it must not.
+  - **WIP threshold** (1–99), **stale days** (1–365) and **expected CTR**
+    (0.01–100, two decimals, or empty for the median fallback) each refuse
+    zero in a sentence. Expected CTR's note says what empty means — the
+    median of the last 10 published, needing at least 3 — with both numbers
+    imported from `lib/next-action.ts`.
+- **`SettingsNav`** — a row of four links (Stages, Checklists, Buckets,
+  Channel) above the channel switch on this slice's two pages, current one
+  marked with `aria-current`. See the honest limits for the other two pages.
+
+### The decision about removing a bucket
+
+The foreign keys decide what the database *permits*: `videos.vertical_id`
+and `videos.horizontal_id` reference `buckets (id, channel_id, axis)` **`on
+delete set null`**, so a delete never fails for being referenced — it unfiles
+every video that carried the bucket, on that axis only, and touches nothing
+else about them (`supabase/tests/50_buckets.test.sql` has proved that since
+M0). Three options were open:
+
+1. **Refuse while videos reference it**, like a stage. Rejected: a bucket is
+   a label on a video, not a place it lives; re-filing eleven videos by hand
+   before a format can be retired is the friction BRIEF.md principle 6 is
+   against, and the state after removal (unfiled on one axis) is one the
+   matrix already draws honestly ("N videos are off the grid").
+2. **Hide the consequence** and let the key do it silently. Rejected: that is
+   the opaque failure the task warns about, inverted.
+3. **Allow it, and say what it does, with the count, before and after.**
+   Taken. The row carries the count; the first click on Remove turns into a
+   sentence (*3 videos are filed under "review". Removing it leaves them with
+   no format — nothing else about them changes, and they can be filed again
+   by hand.*) with "Remove and unfile them" and "Keep"; the action reads the
+   count in the same call and answers with it, so the note afterwards is a
+   report, not a guess. Archived videos are unfiled too and the count on the
+   row does not include them (it is the matrix's number); the sentence says
+   "nothing else changes" rather than pretending archived rows are exempt.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| Routes are `/settings/buckets/[slug]` and `/settings/channel/[slug]`. | PLAN.md's `/c/[slug]/settings`. The stages and checklists slices set the `/settings/<section>/[slug]` shape; a fourth spelling would be worse than a third copy of the deviation. |
+| Removing a bucket unfiles rather than refuses. | Above. |
+| Duplicate names are refused case-insensitively, in the action. | Only the database's case-sensitive unique. Two matrix headings differing by case are one heading to a person. |
+| A quota's ceiling is 99 (`MAX_QUOTA`). | No ceiling. `check (> 0)` has no upper bound; 99 is past any monthly plan and keeps a mistyped `20` from becoming `200` silently. |
+| Empty quota box = null; zero is refused with a sentence pointing at the empty box. | Treating 0 as "clear". Zero is the number the CHECK refuses, and teaching the box that 0 means null would teach the person that 0 is a quota. |
+| A script template without `{{hook}}` saves, with a warning. | Refusing it. `lib/defaults.ts` promised a warning; the template is the user's own shape. |
+| Expected CTR of zero is refused. | Allowing 0. A video cannot be below an expectation of nothing, so the prompt would never fire and the person would believe they had set one. Empty is the way to the median. |
+| Text fields normalise only line endings and trailing whitespace; leading indentation and internal blank lines are kept. | Trimming each line. A voice guide's indented bullets and a template's blank lines are the content. |
+| Positions keep gaps after a removal; a reorder renumbers. | Closing gaps on delete. Same rule as the template editor: positions are order, not a count. |
+| The four-link `SettingsNav` is rendered by this slice's two pages only. | Editing `app/settings/stages/[slug]/page.tsx` and `…/checklists/[slug]/page.tsx` to render it too. Those files belong to slices still being written in the same tree; the component is one import away and the integration pass owns the join. |
+| The matrix's `NoVerticals` panel still says the editor "arrives in M7" with a disabled button. | Turning it into a link to `/settings/buckets/[slug]`. It is `components/ideas/matrix/no-verticals.tsx`, outside this slice, and `e2e/matrix.spec.ts:569–577` asserts the disabled state. The fix is one `<Link>` and two assertions, filed for the integration pass. |
+
+### Deviations from PLAN.md, stated plainly
+
+- **Routes** — the table above.
+- **`updateBuckets` (one action)** is five: add, rename, quota, move, remove.
+  Each is one row or one statement with its own refusal sentence; one
+  "replace the channel's buckets" action would be a delete-and-reinsert that
+  changes every id videos are filed under.
+- **No `updateChannel` name in PLAN.md's action list**; the channel fields
+  are `updateChannelSettings`, one action, one column per blur.
+
+### Honest limits
+
+- **Read-then-write, again.** A reorder reads the axis and writes it back; a
+  bucket removed in another tab between the two is re-inserted by the upsert
+  unless `isPermutationOf` catches the mismatch, which it does when the page
+  and the table disagree on the set — one user, one session.
+- **The filed count is at page load.** A video filed in another tab is not
+  counted until reload; the removal action counts again in the same call and
+  reports the real number.
+- **The `NoVerticals` panel and the two older settings pages** — above.
+- **`revalidatePath("/videos/[id]", "page")`** after every bucket write, so a
+  renamed bucket reaches every video page's picker: broad, rare, fine at one
+  user, and the same call the stages slice makes for the stage select.
+- **Voice guide is stored and shown; nothing reads it.** By design until M8.
+
+### Gates for this slice
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean (both projects) |
+| `npm run lint` | clean |
+| `npm test` | 22 files, 376 tests passed (22 of them new: `lib/bucket-settings.test.ts`, `lib/channel-settings.test.ts`) |
+| `./scripts/verify-db.sh m7b_check` | OK — migrations applied, 15 SQL test files passed, **no migration added by this slice**; the upsert reorder and the two-statement refusal were then tried by hand on that database as `authenticated` |
+| `npm run build` | compiled; 18 routes, `/settings/buckets`, `/settings/buckets/[slug]`, `/settings/channel` and `/settings/channel/[slug]` among them |
+| `npx playwright test settings-channel` (alone, own ports and database) | **7 passed** (43.5s) on the second run; the first run (4 passed, 3 failed) found three things, below |
+| `npm run e2e` (full suite, own ports and database) | **214 passed, 1 failed, 1 skipped** (17.4m) — see below |
+| `npx playwright test m2-review` alone, straight afterwards | 12 passed, 1 failed: `:476` again |
+
+The one failure is `e2e/m2-review.spec.ts:476` (a target date saved without
+a blur): the hydration-window race on record since M4, which the stages
+slice's full run an hour earlier also hit and which the checklists slice
+found losing "four times out of four today, alone included". It lost alone
+again here. Nothing in this slice touches `/videos/[id]`; the diagnosis and
+the fix (a different date on retry, or a hydration marker before the first
+fill) are in the checklists slice's notes and are that spec's to make. The
+skip is `session-refresh`, which only runs under `npm run e2e:refresh`. All
+seven `settings-channel` cases passed inside the full run.
+
+The first run of the spec failed three of its seven cases, and all three were
+worth having found:
+
+1. **The add form's inputs were `disabled` while the add was in flight**, so
+   the `focus()` that put the cursor back for the next pillar was a no-op on a
+   disabled element. The button is what waits now; the boxes stay live.
+2. **The browser was refusing quota `0` before the form could.** `<input
+   type="number" min={1}>` inside a `<form>` triggers native constraint
+   validation on submit — a tooltip, no `onSubmit`, and so none of this
+   slice's sentence. `noValidate` on the two add forms makes the refusal the
+   form's own. The row's quota box was never affected (it is not in a form),
+   which is why that half of the test passed first time.
+3. **The test expected the seeded template trimmed.** `create_channel` stores
+   `SCRIPT_TEMPLATE` verbatim, trailing newline included, and the box shows
+   what the row holds; the assertion was wrong, not the page.
+
+Both runs were on their own ports and database (`DEV_STACK_PORT=54361`,
+`NERTUBE_DEV_DB=nertube_e2e_m7b`, `E2E_PORT=3141`), and had to wait for the
+stages slice's full run to release the one `next dev` the directory allows —
+the same turn-taking the checklists slice recorded.
+
+A screenshot walk of both pages (a scratch spec, deleted afterwards) changed
+two lines of copy: the formats axis had a sentence that did not parse, and a
+second "more than the brief suggests" paragraph repeated the count line.
+
+---
+
+## M7 — Integration: one settings area, one arrow, one refusal
+
+> Scope: the join between the three M7 slices above. `components/settings/`
+> (`settings-header.tsx`, `settings-nav.tsx`, `channel-switch.tsx`,
+> `move-button.tsx`, `refusal.tsx`), `app/settings/page.tsx` and
+> `app/settings/first-channel.ts`, the four `[slug]` pages rewritten onto the
+> header, the six editor components rewritten onto the shared controls,
+> `components/app-sidebar.tsx`, `components/ideas/matrix/no-verticals.tsx`,
+> `components/post-publish/repurposed-lane.tsx`, `e2e/m7-acceptance.spec.ts`,
+> and three existing specs. **No migration; no new runtime dependency.**
+
+### What was found when the three slices were read together
+
+Three agents built four pages in one tree at the same time, and each did the
+sensible thing for its own slice. Read as one screen, the seams were:
+
+1. **Three copies of the top of the page.** Each `[slug]` page drew its own
+   heading with the channel name beside it, imported `ChannelSwitch` from the
+   checklists slice's directory, and two of the four rendered a `SettingsNav`
+   that lived under the channel slice's directory — so from the stages and
+   checklists pages the other two screens were reachable only by address.
+2. **Four copies of the index redirect.** `/settings/stages`,
+   `/settings/checklists`, `/settings/buckets` and `/settings/channel` each
+   carried the same twelve lines; `/settings` itself was a 404.
+3. **Three reorder controls.** Stages drew boxed ▲▼ buttons with a verdict
+   and a reason in the accessible name; buckets drew the same buttons with a
+   plain `disabled`; template rows drew text ↑↓ with a transparent border. Two
+   of the three also carried a private copy of the focus-after-move
+   bookkeeping (a `Map` of refs, a request ref, an effect) and the third had
+   none, so a template arrow that disabled itself by succeeding dropped focus
+   on `<body>` — the pattern M6's review filed against the filming-day panel.
+4. **Two colours for a refusal.** The stages and buckets slices set refusals
+   in `over-limit`; the template editor and `SaveStatus` set them in
+   `attention`. Seven `<p role="alert">` elements, five class strings.
+5. **Two sentences for one rule.** `RepurposedLane` on the video page still
+   carried its own wording of "still holds N videos" beside the
+   `occupiedSentence` the stages screen prints for the same refusal from the
+   same function — the limit the stages slice recorded for this pass.
+6. **A placeholder still promising M7.** The matrix's `NoVerticals` panel
+   kept its `aria-disabled` "Name your pillars M7" button and the sentence
+   "arrives in M7", with `e2e/matrix.spec.ts` asserting both — the limit the
+   channel slice recorded.
+
+### What this pass did about each
+
+1. **`SettingsHeader`** — one component: an eyebrow saying *Settings*, the
+   four-link strip (`SettingsNav`, current one `aria-current="page"`), the
+   channel switch when there is more than one channel (`ChannelSwitch`, now
+   keyed by *section* so it keeps the screen and changes the channel), the
+   heading, the channel's name at `data-testid="settings-channel-name"`, and
+   the page's one paragraph of consequences as children. All four pages
+   render it and nothing else above their editor. `settings-nav.tsx` and
+   `channel-switch.tsx` moved to `components/settings/`; `settingsPath()` is
+   the one place a settings address is spelled, and the sidebar, the matrix
+   panel and the redirects all call it.
+2. **`redirectToFirstChannel(section)`** — one function in
+   `app/settings/first-channel.ts`; the four index routes are one line each
+   and `/settings` now exists, opening on the first channel's stages the way
+   `/` opens on `/now`.
+3. **`MoveButton` and `useMoveFocus`** — the area's one reorder control and
+   the one focus rule. Every arrow now carries a `MoveVerdict`: the stages
+   editor's `canMove` verdicts unchanged, `edgeVerdict()` for "already
+   first/last" on buckets and templates, `IN_FLIGHT` while a write is on the
+   wire, and "This row is not saved yet." on a template row that is still
+   `temp:`. The reason is in the `title` and in the accessible name of the
+   disabled button, on every editor, not only on stages. `useMoveFocus` is
+   the bookkeeping the two editors had copied, used by all three; the
+   template editor gets it for free and no longer loses focus on a move.
+   Test ids are now `<row>-move-up|down` everywhere;
+   `e2e/settings-checklists.spec.ts` was updated from `template-up|down`.
+4. **`Refusal`** — the one refusal line: `role="alert"`, `attention` (the
+   same token `SaveStatus` uses for a failed save, so a refused write and a
+   failed one are the same kind of news), an optional link when the refusal
+   has somewhere to go (the occupied board column, the idea bank). Used by
+   the stage row's switch/remove refusal, both editors' move errors, the
+   bucket row's remove error, both add forms' refusals, the template add
+   form's estimate refusal and the template row's estimate refusal. The two
+   add forms print their hint in a plain `<p>` under the same test id when
+   there is nothing to refuse, so a hint is never inside a live region — the
+   argument `SaveStatus` already makes about its `idle` text.
+5. **`RepurposedLane`** now prints `occupiedSentence(stage.name, occupied)`
+   — the same sentence, from `lib/stage-settings.ts`, that the settings row
+   prints when `set_stage_enabled` refuses. One rule, one sentence, two
+   places. `e2e/post-publish.spec.ts` asserts the shared wording.
+6. **`NoVerticals`** — the button is the `<Link>` it stood in for, to
+   `settingsPath("buckets", slug)`; the note says where pillars are named
+   rather than when. `e2e/matrix.spec.ts` test 5 now follows the link, sees
+   the empty pillars axis, and comes back.
+
+### PLAN.md's runnable, walked
+
+`e2e/m7-acceptance.spec.ts`, three cases, each against a channel rebuilt
+from the seed through `create_channel`:
+
+1. **One area.** The sidebar's Settings row is a link (no
+   `sidebar-unbuilt` left), reached with Tab and Enter; every bare settings
+   address redirects to the first channel; the strip visits all four screens
+   keeping `data-channel` and the sidebar's two `aria-current` marks
+   (Settings as page, the channel row as true); the channel switch goes from
+   this channel's checklists to the *other* channel's checklists.
+2. **Toggle Repurposed off, rename Packaging, board follows.** Both edits on
+   the settings screen; Postgres holds `is_enabled = false` and the new
+   label with every `(kind, position)` pair exactly as seeded; the board's
+   columns, read left to right, are the seed with Packaging relabelled and
+   Repurposed absent. Then the invariant: on the video page the stage select
+   offers *Packaging & hook* and not *Repurposed*; moving a titleless idea
+   into the renamed stage succeeds ("Moved to Packaging & hook"); moving it
+   out to Scripting is refused with "Packaging still needs …" — the gate's
+   own wording, keyed on `kind`, unchanged by the label — and the row is
+   still in Packaging. Repurposed switched back on returns the column.
+3. **The placeholder closed.** From the matrix's empty state, the link lands
+   on the bucket editor's pillars axis; *money* is added; the matrix draws
+   the row crossed with the eight seeded formats.
+
+The four consequence loops are proved by the slice specs and were re-run
+inside this pass's runs rather than duplicated: **quota → matrix** and
+**wip_threshold → board warning** in `settings-channel.spec.ts` (tests 4 and
+5), **est_minutes → /now** and **template → the next video to enter** in
+`settings-checklists.spec.ts` (tests 3 and 1).
+
+### The m2-review flake, fixed
+
+`e2e/m2-review.spec.ts:476` (a target date saved without a blur) failed in
+every M7 slice's full run and was diagnosed by the checklists slice: once
+the first `fill` lands before hydration, React adopts the DOM value at
+hydration and every later fill of the *same* date fires no `onChange`, so
+the test's `untilTaken` retry could never recover from the race it exists
+for. The first fill now waits for the app's own hydration signal (the
+sidebar's `c` binding reporting `data-shortcut-ready="true"`, the marker
+every M7 spec already uses) and the retry stays for the narrower case. The
+page is untouched; `e2e/flow-fields.spec.ts` was already proving the field.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| Refusals are set in `attention`, not `over-limit`. | Keeping `over-limit`, which the stages and buckets slices used. `globals.css` defines `over-limit` as "a rule is being broken right now" — the title over 55 characters, the column over its WIP threshold — and `attention` as "something wants a look". A refused request is the second: nothing is broken, the person asked for something the tool will not do, and the failed-save line beside it was already `attention`. |
+| The sidebar's Settings row opens `/settings/stages/[slug]`, not `/settings`. | The bare address. The row is the Board row's channel, like Ideas; a redirect in between would be a hop for nothing and would lose the channel the sidebar is showing. `/settings` exists for a typed address and lands in the same place. |
+| The channel switch keeps the section. | Keeping the stages slice's `basePath` prop, which each page filled in by hand. Keyed by section, the switch cannot be pointed at the wrong screen by a copied import. |
+| `useMoveFocus` reaches the template editor too. | Leaving template rows without it, as the slice shipped them. The arrows there are disabled while the write is in flight, which is precisely the case that drops focus. |
+| Two testid renames in two slice specs (`settings-stages-channel` → `settings-channel-name`; `template-up|down` → `template-move-up|down`). | Keeping per-slice ids and mapping them in the shared components. One id per meaning is the point of one component. |
+| `e2e/m2-review.spec.ts` gets the hydration wait rather than a different date on retry. | The other fix the checklists slice named. A different date on retry proves "some date saved", which is weaker than the test's title; waiting for the marker proves the date it picked. |
+
+### Deviations from PLAN.md, stated plainly
+
+- **Route shape** — `/settings/<section>/[slug]`, as the three slices
+  recorded; this pass made it one area rather than moving it to
+  `/c/[slug]/settings`. The one thing PLAN.md's table wanted from its
+  spelling — settings are a channel's — is what `SettingsHeader` and the
+  sidebar say on every screen.
+- **`updateStages` / `updateTemplates` / `updateBuckets` as single actions** —
+  each slice split its writes into one action per edit, for the reasons each
+  recorded; unchanged here.
+
+### Honest limits
+
+- **Two arrows per template row are now 24px boxes**, the same control as
+  the other two editors. The rows are denser than before and the page is
+  longer by a little; one control was worth more than the pixels.
+- **The `Refusal` line has no Retry.** Refusals here have no payload to
+  re-send — the retry is the person changing what they asked for. Save
+  failures on a field still go through `SaveStatus`, which does.
+- **`RepurposedLane` still pre-disables its box** where the settings row
+  leaves the switch live and lets the database refuse. Two behaviours, one
+  sentence; the stages slice argued for the live switch on its screen, and
+  the lane's argument (the count is already on the server render, the box
+  is beside a video, not a list) still holds on its own. Left as two.
+- **No `app/settings/layout.tsx`.** The channel is the last URL segment, so
+  a layout could not read it without a second fetch; the header is a
+  component the four pages call instead.
+- **The timezone question** M6's review deferred to M7 is still open. It is
+  a profile setting, not a channel one (`lib/calendar-dates.ts` still
+  interprets dates in the server's zone), and none of the three slices took
+  it; it is filed for M9's polish pass with the rest of the empty states.

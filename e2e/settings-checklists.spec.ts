@@ -376,11 +376,11 @@ test('reorder persists, renumbers 1..n as one statement, and survives a reload',
   await expect(rows(editor)).toHaveCount(PACKAGING.length);
 
   // The ends have nowhere to go, and say so by being disabled rather than gone.
-  await expect(editor.getByTestId('template-up').nth(0)).toBeDisabled();
-  await expect(editor.getByTestId('template-down').nth(PACKAGING.length - 1)).toBeDisabled();
+  await expect(editor.getByTestId('template-move-up').nth(0)).toBeDisabled();
+  await expect(editor.getByTestId('template-move-down').nth(PACKAGING.length - 1)).toBeDisabled();
 
   // First row down one.
-  await editor.getByTestId('template-down').nth(0).click();
+  await editor.getByTestId('template-move-down').nth(0).click();
   const afterDown = [PACKAGING[1], PACKAGING[0], ...PACKAGING.slice(2)];
   await expect.poll(async () => (await readTemplate('packaging')).map((r) => r.text)).toEqual(
     afterDown,
@@ -388,7 +388,7 @@ test('reorder persists, renumbers 1..n as one statement, and survives a reload',
   expect(await rowTexts(editor)).toEqual(afterDown);
 
   // The row that is now third, up one — so the two moves compose.
-  await editor.getByTestId('template-up').nth(2).click();
+  await editor.getByTestId('template-move-up').nth(2).click();
   const afterUp = [PACKAGING[1], PACKAGING[2], PACKAGING[0], ...PACKAGING.slice(3)];
   await expect.poll(async () => (await readTemplate('packaging')).map((r) => r.text)).toEqual(
     afterUp,

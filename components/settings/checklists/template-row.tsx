@@ -1,7 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type RefObject } from "react";
 
+import { IN_FLIGHT, MoveButton, edgeVerdict } from "@/components/settings/move-button";
+import { Refusal } from "@/components/settings/refusal";
 import { MAX_ITEM_LENGTH } from "@/lib/checklist";
 import {
   EstMinutesSchema,
@@ -23,11 +25,10 @@ import { isUnsaved } from "./use-template-editor";
  * row's value with the reason printed beside it, without the list losing a row
  * it never changed.
  *
- * The arrows are buttons rather than a drag handle: there is no drag-and-drop
- * library in this app, a template is at most nine rows, and an arrow is the
- * same gesture for a keyboard as for a mouse. The first row's "up" and the
- * last row's "down" are disabled rather than hidden, so the row's controls are
- * always in the same place.
+ * The arrows are `MoveButton`, the settings area's one reorder control: the
+ * first row's "up" and the last row's "down" are disabled rather than hidden,
+ * so the row's controls are always in the same place, and a row that is not
+ * yet saved, or a list with a write in flight, says so on the button.
  */
 export function TemplateRow({
   item,
@@ -38,6 +39,7 @@ export function TemplateRow({
   onEdit,
   onRemove,
   onMove,
+  moveButtonRef,
 }: {
   item: TemplateItem;
   /** 0-based, in display order. */
@@ -49,6 +51,8 @@ export function TemplateRow({
   onEdit: (id: string, patch: { text?: string; estMinutes?: number }) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: "up" | "down") => void;
+  /** So the editor can put focus back on an arrow after a move re-renders it. */
+  moveButtonRef: (direction: "up" | "down") => RefObject<HTMLButtonElement | null>;
 }) {
   const unsaved = isUnsaved(item);
   const quick = fitsTenMinutes(item.estMinutes, stageKind);
@@ -99,6 +103,12 @@ export function TemplateRow({
     setMinutesError(null);
     if (parsed.data === item.estMinutes) return;
     onEdit(item.id, { estMinutes: parsed.data });
+  }
+
+  function verdict(direction: "up" | "down") {
+    if (unsaved) return { ok: false as const, reason: "This row is not saved yet." };
+    if (busy) return IN_FLIGHT;
+    return edgeVerdict(`Item ${index + 1}`, index, count, direction);
   }
 
   return (
@@ -170,26 +180,22 @@ export function TemplateRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            data-testid="template-up"
-            disabled={unsaved || busy || index === 0}
+          <MoveButton
+            direction="up"
+            subject={`item ${index + 1}`}
+            verdict={verdict("up")}
             onClick={() => onMove(item.id, "up")}
-            className="rounded-button border border-transparent px-1.5 py-1 text-[12px] leading-4 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            <span aria-hidden="true">↑</span>
-            <span className="sr-only">Move item {index + 1} up</span>
-          </button>
-          <button
-            type="button"
-            data-testid="template-down"
-            disabled={unsaved || busy || index === count - 1}
+            buttonRef={moveButtonRef("up")}
+            testIdPrefix="template"
+          />
+          <MoveButton
+            direction="down"
+            subject={`item ${index + 1}`}
+            verdict={verdict("down")}
             onClick={() => onMove(item.id, "down")}
-            className="rounded-button border border-transparent px-1.5 py-1 text-[12px] leading-4 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            <span aria-hidden="true">↓</span>
-            <span className="sr-only">Move item {index + 1} down</span>
-          </button>
+            buttonRef={moveButtonRef("down")}
+            testIdPrefix="template"
+          />
           <button
             type="button"
             data-testid="template-remove"
@@ -205,13 +211,9 @@ export function TemplateRow({
       </div>
 
       {minutesError ? (
-        <p
-          role="alert"
-          data-testid="template-minutes-error"
-          className="pl-7 text-[12px] text-attention"
-        >
-          {minutesError}
-        </p>
+        <div className="pl-7">
+          <Refusal testId="template-minutes-error" message={minutesError} />
+        </div>
       ) : null}
     </li>
   );

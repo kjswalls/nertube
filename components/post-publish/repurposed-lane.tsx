@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 
 import { setStageEnabled } from "@/app/actions/stages";
+import { occupiedSentence } from "@/lib/stage-settings";
 
 /**
  * The Repurposed lane switch.
@@ -29,7 +30,11 @@ import { setStageEnabled } from "@/app/actions/stages";
  * nothing saying where they went. So `setStageEnabled` refuses, naming the
  * count, and this component shows the refusal in place rather than as a toast
  * that scrolls away. The count is also read on the server, so the switch is
- * already disabled with the reason underneath it before anyone clicks.
+ * already disabled with the reason underneath it before anyone clicks — and
+ * the reason is `occupiedSentence`, the same sentence `/settings/stages`
+ * prints when the same function refuses the same switch there. One rule, one
+ * sentence; M7's settings screen is where the switch lives for every stage,
+ * and this is the lane's own copy of it at the end of the loop it belongs to.
  */
 export function RepurposedLane({
   stage,
@@ -128,14 +133,12 @@ export function RepurposedLane({
         role={error ? "alert" : undefined}
         className={[
           "text-xs leading-5",
-          error ? "text-over-limit" : "text-muted",
+          error ? "text-attention" : "text-muted",
         ].join(" ")}
       >
         {error ??
           (blocked
-            ? occupied === 1
-              ? `${stage.name} still holds a video, so it cannot be switched off — that would hide it from the board and from /now. Move it on or archive it first.`
-              : `${stage.name} still holds ${occupied} videos, so it cannot be switched off — that would hide them from the board and from /now. Move them on or archive them first.`
+            ? occupiedSentence(stage.name, occupied)
             : enabled
               ? "Clips, shorts and the newsletter get their own column at the end of the board. Switch it off if you do not repurpose."
               : "Switched off: the board ends at Published for this channel, and Published is a terminal stage.")}

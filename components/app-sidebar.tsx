@@ -3,6 +3,7 @@ import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { CaptureHost } from "@/components/capture/capture-host";
 import { ChannelShortcuts } from "@/components/channel-shortcuts";
+import { settingsPath } from "@/components/settings/settings-nav";
 import { ShortcutHints } from "@/components/shortcut-hints";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -57,7 +58,7 @@ export function boardChannelOf(
  *
  * ## Every section here is now a page
  *
- * Calendar was the last placeholder, and M6 removed it: all four rows are
+ * Settings was the last placeholder, and M7 removed it: all five rows are
  * links, reachable by keyboard like any other link, and none of them announces
  * a milestone any more. The rule that produced them is worth keeping even
  * though the rows are gone — M3's reviewers filed the Ideas row as unreachable
@@ -307,16 +308,19 @@ export function AppSidebar({
             </li>
             <li>
               {/*
-                M7 built it. Settings are a channel's settings — stages,
-                templates and buckets are all per channel (BRIEF.md) — so the
-                row opens the Board row's channel, the way Ideas does, and is
-                a link only once there is a channel to configure.
+                M7 built it, and it was the last placeholder. Settings are a
+                channel's settings — stages, templates, buckets and the
+                channel's own fields are all per channel (BRIEF.md) — so the
+                row opens the Board row's channel, the way Ideas does, on the
+                first of the area's four screens; the strip at the top of that
+                screen reaches the other three. A link only once there is a
+                channel to configure.
               */}
               {boardChannel ? (
                 <SidebarLink
-                  href={`/settings/stages/${boardChannel.slug}`}
+                  href={settingsPath("stages", boardChannel.slug)}
                   current={section === "settings" ? "page" : false}
-                  title={`${boardChannel.name}'s stages, templates and buckets`}
+                  title={`${boardChannel.name}'s stages, checklists, buckets and channel settings`}
                 >
                   Settings
                 </SidebarLink>

@@ -2,15 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { ChannelSwitch } from "@/components/settings/checklists/channel-switch";
+import { SettingsHeader } from "@/components/settings/settings-header";
 import { StagesEditor } from "@/components/settings/stages/stages-editor";
 import type { SettingsStage } from "@/components/settings/stages/types";
 import { isStageKind } from "@/lib/defaults";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
-
-/** The route, so the switch and the actions' revalidation name the same path. */
-const PATH = "/settings/stages";
 
 export async function generateMetadata({
   params,
@@ -41,11 +38,11 @@ export async function generateMetadata({
  * Stages are per channel (BRIEF.md: *"Stage definitions, checklist templates,
  * and content buckets are all per-channel"*), and this is the one screen
  * where editing the wrong channel's rows is a real mistake with a real cost.
- * So the channel is in the address, in the switch at the top, in the heading
- * beside the title, in the `data-channel` on the root, and the sidebar marks
- * the channel row as current. Nothing on this page reads or writes another
- * channel's stages: every action resolves the channel from the stage row it
- * was handed, through RLS, never from the URL.
+ * `SettingsHeader` puts the channel in the switch and the heading, the
+ * address carries it, `data-channel` on the root repeats it, and the sidebar
+ * marks the channel row as current. Nothing on this page reads or writes
+ * another channel's stages: every action resolves the channel from the stage
+ * row it was handed, through RLS, never from the URL.
  *
  * A slug that does not belong to this user is a 404, like the board's.
  */
@@ -104,8 +101,6 @@ export default async function StageSettingsPage({
     occupied: occupied.get(stage.id) ?? 0,
   }));
 
-  const others = channels.filter((row) => row.id !== channel.id);
-
   return (
     <AppShell currentSlug={channel.slug} section="settings" gutter="reading">
       <div
@@ -113,36 +108,9 @@ export default async function StageSettingsPage({
         data-channel={channel.slug}
         className="flex w-full max-w-3xl flex-col gap-5"
       >
-        <div className="flex flex-col gap-3">
-          <ChannelSwitch channels={channels} currentSlug={channel.slug} basePath={PATH} />
-
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
-              Stages
-            </h1>
-            <p data-testid="settings-stages-channel" className="text-[12px] text-muted">
-              {channel.name}
-            </p>
-          </div>
-
-          <p className="max-w-2xl text-[13px] leading-5 text-muted">
-            These are <strong className="font-medium text-foreground">{channel.name}</strong>
-            &rsquo;s stages and nobody else&rsquo;s
-            {others.length === 1 ? (
-              <>
-                {" "}
-                &mdash; {others[0].name} has{" "}
-                <Link
-                  href={`${PATH}/${encodeURIComponent(others[0].slug)}`}
-                  className="underline decoration-border underline-offset-2 hover:decoration-current"
-                >
-                  its own
-                </Link>
-              </>
-            ) : others.length > 1 ? (
-              " — every other channel has its own"
-            ) : null}
-            . They are the columns of the{" "}
+        <SettingsHeader section="stages" channel={channel} channels={channels}>
+          <p>
+            The columns of the{" "}
             <Link
               href={`/c/${channel.slug}/board`}
               className="underline decoration-border underline-offset-2 hover:decoration-current"
@@ -156,10 +124,11 @@ export default async function StageSettingsPage({
             >
               /now
             </Link>{" "}
-            walks a video along. Switching one off takes its column away;
-            it is refused while any video is still in it.
+            walks a video along. Renaming one changes its label and nothing
+            else; switching one off takes its column away, and is refused
+            while any video is still in it.
           </p>
-        </div>
+        </SettingsHeader>
 
         {stages.length === 0 ? (
           <p data-testid="settings-no-stages" className="text-[13px] text-muted">

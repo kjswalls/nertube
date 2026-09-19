@@ -5,6 +5,14 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import {
+  ExpectedCtrSchema,
+  ScriptTemplateSchema,
+  StaleDaysSchema,
+  VoiceGuideSchema,
+  WipThresholdSchema,
+} from "@/lib/channel-settings";
+import type { Database } from "@/lib/database.types";
+import {
   CHANNEL_DEFAULTS,
   SCRIPT_TEMPLATE,
   SEED_BUCKETS,
@@ -105,4 +113,121 @@ export async function createChannelAction(
 ): Promise<CreateChannelState> {
   const name = formData.get("name");
   return createChannel(typeof name === "string" ? name : "");
+}
+
+/* ========================================================================== */
+/* The settings half — `/settings/channel/[slug]`                             */
+/* ========================================================================== */
+
+/**
+ * The five columns `/settings/channel/[slug]` edits, as the screen holds them.
+ * `expectedCtr` is a number here and `numeric(5,2)` in the row; PostgREST
+ * hands numerics back as JSON numbers, and `lib/now-data.ts` reads the same
+ * column the same way.
+ */
+export interface ChannelSettings {
+  readonly voiceGuide: string | null;
+  readonly scriptTemplate: string;
+  readonly wipThreshold: number;
+  readonly staleDays: number;
+  readonly expectedCtr: number | null;
+}
+
+const SettingsPatch = z
+  .object({
+    channelId: z.uuid(),
+    voiceGuide: VoiceGuideSchema.optional(),
+    scriptTemplate: ScriptTemplateSchema.optional(),
+    wipThreshold: WipThresholdSchema.optional(),
+    staleDays: StaleDaysSchema.optional(),
+    expectedCtr: ExpectedCtrSchema.nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.voiceGuide !== undefined ||
+      value.scriptTemplate !== undefined ||
+      value.wipThreshold !== undefined ||
+      value.staleDays !== undefined ||
+      value.expectedCtr !== undefined,
+    { message: "Nothing to change." },
+  );
+
+export type UpdateChannelSettingsInput = z.input<typeof SettingsPatch>;
+
+export type UpdateChannelSettingsResult =
+  | { ok: true; settings: ChannelSettings }
+  | { ok: false; error: string };
+
+const SETTINGS_COLUMNS =
+  "id, slug, voice_guide, script_template, wip_threshold, stale_days, expected_ctr" as const;
+
+/**
+ * Change one or more of the channel's own settings. Absolute values, one
+ * field per blur in practice, so re-sending is harmless and two in flight is
+ * the ordering problem the client's queue already solves.
+ *
+ * ## What each column reaches, and what is revalidated for it
+ *
+ * - `wip_threshold` and `stale_days` are read by the board (the column
+ *   count's warning, the card's stale flag, the weekly strip's median flag).
+ * - `expected_ctr` is read by `/now` (rule 3) and by the video page's
+ *   Publish section, through `lib/expectation.ts`.
+ * - `script_template` is read by `move_video` at the moment a video first
+ *   enters Scripting — a database read, nothing cached, so no page needs
+ *   revalidating for it; videos already past Scripting keep their script.
+ * - `voice_guide` is read by nothing yet. M8's brainstorm will read it.
+ *
+ * The channel is read through RLS first; another user's id reads as no row,
+ * and a row that is not there is answered in words rather than with a PATCH
+ * that quietly matched nothing.
+ */
+export async function updateChannelSettings(
+  input: UpdateChannelSettingsInput,
+): Promise<UpdateChannelSettingsResult> {
+  const parsed = SettingsPatch.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0].message };
+  }
+  const { channelId, ...fields } = parsed.data;
+
+  const { supabase } = await requireUser();
+
+  // Typed against the generated `channels.Update`, so a column name that does
+  // not exist is a compile error rather than a silent no-op PATCH.
+  const patch: Database["public"]["Tables"]["channels"]["Update"] = {};
+  if (fields.voiceGuide !== undefined) patch.voice_guide = fields.voiceGuide;
+  if (fields.scriptTemplate !== undefined) patch.script_template = fields.scriptTemplate;
+  if (fields.wipThreshold !== undefined) patch.wip_threshold = fields.wipThreshold;
+  if (fields.staleDays !== undefined) patch.stale_days = fields.staleDays;
+  if (fields.expectedCtr !== undefined) patch.expected_ctr = fields.expectedCtr;
+
+  const { data, error } = await supabase
+    .from("channels")
+    .update(patch)
+    .eq("id", channelId)
+    .select(SETTINGS_COLUMNS)
+    .maybeSingle();
+
+  if (error) return { ok: false, error: `That did not save: ${error.message}` };
+  if (!data) return { ok: false, error: "That channel does not exist any more." };
+
+  if (fields.wipThreshold !== undefined || fields.staleDays !== undefined) {
+    revalidatePath(`/c/${data.slug}/board`);
+  }
+  if (fields.expectedCtr !== undefined) {
+    revalidatePath("/now");
+    revalidatePath("/videos/[id]", "page");
+  }
+  revalidatePath("/settings/channel/[slug]", "page");
+
+  return {
+    ok: true,
+    settings: {
+      voiceGuide: data.voice_guide,
+      scriptTemplate: data.script_template,
+      wipThreshold: data.wip_threshold,
+      staleDays: data.stale_days,
+      expectedCtr: data.expected_ctr === null ? null : Number(data.expected_ctr),
+    },
+  };
 }

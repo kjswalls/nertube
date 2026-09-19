@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { SaveStatus } from "@/components/autosave";
+import { useMoveFocus } from "@/components/settings/move-button";
+import { Refusal } from "@/components/settings/refusal";
 import { MAX_ITEM_LENGTH } from "@/lib/checklist";
 import {
   DEFAULT_TEMPLATE_MINUTES,
@@ -65,6 +67,14 @@ export function StageTemplateEditor({
 }) {
   const editor = useTemplateEditor({ stageId: stage.id, initial });
   const headingId = useId();
+
+  // Focus follows a moved row, as it does in the other two editors: the
+  // arrows are disabled while the write is on the wire, and a disabled button
+  // drops focus on <body>.
+  const focus = useMoveFocus(
+    [editor.items, editor.pending],
+    (itemId) => `[data-template-id="${itemId}"] [data-testid="template-text"]`,
+  );
 
   const total = stageMinutes(editor.items);
   const quick = quickCount(editor.items, stage.kind);
@@ -157,7 +167,11 @@ export function StageTemplateEditor({
               busy={editor.pending}
               onEdit={editor.edit}
               onRemove={editor.remove}
-              onMove={editor.move}
+              onMove={(id, direction) => {
+                focus.requestFocus(id, direction);
+                editor.move(id, direction);
+              }}
+              moveButtonRef={(direction) => focus.buttonRef(item.id, direction)}
             />
           ))}
         </ol>
@@ -277,11 +291,7 @@ function AddTemplateItem({
           Add
         </button>
       </div>
-      {error ? (
-        <p role="alert" data-testid="template-add-error" className="text-[12px] text-attention">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Refusal testId="template-add-error" message={error} /> : null}
     </form>
   );
 }

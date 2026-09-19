@@ -1,26 +1,30 @@
 import Link from "next/link";
 
+import { settingsPath, type SettingsSection } from "./settings-nav";
+
 /**
- * Which channel's templates are on screen.
+ * Which channel's settings are on screen, and the way to another's.
  *
- * Templates are per channel (BRIEF.md: *"Stage definitions, checklist
- * templates, and content buckets are all per-channel"*), and the settings
- * routes live outside `/c/[slug]`, so the channel is the last segment of the
- * address and these are real links to it — a settings page for one channel is
- * a place, it can be pasted to somebody, and `aria-current="page"` says which
- * one is showing without inventing a tab widget.
+ * Every setting in this area is per channel (BRIEF.md: *"Stage definitions,
+ * checklist templates, and content buckets are all per-channel"*), and the
+ * settings routes live outside `/c/[slug]`, so the channel is the last
+ * segment of the address and these are real links to it — the same section,
+ * the other channel. A settings page for one channel is a place, it can be
+ * pasted to somebody, and `aria-current="page"` says which one is showing
+ * without inventing a tab widget.
  *
- * Rendered only when there is a choice to make: one channel is not a switch.
+ * Rendered only when there is a choice to make: one channel is not a switch,
+ * and the heading beside it already names the channel.
  */
 export function ChannelSwitch({
   channels,
   currentSlug,
-  basePath,
+  section,
 }: {
   channels: readonly { id: string; name: string; slug: string }[];
   currentSlug: string;
-  /** The settings route these links point back at. */
-  basePath: string;
+  /** The settings section these links stay on. */
+  section: SettingsSection;
 }) {
   if (channels.length < 2) return null;
 
@@ -35,7 +39,7 @@ export function ChannelSwitch({
         return (
           <Link
             key={channel.id}
-            href={`${basePath}/${encodeURIComponent(channel.slug)}`}
+            href={settingsPath(section, channel.slug)}
             aria-current={current ? "page" : undefined}
             data-testid="settings-channel-link"
             className={[

@@ -1,3 +1,7 @@
+import Link from "next/link";
+
+import { settingsPath } from "@/components/settings/settings-nav";
+
 import { BucketCount, QuotaMeter } from "./quota-meter";
 import type { BucketTally } from "./tally";
 
@@ -19,11 +23,12 @@ import type { BucketTally } from "./tally";
  * 2. **What it does have is still worth showing.** The formats are real, they
  *    have real counts and possibly real quotas, and one axis of the answer is
  *    better than none — so they are drawn as a strip, labelled as one axis.
- * 3. **The way to add pillars is named, and not faked.** The bucket editor is
- *    M7 (PLAN.md's settings milestone). A button that opened nothing would be
- *    the dead-link mistake M1 and M3 both filed; this is the sidebar's own
- *    pattern — present, plainly unavailable, and carrying the milestone on the
- *    control rather than only in a tooltip.
+ * 3. **The way to add pillars is a link to it.** Until M7 this was a
+ *    control that was present and plainly unavailable, carrying the milestone
+ *    on itself, because a button that opened nothing would be the dead-link
+ *    mistake M1 and M3 both filed. M7 built `/settings/buckets/[slug]`, so
+ *    the control is now the link it was standing in for — and it lands on
+ *    the pillars axis, whose add form is the first empty thing on the page.
  */
 export function NoVerticals({
   channelSlug,
@@ -73,30 +78,13 @@ export function NoVerticals({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
-          {/*
-            Present, and refusing to pretend.
-
-            `aria-disabled` rather than `disabled`, which is the rule
-            `components/app-sidebar.tsx` states for the same situation and which
-            the M5 review found this control breaking: a `disabled` button is
-            out of the tab order, so a keyboard user could not reach the one
-            affordance on this panel, and everything it had to say was in a
-            tooltip they could not summon. The milestone is on the control in
-            type for the same reason, and the sentence under it is a real
-            paragraph rather than a `title`.
-          */}
-          <button
-            type="button"
-            aria-disabled="true"
-            aria-describedby={`${channelSlug}-add-buckets-note`}
+          <Link
+            href={settingsPath("buckets", channelSlug)}
             data-testid="add-buckets"
-            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] text-muted opacity-80 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <span>Name your pillars</span>
-            <span className="font-mono text-[11px] tracking-wide uppercase">
-              M7
-            </span>
-          </button>
+            Name your pillars
+          </Link>
 
           <a
             href={`/c/${channelSlug}/ideas`}
@@ -106,16 +94,10 @@ export function NoVerticals({
           </a>
         </div>
 
-        <p
-          id={`${channelSlug}-add-buckets-note`}
-          data-testid="add-buckets-note"
-          className="text-[12px] text-muted"
-        >
+        <p data-testid="add-buckets-note" className="text-[12px] text-muted">
           Naming pillars, renaming formats and setting monthly quotas all live
-          in the channel’s settings screen, which arrives in M7. Until then a
-          pillar can only be written straight into the database — which is why
-          this build cannot demonstrate the matrix on a channel made in the
-          product.
+          in the channel&rsquo;s settings. A pillar added there is a row here
+          the moment the page is next drawn.
         </p>
       </section>
 

@@ -2,11 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { ChannelSwitch } from "@/components/settings/checklists/channel-switch";
 import {
   StageTemplateEditor,
   type TemplateStage,
 } from "@/components/settings/checklists/stage-template-editor";
+import { SettingsHeader } from "@/components/settings/settings-header";
 import {
   TEMPLATE_COLUMNS,
   readTemplateItem,
@@ -16,9 +16,6 @@ import {
 import { isStageKind } from "@/lib/defaults";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
-
-/** The route, so the switch and the actions' revalidation name the same path. */
-const PATH = "/settings/checklists";
 
 export async function generateMetadata({
   params,
@@ -127,21 +124,8 @@ export default async function ChecklistSettingsPage({
         data-channel={channel.slug}
         className="flex w-full max-w-3xl flex-col gap-5"
       >
-        <div className="flex flex-col gap-3">
-          <ChannelSwitch
-            channels={channels}
-            currentSlug={channel.slug}
-            basePath={PATH}
-          />
-
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
-              Checklist templates
-            </h1>
-            <p className="text-[12px] text-muted">{channel.name}</p>
-          </div>
-
-          <p className="max-w-2xl text-[13px] leading-5 text-muted">
+        <SettingsHeader section="checklists" channel={channel} channels={channels}>
+          <p>
             Each stage&rsquo;s list is copied onto a video the moment it enters
             that stage &mdash; from then on the video&rsquo;s copy is its own.
             Editing a template changes what the <em>next</em> video gets; it
@@ -162,7 +146,7 @@ export default async function ChecklistSettingsPage({
             </Link>{" "}
             counts towards done/total on every card.
           </p>
-        </div>
+        </SettingsHeader>
 
         {stages.length === 0 ? (
           <p data-testid="settings-no-stages" className="text-[13px] text-muted">

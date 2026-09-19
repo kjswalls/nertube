@@ -79,8 +79,20 @@ const TODAY = todayColumn(Date.now());
 const SHOOT = addDays(TODAY, 10) as string;
 /** The month the whole walk happens in, as `?month=` spells it. */
 const SHOOT_MONTH = monthKey(monthOf(SHOOT)!);
-/** A publish date on the grid, so the filming day is not the only event. */
-const PUBLISH = addDays(TODAY, 12) as string;
+/**
+ * A publish date on the grid, so the filming day is not the only event.
+ *
+ * On the *same* grid: two days after the shoot when that is still the shoot's
+ * month, two days before it otherwise. `TODAY + 12` used to be the rule, and
+ * from the 19th of a 30-day month onwards that lands in the month after the
+ * one the test opens — the chip was off the grid, not missing. Found by M7's
+ * full runs on 19 September.
+ */
+const PUBLISH = (
+  monthKey(monthOf(addDays(SHOOT, 2) as string)!) === SHOOT_MONTH
+    ? addDays(SHOOT, 2)
+    : addDays(SHOOT, -2)
+) as string;
 
 test.beforeAll(async () => {
   db = new pg.Client({

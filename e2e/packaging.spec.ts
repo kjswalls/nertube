@@ -528,9 +528,15 @@ test('skipping needs a typed reason, an empty one is refused, and un-skipping pu
   // to be opened first. That is the "structurally awkward" of BRIEF.md
   // principle 1, and it is the whole reason the control looks like this.
   await expect(page.getByTestId('packaging-skip-form')).toHaveCount(0);
-  await page.getByTestId('packaging-skip-open').click();
+  // Through `untilTaken`, like the hook editor's first click above: a direct
+  // load of this page has a hydration window a few hundred milliseconds wide,
+  // and a click that lands in it is swallowed. M7's full runs hit that window
+  // four times out of four on this line; the retry is the suite's own answer.
   const form = page.getByTestId('packaging-skip-form');
-  await expect(form).toBeVisible();
+  await untilTaken(
+    () => page.getByTestId('packaging-skip-open').click(),
+    () => expect(form).toBeVisible({ timeout: 1_500 }),
+  );
   await expect(form).toContainText('badge on the card');
 
   // ---- An empty reason is refused, out loud, and nothing is written.

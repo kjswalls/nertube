@@ -136,7 +136,7 @@ export function IdeaFilterBar({
           */
           <span
             data-testid="no-verticals"
-            title="A new channel has no topic pillars: they are your own 3–5, and settings (M7) is where they get named."
+            title="A new channel has no topic pillars: they are your own 3–5, named under Settings › Buckets."
             className="font-mono text-[10px] text-muted"
           >
             none yet

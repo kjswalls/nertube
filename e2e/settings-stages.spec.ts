@@ -255,7 +255,7 @@ test('renaming Packaging relabels the board column and changes nothing about the
   await openSettings(page, CHANNEL.slug);
 
   // The channel is unmistakable: in the heading and on the root.
-  await expect(page.getByTestId('settings-stages-channel')).toHaveText(CHANNEL.name);
+  await expect(page.getByTestId('settings-channel-name')).toHaveText(CHANNEL.name);
   await expect(
     page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }),
   ).toHaveAttribute('aria-current', 'page');
@@ -630,7 +630,7 @@ test('the other channel is untouched by every edit above, and has its own addres
     .getByRole('link', { name: OTHER.name })
     .click();
   await page.waitForURL(`**/settings/stages/${OTHER.slug}`);
-  await expect(page.getByTestId('settings-stages-channel')).toHaveText(OTHER.name);
+  await expect(page.getByTestId('settings-channel-name')).toHaveText(OTHER.name);
   await expect(page.getByTestId('stage-row')).toHaveCount(9);
   await expect(rowByName(page, 'Only here')).toHaveCount(0);
   await expect(rowByKind(page, 'repurposed')).toHaveAttribute('data-enabled', 'true');

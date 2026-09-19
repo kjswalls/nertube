@@ -564,17 +564,22 @@ test('a channel with no pillars says so instead of drawing an empty grid', async
   await expect(panel).toHaveAttribute('data-horizontals', '8');
   await expect(panel).toContainText('No topic pillars yet');
 
-  // It names the way to add them, and refuses to pretend it can: the bucket
-  // editor is M7, and the control says so on itself rather than in a tooltip.
-  // `aria-disabled` and not `disabled`, so a keyboard can reach the control and
-  // hear why it does nothing — the rule the sidebar already follows.
+  // It names the way to add them, and since M7 the control is the link it
+  // used to stand in for: it opens the channel's bucket editor, on the
+  // pillars axis, and a keyboard can reach it like any other link.
   const add = page.getByTestId('add-buckets');
   await expect(add).toBeVisible();
-  await expect(add).toHaveAttribute('aria-disabled', 'true');
-  await expect(add).toContainText('M7');
+  await expect(add).toHaveAttribute('href', `/settings/buckets/${BARE.slug}`);
+  await expect(add).not.toHaveAttribute('aria-disabled', /.*/);
   await add.focus();
   await expect(add).toBeFocused();
-  await expect(page.getByTestId('add-buckets-note')).toContainText('M7');
+  await expect(page.getByTestId('add-buckets-note')).toContainText('settings');
+  await add.click();
+  await page.waitForURL(`**/settings/buckets/${BARE.slug}`);
+  await expect(page.getByTestId('settings-buckets')).toHaveAttribute('data-channel', BARE.slug);
+  await expect(page.getByTestId('bucket-axis-empty')).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId('matrix-needs-buckets')).toBeVisible();
 
   // The axis it does have is still shown, and is not called a matrix.
   await expect(page.getByTestId('format-chip')).toHaveCount(8);

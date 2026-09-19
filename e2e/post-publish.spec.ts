@@ -682,6 +682,6 @@ test('the Repurposed lane can be switched off, unless it is holding something', 
   await openPublish(page, ids.published);
   await expect(page.getByTestId('repurposed-toggle')).toBeDisabled();
   await expect(page.getByTestId('repurposed-note')).toContainText(
-    'cannot be switched off',
+    'switching the stage off would hide it',
   );
 });
