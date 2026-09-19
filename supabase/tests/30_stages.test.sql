@@ -90,6 +90,12 @@ begin
   if n <> 2 then raise exception 'FAILED: inert stages are constrained by kind, got %', n; end if;
 end $$;
 
+-- The two blocks below are about the constraint, not the grant, so they run as
+-- the owner: since 0007_stage_settings.sql a client cannot write `position` at
+-- all and goes through reorder_stages(), which 35_stage_settings.test.sql
+-- exercises. What is proved here is the property that function relies on.
+reset role;
+
 do $$
 declare
   a uuid := fx.stage(fx.channel('a-main'), 'filming');
@@ -99,8 +105,8 @@ begin
   select s.position into pa from public.stages s where s.id = a;
   select s.position into pb from public.stages s where s.id = b;
 
-  -- Settings swaps two positions in ONE statement; the intermediate state
-  -- collides, which only a DEFERRABLE INITIALLY DEFERRED unique tolerates.
+  -- A swap is ONE statement; the intermediate state collides, which only a
+  -- DEFERRABLE INITIALLY DEFERRED unique tolerates.
   update public.stages s
      set position = case when s.id = a then pb else pa end
    where s.id in (a, b);

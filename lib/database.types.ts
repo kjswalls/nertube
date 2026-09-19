@@ -557,6 +557,14 @@ export type Database = {
         Args: { p_video: string; p_to_role: string; p_reason: string };
         Returns: VideosRow;
       };
+      reorder_stages: {
+        Args: { p_channel: string; p_stage_ids: string[] };
+        Returns: Database["public"]["Tables"]["stages"]["Row"][];
+      };
+      set_stage_enabled: {
+        Args: { p_stage: string; p_enabled: boolean };
+        Returns: Database["public"]["Tables"]["stages"]["Row"];
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

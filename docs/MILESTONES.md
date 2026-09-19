@@ -5743,3 +5743,138 @@ The remedy the M4 section named still applies and is still not taken here:
 **fewer components in that page's hydration pass, not a longer wait in the
 test.** That is a change to `/videos/[id]`'s composition, which is not this
 review's scope; it is left where M4 filed it, with one more data point on it.
+
+## M7 — The stages editor: a label, an order, a switch, and one column with no behaviour
+
+> Scope: `/settings/stages/[slug]`, `components/settings/stages/**`,
+> `lib/stage-settings.ts`, the stage half of `app/actions/stages.ts`, and one
+> migration. The checklist-template editor, the bucket editor and the channel
+> fields (voice guide, script template, thresholds, expected CTR) are M7's other
+> slices and are not described here.
+
+### What this slice delivers
+
+- **`/settings/stages/[slug]`** — one channel's stages, all of them, disabled
+  included, in board order. `/settings/stages` with no slug redirects to the
+  first channel's, the way `/` picks a board. The Settings row in the sidebar
+  is now a link (to the Board row's channel, the way Ideas is), and it is the
+  last of the sidebar's placeholders to become a page.
+- **Rename.** The name is an input on the row; it saves on blur or Enter
+  through `useAutosave` — the one save queue — and a blank or over-long name
+  is refused before it reaches the row. Under the name is a sentence saying
+  what the stage's *kind* does (`KIND_NOTES` in `lib/stage-settings.ts`), which
+  is the sentence that stays true whatever the name becomes.
+- **Reorder.** Up/down arrows per row. On a fresh channel every arrow is
+  disabled, because nine core stages in a row have nowhere legal to go, and
+  each disabled arrow's title says which pair keeps its order ("Core stages
+  keep their order: Filming stays before Editing."). Add a stage and its
+  arrows light up, and so do the arrows of the core stages either side of it.
+  The move is one call to `reorder_stages`, which writes the whole order in
+  one statement.
+- **On / off.** A checkbox per row, flipped optimistically and put back with
+  the reason when the database refuses. The count of non-archived videos in
+  the stage is on the row before the switch is pressed; the refusal names the
+  count and links to where they are (the board, or Ideas for the Idea stage).
+- **Add.** A form at the end: name, button, appended at position `max + 1`
+  with `kind = null`, and a sentence saying before it is pressed what that
+  means — a column with no gate, no badge, no template and no place on
+  `/now`'s path. An added stage can be removed again, behind a second click,
+  as long as nothing refers to it.
+- **Per channel.** The channel is the last segment of the address, the switch
+  at the top (reused from the checklists slice's `ChannelSwitch`), the heading,
+  the sidebar's current channel row, and `data-channel` on the root. Every
+  action resolves the channel from the stage row it was handed, through RLS —
+  never from the URL.
+
+### The migration: `0007_stage_settings.sql`
+
+M4's `app/actions/stages.ts` said that the "cannot disable an occupied stage"
+rule lived in the application only because moving it to the database meant
+revoking a column and rewriting a passing test, and that this was "M7's
+argument to have with the whole settings screen in front of it". This is the
+argument, settled the way the rest of the schema settles it.
+
+1. **`position` and `is_enabled` leave the client's UPDATE grant**; `name`
+   stays. The three columns a client may write on `stages` are now
+   `user_id, channel_id, name`. `20_column_privileges.test.sql`'s catalogue
+   check went from "expected 5" to "expected 3", and the block that proved a
+   client could disable a core stage by direct UPDATE now proves it cannot,
+   and that it can through the function.
+2. **`reorder_stages(channel, ids)`** — the whole list, every stage once and
+   nothing foreign, checked for a core crossing by walking the core kinds in
+   the given order against `CORE_KIND_ORDER`, then ONE
+   `update … from unnest(ids) with ordinality` — the same single statement as
+   `set position = case …`, written for a list of unknown length. The deferred
+   unique tolerates the colliding intermediate state; the end state is a
+   permutation of 1..n. `35_stage_settings.test.sql` forces the constraint
+   immediate after the call to prove it.
+3. **`set_stage_enabled(stage, enabled)`** — refuses with `occupied:<n>` when
+   non-archived videos are in the stage (archived ones do not count, PLAN.md
+   review item 10), and refuses switching off the last enabled stage. The
+   count and the write are one transaction, so the read-then-write race M4
+   documented is gone.
+4. **`check (btrim(name) <> '')`** on `stages`, because a column with no
+   heading is one nobody can find.
+
+Why a migration rather than the upsert the checklist-template slice uses for
+*its* deferred unique: the upsert works where the client holds the columns, and
+the whole point here is that it should not. A client that could PATCH
+`position` could draw the pipeline backwards; one that could PATCH
+`is_enabled` could hide every video in a stage from the board, `/now` and the
+sidebar's count without a word. `e2e/settings-stages.spec.ts` posts all three
+forged writes from a real browser session — the RPC with Filming and Editing
+swapped, a PATCH of `position`, a PATCH of `is_enabled` — and gets a 400 naming
+the pair and two 403s from the grant, after a control rename with the same
+token succeeds. `90_schema_contract.test.sql` now pins six security-definer
+functions rather than four.
+
+### The invariant, proved rather than asserted
+
+Renaming must change the label and nothing else. The spec renames Packaging to
+"Packaging & hook", then on the board drags a titleless idea *into* the renamed
+column (never gated — the gate guards the stages after it) and *out* of it to
+Scripting, and asserts the refusal toast reads "Could not move … to Scripting.
+Packaging still needs …" — the column named by its new label, the field named
+by the gate's wording, and the row still in the renamed stage in Postgres.
+`move_video` compares `array_position(k_order, kind)`; the name is not an input
+to it. The other channel's Packaging is asserted unchanged in the same test.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| The route is `/settings/stages/[slug]`, not PLAN.md's `/c/[slug]/settings`. | Following PLAN.md's table. The M7 task text named `app/settings/stages/**`, and the checklists slice landed on `/settings/checklists/[slug]` in the same tree; one shape for every settings screen, with the channel as the last segment so a settings page is a place that can be pasted, mattered more than the plan's spelling. Recorded here as a deviation. |
+| The last enabled stage cannot be switched off. | Allowing a channel with no enabled stages, which the board already has an empty state for. Rejected: the state is nonsense (no columns, nothing to rank) and nothing needs it; the function refuses it in one line and the screen says why. |
+| An occupied stage's switch stays clickable and the database refuses. | Pre-disabling the switch with the reason under it, as the video page's Repurposed lane does. The count is on the row already, so the refusal is not a surprise; leaving the switch live means the refusal the person sees is the database's, with the link, and the spec proves that path rather than a client-side guard. |
+| Inert stages can be removed, but only when nothing refers to them. | No delete at all. The delete policy for `kind is null` has existed since M0 for exactly this, and a stage added by mistake should not be a permanent disabled row. A stage videos have passed through still has `checklist_items` naming it (`no action`), so the delete fails at the database and the message says to switch it off instead. |
+| An added stage lands at the end and is moved with the arrows. | Asking for a position at add time. One step at a time is the only move the order rule needs to judge, and the arrows already exist. |
+| Names are unique within a channel, case-insensitively, in the action. | A database unique. Nothing behaves differently with two "Editing" columns; what breaks is a screen reader announcing two regions with one name. A rule about legibility belongs where the sentence is. |
+| Focus after a move follows the stage: the same arrow if it is still offered, otherwise the other one, otherwise the name. | Letting focus fall to `<body>` when the pressed arrow disables itself — the pattern M6's review filed against the filming-day panel. |
+
+### Deviations from PLAN.md, stated plainly
+
+- **A migration, where PLAN.md's M7 has none.** Justified above: it is the
+  migration M4 deferred by name, and the one statement PLAN.md asks for is
+  not expressible from supabase-js.
+- **The route** — see the table above.
+- **"Up/down only within the core-order constraint"** is implemented as *the
+  result must keep the core order*, not *both endpoints are core*. For an
+  adjacent swap on a valid order the two are the same rule; stated on the
+  result it stays true on a hand-edited database and lets a broken order be
+  repaired one step at a time (`lib/stage-settings.test.ts` has that case).
+
+### Honest limits
+
+- **`revalidatePath("/videos/[id]", "page")`** is used to let a rename reach
+  the stage select on every video page; it is a broad invalidation for a rare
+  edit and is fine at one user.
+- **The Repurposed lane switch on the video page** (`components/post-publish/repurposed-lane.tsx`)
+  still carries its own copy of the occupancy sentence and still pre-disables
+  the box. It now calls the function through the same `setStageEnabled`, so
+  the rule is one rule; the sentence is two sentences. Left for the integration
+  pass, which owns that file.
+- **`ChannelSwitch` is imported from `components/settings/checklists/`**, the
+  other slice's directory, rather than copied. If the integration pass moves it
+  somewhere shared, this page's import moves with it.
+- **The timezone question** deferred to M7 by M6's review is not answered by
+  this slice; it is a channel-or-profile setting, not a stage one.

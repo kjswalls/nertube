@@ -1,0 +1,334 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import {
+  createRef,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type RefObject,
+} from "react";
+
+import { addStage, moveStage } from "@/app/actions/stages";
+import { STAGE_NAME_MAX, canMove } from "@/lib/stage-settings";
+
+import { StageRow } from "./stage-row";
+import type { SettingsChannel, SettingsStage } from "./types";
+
+/**
+ * One channel's stages, in board order, editable in place.
+ *
+ * ## What this component owns
+ *
+ * The list. Each row owns its own label, switch and refusal line
+ * (`StageRow`), but the *order* is a property of the list, and so is adding
+ * to it — so the arrows report up to here, `moveStage` is called from here,
+ * and the answer (the whole order, renumbered by the database) replaces what
+ * is on screen. Nothing is moved optimistically: a reorder is one round trip,
+ * it is rarely pressed twice a second, and a row that jumped and then jumped
+ * back would be worse than a row that took 200ms to move.
+ *
+ * A server render is still authoritative. The page re-reads on every
+ * navigation and after `router.refresh()`, and when the set it sends differs
+ * from the set last adopted — a stage added in another tab, a count changed
+ * by a move on the board — the list is replaced wholesale. The same pattern
+ * `RepurposedLane` and `FlowFields` use, for the same reason: local state is
+ * only ever the delta this screen produced.
+ *
+ * ## Which arrows are lit
+ *
+ * `canMove` decides, per row and per direction, from the list as it stands —
+ * the same function `moveStage` runs on the server before it asks the
+ * database, which runs the same rule a third time. On a fresh channel every
+ * arrow is off, because nine core stages in a row have nowhere legal to go;
+ * the sentence in the header says why, so eighteen grey buttons do not read
+ * as a broken screen. Add a stage and its arrows light up, and so do the
+ * arrows of the core stages either side of it.
+ *
+ * ## Focus after a move
+ *
+ * The arrow that was pressed may be disabled by its own success (an inert
+ * stage moved to the top has no "up" left). Focus follows the stage: the same
+ * arrow if it is still offered, otherwise the other one, otherwise the name.
+ */
+export function StagesEditor({
+  channel,
+  stages,
+}: {
+  channel: SettingsChannel;
+  stages: readonly SettingsStage[];
+}) {
+  const router = useRouter();
+
+  const serverKey = keyOf(stages);
+  const [adoptedKey, setAdoptedKey] = useState(serverKey);
+  const [list, setList] = useState<readonly SettingsStage[]>(stages);
+  if (adoptedKey !== serverKey) {
+    setAdoptedKey(serverKey);
+    setList(stages);
+  }
+
+  const [moving, setMoving] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  /* --------------------------------------------------------------- focus -- */
+
+  const buttons = useRef(new Map<string, RefObject<HTMLButtonElement | null>>());
+  function buttonRef(stageId: string, direction: "up" | "down") {
+    const key = `${stageId}:${direction}`;
+    let ref = buttons.current.get(key);
+    if (!ref) {
+      ref = createRef<HTMLButtonElement>();
+      buttons.current.set(key, ref);
+    }
+    return ref;
+  }
+
+  /**
+   * Where focus should land once the list has re-rendered after a move. A ref
+   * and not state: it is written just before the list changes and read once,
+   * in the effect that runs after that change commits, so there is nothing to
+   * render from and no second render to cause.
+   */
+  const focusRequest = useRef<{ stageId: string; direction: "up" | "down" } | null>(null);
+
+  useEffect(() => {
+    const request = focusRequest.current;
+    if (!request) return;
+    focusRequest.current = null;
+    const { stageId, direction } = request;
+    const other = direction === "up" ? "down" : "up";
+    const candidates = [
+      buttons.current.get(`${stageId}:${direction}`)?.current,
+      buttons.current.get(`${stageId}:${other}`)?.current,
+    ];
+    const target = candidates.find((button) => button && !button.disabled) ?? null;
+    if (target) {
+      target.focus();
+    } else {
+      document
+        .querySelector<HTMLInputElement>(
+          `[data-stage-id="${stageId}"] [data-testid="stage-name"]`,
+        )
+        ?.focus();
+    }
+  }, [list, moving]);
+
+  /* ---------------------------------------------------------------- moves -- */
+
+  async function move(stageId: string, direction: "up" | "down"): Promise<void> {
+    const index = list.findIndex((stage) => stage.id === stageId);
+    const verdict = canMove(list, index, direction);
+    if (!verdict.ok || moving !== null) return;
+
+    setMoving(stageId);
+    setMoveError(null);
+    try {
+      const result = await moveStage({ stageId, direction });
+      if (!result.ok) {
+        setMoveError(result.error);
+        return;
+      }
+      const positions = new Map(result.order.map((row) => [row.id, row.position]));
+      focusRequest.current = { stageId, direction };
+      setList((current) =>
+        [...current]
+          .map((stage) => ({ ...stage, position: positions.get(stage.id) ?? stage.position }))
+          .sort((a, b) => a.position - b.position),
+      );
+      router.refresh();
+    } catch {
+      setMoveError("Could not reach the server, so the order is unchanged. Try again.");
+    } finally {
+      setMoving(null);
+    }
+  }
+
+  /* ------------------------------------------------------------- per-row -- */
+
+  function patch(stageId: string, change: Partial<SettingsStage>): void {
+    setList((current) =>
+      current.map((stage) => (stage.id === stageId ? { ...stage, ...change } : stage)),
+    );
+  }
+
+  const enabledCount = list.filter((stage) => stage.isEnabled).length;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-[13px] font-medium">
+          Board order{" "}
+          <span className="font-mono text-[11px] font-normal text-muted">
+            {enabledCount} of {list.length} on the board
+          </span>
+        </h2>
+        <p className="text-[12px] leading-5 text-muted">
+          Top to bottom here is left to right on the board. Core stages keep
+          their order — the pipeline is a pipeline — so their arrows only light
+          up next to a stage you added, which can sit anywhere. Renaming
+          changes the label and nothing else; what a stage <em>does</em> is
+          written under its name and stays put.
+        </p>
+      </div>
+
+      {moveError ? (
+        <p role="alert" data-testid="stage-move-error" className="text-[12px] leading-5 text-over-limit">
+          {moveError}
+        </p>
+      ) : null}
+
+      <ol data-testid="stage-list" aria-label="Stages, in board order" className="flex flex-col gap-2">
+        {list.map((stage, index) => (
+          <StageRow
+            key={stage.id}
+            stage={stage}
+            index={index}
+            total={list.length}
+            upVerdict={
+              moving !== null
+                ? { ok: false, reason: "A move is in flight." }
+                : canMove(list, index, "up")
+            }
+            downVerdict={
+              moving !== null
+                ? { ok: false, reason: "A move is in flight." }
+                : canMove(list, index, "down")
+            }
+            onMove={(direction) => void move(stage.id, direction)}
+            onRenamed={(name) => {
+              patch(stage.id, { name });
+              router.refresh();
+            }}
+            onEnabledChanged={(isEnabled) => {
+              patch(stage.id, { isEnabled });
+              router.refresh();
+            }}
+            onRemoved={() => {
+              setList((current) => current.filter((other) => other.id !== stage.id));
+              router.refresh();
+            }}
+            moveButtonRef={(direction) => buttonRef(stage.id, direction)}
+          />
+        ))}
+      </ol>
+
+      <AddStageForm
+        channel={channel}
+        taken={list.map((stage) => stage.name)}
+        onAdded={(stage) => {
+          setList((current) =>
+            [...current, stage].sort((a, b) => a.position - b.position),
+          );
+          router.refresh();
+        }}
+      />
+    </div>
+  );
+}
+
+/** A key that changes when the server's set does, in any way the list shows. */
+function keyOf(stages: readonly SettingsStage[]): string {
+  return stages
+    .map(
+      (stage) =>
+        `${stage.id}|${stage.name}|${stage.position}|${stage.isEnabled}|${stage.occupied}`,
+    )
+    .join(";");
+}
+
+/**
+ * Adding an inert stage: one input, one button, appended at the end.
+ *
+ * The form says what it is adding before it is pressed — a column with no
+ * behaviour — because that is the surprise a person would otherwise get on
+ * the board: a "Sponsor review" column that videos can sit in and that the
+ * gate, the badges and `/now` all look straight through.
+ */
+function AddStageForm({
+  channel,
+  taken,
+  onAdded,
+}: {
+  channel: SettingsChannel;
+  taken: readonly string[];
+  onAdded: (stage: SettingsStage) => void;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+
+  const trimmed = name.trim();
+  const duplicate = taken.some(
+    (other) => other.trim().toLocaleLowerCase() === trimmed.toLocaleLowerCase(),
+  );
+
+  async function submit(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    if (trimmed === "" || duplicate || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await addStage({ channelId: channel.id, name: trimmed });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onAdded({ ...result.stage, occupied: 0 });
+      setName("");
+      input.current?.focus();
+    } catch {
+      setError("Could not reach the server, so nothing was added. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(event) => void submit(event)}
+      data-testid="add-stage"
+      className="flex flex-col gap-2 rounded-card border border-dashed border-border px-4 py-3"
+    >
+      <label htmlFor="add-stage-name" className="text-[13px] font-medium">
+        Add a stage
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id="add-stage-name"
+          ref={input}
+          data-testid="add-stage-name"
+          value={name}
+          maxLength={STAGE_NAME_MAX}
+          disabled={busy}
+          onChange={(event) => {
+            setName(event.target.value);
+            setError(null);
+          }}
+          placeholder="e.g. Sponsor review"
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+        />
+        <button
+          type="submit"
+          data-testid="add-stage-submit"
+          disabled={busy || trimmed === "" || duplicate}
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+        >
+          {busy ? "Adding…" : "Add stage"}
+        </button>
+      </div>
+      <p
+        role={error ? "alert" : undefined}
+        data-testid="add-stage-status"
+        className={["text-[12px] leading-5", error ? "text-over-limit" : "text-muted"].join(" ")}
+      >
+        {error ??
+          (duplicate
+            ? `${channel.name} already has a stage called “${trimmed}”.`
+            : "It lands at the end of the board, switched on, with no behaviour: no gate, no badge, no template, and not on /now’s path. Move it with the arrows.")}
+      </p>
+    </form>
+  );
+}

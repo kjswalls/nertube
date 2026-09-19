@@ -209,16 +209,14 @@ end $$;
 do $$
 declare ok boolean := false; msg text;
 begin
-  -- A disabled stage.
-  update public.stages set is_enabled = false
-   where channel_id = fx.channel('a-main') and kind = 'editing';
+  -- A disabled stage — switched off the only way a client can since 0007.
+  perform public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'editing'), false);
   begin
     perform public.move_video(fx.video_a(), fx.stage(fx.channel('a-main'), 'editing'));
   exception when others then
     get stacked diagnostics msg = message_text; ok := true;
   end;
-  update public.stages set is_enabled = true
-   where channel_id = fx.channel('a-main') and kind = 'editing';
+  perform public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'editing'), true);
   if not ok then raise exception 'FAILED: a video moved into a disabled stage'; end if;
   if msg not like '%disabled%' then raise exception 'FAILED: expected a disabled refusal, got %', msg; end if;
 end $$;

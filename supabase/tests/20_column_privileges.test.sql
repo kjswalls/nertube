@@ -160,12 +160,30 @@ begin
   if not ok then raise exception 'FAILED: a client nulled stages.kind'; end if;
   if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
 
-  -- Renaming and disabling a core stage still work (PLAN.md: "Core stages may
-  -- be renamed and disabled, never deleted").
-  update public.stages set name = 'Packaging', is_enabled = false
+  -- Renaming a core stage still works (PLAN.md: "Core stages may be renamed
+  -- and disabled, never deleted"). Disabling does too, but since
+  -- 0007_stage_settings.sql only through set_stage_enabled(): is_enabled and
+  -- position left the client grant with the settings screen, so the occupancy
+  -- and core-order rules are the database's rather than the application's.
+  update public.stages set name = 'Packaging'
    where channel_id = fx.channel('a-main') and kind = 'packaging';
   get diagnostics n = row_count;
   if n <> 1 then raise exception 'FAILED: a core stage could not be renamed'; end if;
+
+  ok := false;
+  begin
+    update public.stages set is_enabled = false
+     where channel_id = fx.channel('a-main') and kind = 'packaging';
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client wrote stages.is_enabled directly'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
+
+  perform public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'packaging'), false);
+  select count(*) into n from public.stages
+   where channel_id = fx.channel('a-main') and kind = 'packaging' and not is_enabled;
+  if n <> 1 then raise exception 'FAILED: set_stage_enabled did not switch Packaging off'; end if;
 end $$;
 
 -- thumbnail_swaps is an append-only log with exactly one writer.
@@ -279,18 +297,20 @@ begin
      and column_name in ('id', 'created_at');
   if n <> 0 then raise exception 'FAILED: % identity columns are still UPDATE-grantable', n; end if;
 
-  -- stages: every column but kind, id and created_at is updatable.
+  -- stages: kind, id, created_at and — since 0007 — position and is_enabled
+  -- are out; user_id, channel_id and name remain.
   select count(*) into n
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
-     and privilege_type = 'UPDATE' and grantee = 'authenticated' and column_name = 'kind';
-  if n <> 0 then raise exception 'FAILED: stages.kind is still UPDATE-grantable'; end if;
+     and privilege_type = 'UPDATE' and grantee = 'authenticated'
+     and column_name in ('kind', 'position', 'is_enabled');
+  if n <> 0 then raise exception 'FAILED: % protected stage columns are still UPDATE-grantable', n; end if;
 
   select count(*) into n
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
      and privilege_type = 'UPDATE' and grantee = 'authenticated';
-  if n <> 5 then raise exception 'FAILED: % stage columns are updatable, expected 5', n; end if;
+  if n <> 3 then raise exception 'FAILED: % stage columns are updatable, expected 3', n; end if;
 end $$;
 
 -- TRUNCATE is not subject to RLS, so a role holding it empties a table for every

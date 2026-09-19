@@ -7,7 +7,7 @@ import { ShortcutHints } from "@/components/shortcut-hints";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /** Which entry in the sidebar the route being rendered corresponds to. */
-export type SidebarSection = "board" | "now" | "ideas" | "calendar";
+export type SidebarSection = "board" | "now" | "ideas" | "calendar" | "settings";
 
 export interface SidebarChannel {
   readonly id: string;
@@ -305,6 +305,27 @@ export function AppSidebar({
                 Calendar
               </SidebarLink>
             </li>
+            <li>
+              {/*
+                M7 built it. Settings are a channel's settings — stages,
+                templates and buckets are all per channel (BRIEF.md) — so the
+                row opens the Board row's channel, the way Ideas does, and is
+                a link only once there is a channel to configure.
+              */}
+              {boardChannel ? (
+                <SidebarLink
+                  href={`/settings/stages/${boardChannel.slug}`}
+                  current={section === "settings" ? "page" : false}
+                  title={`${boardChannel.name}'s stages, templates and buckets`}
+                >
+                  Settings
+                </SidebarLink>
+              ) : (
+                <SidebarDisabled title="Create a channel first — settings are a channel's settings.">
+                  Settings
+                </SidebarDisabled>
+              )}
+            </li>
           </ul>
         </div>
 
@@ -427,8 +448,8 @@ export function AppSidebar({
  * visible) applied to mouse users only. `aria-disabled` keeps it in the tab
  * order and announces it as unavailable, which is the honest pair.
  *
- * Two call sites, and they are the same situation: **Board and Ideas on an
- * account with no channel at all**. There is nothing to link to until a channel
+ * Three call sites, and they are the same situation: **Board, Ideas and
+ * Settings on an account with no channel at all**. There is nothing to link to until a channel
  * exists, and a row that vanished would hide the shape of the product from the
  * person who has least idea of it. Creating a channel turns both into links.
  *

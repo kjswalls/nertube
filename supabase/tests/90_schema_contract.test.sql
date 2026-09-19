@@ -1,6 +1,6 @@
 -- The shape PLAN.md's data model promises, asserted against the catalogue:
 -- the table set, the common columns, RLS on everything, unique (id, user_id) on
--- every parent, and the four SQL functions being security definer with a pinned
+-- every parent, and the six SQL functions being security definer with a pinned
 -- search_path. Plus the delete cascades.
 
 begin;
@@ -61,7 +61,8 @@ begin
   for f in select p.proname, p.prosecdef, p.proconfig
              from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
             where ns.nspname = 'public'
-              and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel')
+              and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel',
+                                'reorder_stages','set_stage_enabled')
   loop
     n := n + 1;
     if not f.prosecdef then raise exception 'FAILED: %() is not security definer', f.proname; end if;
@@ -69,7 +70,7 @@ begin
       raise exception 'FAILED: %() does not pin search_path (%)', f.proname, f.proconfig;
     end if;
   end loop;
-  if n <> 4 then raise exception 'FAILED: expected 4 SQL functions, found %', n; end if;
+  if n <> 6 then raise exception 'FAILED: expected 6 SQL functions, found %', n; end if;
 end $$;
 
 do $$
@@ -81,6 +82,12 @@ begin
   end if;
   if not has_function_privilege('authenticated', 'public.swap_thumbnail(uuid,text,text)', 'execute') then
     raise exception 'FAILED: authenticated cannot execute swap_thumbnail';
+  end if;
+  if has_function_privilege('anon', 'public.reorder_stages(uuid,uuid[])', 'execute') then
+    raise exception 'FAILED: anon can execute reorder_stages';
+  end if;
+  if has_function_privilege('anon', 'public.set_stage_enabled(uuid,boolean)', 'execute') then
+    raise exception 'FAILED: anon can execute set_stage_enabled';
   end if;
 
   -- The policy set: stages has its own delete policy, channels has none.
