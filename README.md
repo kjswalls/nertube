@@ -179,6 +179,77 @@ apply to — is revoked from `anon` and `authenticated` on every table. RLS is o
 for every table; the browser's anon key can read and write nothing that does not
 belong to the signed-in user.
 
+## The brainstorm, and what to set in Vercel
+
+The title / hook / concept suggestions and the thumbnail critique are one
+feature behind one interface — `AssistProvider` in `lib/assist/types.ts`. Two
+implementations ship: `lib/assist/anthropic.ts`, which calls Claude, and
+`lib/assist/fake.ts`, which returns deterministic fixtures with no network at
+all. The app depends only on the interface; `app/actions/assist.ts` picks an
+implementation from the environment and imports it lazily, so a process running
+the fixtures never even loads the vendor SDK.
+
+**The key is server-side only and must stay that way.** `lib/assist/anthropic.ts`
+is the one file that reads `ANTHROPIC_API_KEY`, and its first line is
+`import "server-only"` — a client component that reached it would fail the build
+rather than ship a key to a browser. The client sends a video id and a kind and
+nothing else; the prompt, the voice guide and the past titles are all assembled
+on the server, so a browser can never spend the key on something of its own.
+`npm run build` followed by a grep of `.next/static` for `ANTHROPIC_API_KEY`,
+`api.anthropic.com` and `x-api-key` is the check, and it finds nothing.
+
+### Variables
+
+Set these in Vercel under **Project → Settings → Environment Variables**, as
+server-side variables (no `NEXT_PUBLIC_` prefix — that prefix is what inlines a
+value into the browser bundle):
+
+| Variable | Required | What it does |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | **Yes**, for the real provider | Your Anthropic API key. Server-side only. Nothing else in this repository reads it, and no value for it is written down anywhere here. |
+| `ANTHROPIC_MODEL` | No | Overrides the model id. Defaults to the one `lib/assist/anthropic.ts` pins. Set it to migrate models without a deploy of new code. |
+| `ASSIST_PROVIDER` | No | `fake` forces the fixtures. Leave it **unset in production.** Anything else, including unset, means Claude. |
+| `ASSIST_FAKE_SCENARIO` | No | Only read by the fixtures: makes them answer with a named failure, for driving the error paths. Never set it in production. |
+
+Everything else the app needs (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`) is listed in `.env.example`;
+`SUPABASE_SERVICE_ROLE_KEY`, `SEED_EMAIL` and `SEED_PASSWORD` are read by
+`scripts/`, never by the app, and do not belong in a Vercel deployment.
+
+### Which implementation answers
+
+The rule is one pure function, `selectAssistProvider` in `lib/assist/select.ts`,
+with a unit test per case:
+
+| `ASSIST_PROVIDER` | key present | `NODE_ENV` | answers |
+|---|---|---|---|
+| `fake` | either | any | the fixtures |
+| anything else non-empty | either | any | Claude |
+| unset | yes | any | Claude |
+| unset | no | `production` | Claude — and the panel says "no API key configured" |
+| unset | no | anything else | the fixtures |
+
+A **production** deployment with no key deliberately does *not* fall back. The
+fixtures return plausible titles with plausible reasons; a deployment where the
+key was never pasted would, if it fell back, hand you invented titles and let
+you believe a model wrote them — the one failure in this feature nobody can
+notice from outside. So it fails with a sentence naming the variable instead.
+
+A **development** checkout with no key does fall back, so a fresh clone is
+reviewable without a paid account — and wherever the fixtures answer, every
+panel says so, on every answer, in the attention colour: *these came from this
+app's built-in fixtures, not from Claude.* Which implementation answered is
+stored with the result in `videos.brainstorm_last`, so a panel reopened tomorrow
+makes the same admission. The fixtures are never silent about being fixtures.
+
+(That sentence points here rather than naming `ANTHROPIC_API_KEY`, on purpose:
+the panels are client components, so a variable spelled in one of them would
+appear in `.next/static` and cost the grep above its only useful answer, which
+is *nothing*.)
+
+`npm run e2e` sets `ASSIST_PROVIDER=fake` explicitly in `playwright.config.ts`,
+so the suite can never spend money or depend on a third party being up.
+
 ## Channels
 
 `createChannel` (`app/actions/channels.ts`) is the only way a channel comes into

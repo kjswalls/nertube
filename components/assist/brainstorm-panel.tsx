@@ -2,8 +2,6 @@
 
 import { useCallback } from "react";
 
-import { formatAge } from "@/components/video-detail/age";
-import type { AssistMeta } from "@/lib/assist/types";
 import { TITLE_WARN_LENGTH } from "@/lib/packaging";
 import { sameLabel } from "@/lib/text";
 
@@ -14,10 +12,11 @@ import {
   AssistNoticeLine,
   AssistPanel,
   AssistPending,
+  AssistProvenance,
   useAssistFocus,
 } from "./chrome";
 import { useAssistTarget } from "./packaging-assist";
-import type { AssistFailureView, AssistNotice } from "./run";
+import type { AssistNotice, AssistRunState } from "./run";
 import type { StoredAssistEntryValue } from "./stored";
 
 /**
@@ -57,26 +56,18 @@ import type { StoredAssistEntryValue } from "./stored";
  * here happens in an effect on mount.
  */
 
-/** Everything known about one of the three questions. Owned by the parent. */
-export interface KindView {
-  readonly entry: StoredAssistEntryValue | null;
-  /** Asked for in this sitting, rather than read back out of the column. */
-  readonly fresh: boolean;
-  readonly meta: AssistMeta | null;
-  readonly persisted: boolean;
-  readonly pending: boolean;
-  /** When the in-flight ask started, for the elapsed counter. */
-  readonly startedAt: number | null;
-  readonly failure: AssistFailureView | null;
-  /**
-   * The last thing that happened: an acceptance, a replacement, a cancel.
-   *
-   * A bare string is the common case and stays allowed; the object form
-   * carries an undo, which is what an acceptance that *replaces* a field
-   * needs. `components/assist/chrome.tsx` renders both.
-   */
-  readonly notice: AssistNotice | string | null;
-}
+/**
+ * Everything known about one of the two questions.
+ *
+ * Not a type of its own: it is `AssistRunState` from
+ * `components/assist/run.ts`, the one in-flight state every assist control in
+ * this app uses, carrying a stored brainstorm entry as its answer. This panel
+ * used to keep a near-identical `KindView` and its owner used to keep a
+ * near-identical copy of the machine that fills it; they agreed by hand, which
+ * is the kind of agreement that stops being true. One machine, one state, one
+ * set of words for cancelling.
+ */
+export type KindView = AssistRunState<StoredAssistEntryValue>;
 
 /**
  * The two questions *this* panel answers.
@@ -133,7 +124,7 @@ export function BrainstormPanel({
   onClose: () => void;
 }) {
   const target = useAssistTarget();
-  const { entry } = view;
+  const entry = view.data;
 
   /*
     Focus lands in the panel whenever a pill opens it, and again when it is
@@ -201,15 +192,13 @@ export function BrainstormPanel({
           >
             Brainstorm — {LABEL[kind].toLowerCase()}, proposed
           </h3>
-          <p data-testid="brainstorm-provenance" className="text-xs text-muted">
-            {view.pending
-              ? "Asking now…"
-              : entry === null
-                ? "Nothing asked for yet."
-                : view.fresh
-                  ? `Fresh, just now. ${entry.voiceGuide ? "Written against this channel’s voice guide." : "This channel has no voice guide, so this is generic advice — write one in settings and ask again."}`
-                  : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${entry.voiceGuide ? "It used the voice guide as it was then." : "It was written without a voice guide."}`}
-          </p>
+          <AssistProvenance
+            prefix="brainstorm"
+            entry={entry}
+            pending={view.pending}
+            fresh={view.fresh}
+            now={now}
+          />
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -286,12 +275,7 @@ export function BrainstormPanel({
       ) : null}
 
       {view.notice ? (
-        <AssistNoticeLine
-          prefix="brainstorm"
-          notice={
-            typeof view.notice === "string" ? { text: view.notice } : view.notice
-          }
-        />
+        <AssistNoticeLine prefix="brainstorm" notice={view.notice} />
       ) : null}
 
       {!view.persisted ? (

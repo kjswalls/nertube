@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react";
 
+import { formatAge } from "@/components/video-detail/age";
 import type { AssistMeta } from "@/lib/assist/types";
 
 import { describeMeta } from "./acceptance";
@@ -250,6 +251,122 @@ export function AssistMetaLine({
 }
 
 /* -------------------------------------------------------------------------- */
+/* Where the answer came from                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The line under a panel's heading: when this was asked for, what it was
+ * written against, and — the part that matters most — *who answered*.
+ *
+ * ## Why it says when a fixture answered
+ *
+ * `ASSIST_PROVIDER=fake` selects `lib/assist/fake.ts`, which returns plausible
+ * titles with plausible reasons and no network at all. That is what makes this
+ * feature testable forever and runnable in a container with no key, and it is
+ * also the one failure in this app nobody can notice from the outside: fixtures
+ * read exactly like an answer. A person who believed a model wrote these would
+ * be wrong about the only thing the panel is for. So whenever the answer came
+ * from the fixtures the panel says so, in as many words, every time — and the
+ * sentence names the variable, because the fix is one line of environment.
+ *
+ * ## Why it does not name the environment variable
+ *
+ * PLAN.md's review item for M8 is that the key never reaches the client
+ * bundle, checked by grepping the build output for `ANTHROPIC_API_KEY`,
+ * `api.anthropic.com` and `x-api-key`. This file is a client component, so a
+ * sentence here spelling that variable puts the string into `.next/static` —
+ * harmless in itself (it is the name, never a value) and *fatal to the gate*,
+ * which stops being "finds nothing" and becomes "finds one thing somebody has
+ * to re-examine on every build". A gate with a known-benign hit is a gate
+ * people learn to ignore. The sentence points at the README instead. The
+ * failure messages that *do* name the variable — `not_configured`,
+ * `unauthorized` in `lib/assist/types.ts` — are written on the server and
+ * arrive as data, so they never enter a bundle.
+ *
+ * ## Why it is one component
+ *
+ * Both text panels used to compute this sentence themselves, from the same
+ * fields, in two copies that happened to agree. A claim about provenance is
+ * exactly the kind of thing that must not be able to disagree with itself.
+ */
+export function AssistProvenance({
+  prefix,
+  entry,
+  pending,
+  fresh,
+  now,
+}: {
+  prefix: string;
+  /** The answer on screen, or null when nothing has been asked for yet. */
+  entry: {
+    readonly at: string;
+    readonly provider: string;
+    readonly voiceGuide: boolean;
+  } | null;
+  pending: boolean;
+  /** Asked for in this sitting, rather than read back out of the column. */
+  fresh: boolean;
+  /** The clock, read when the panel was opened. Never during render. */
+  now: number;
+}) {
+  const voice = entry?.voiceGuide
+    ? fresh
+      ? "Written against this channel’s voice guide."
+      : "It used the voice guide as it was then."
+    : fresh
+      ? "This channel has no voice guide, so this is generic advice — write one in settings and ask again."
+      : "It was written without a voice guide.";
+
+  return (
+    <>
+      <p data-testid={`${prefix}-provenance`} className="text-xs text-muted">
+        {pending
+          ? "Asking now…"
+          : entry === null
+            ? "Nothing asked for yet."
+            : fresh
+              ? `Fresh, just now. ${voice}`
+              : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${voice}`}
+      </p>
+      <AssistFixtureNotice prefix={prefix} provider={entry?.provider ?? null} />
+    </>
+  );
+}
+
+/**
+ * "A fixture answered this", said out loud.
+ *
+ * Its own component because the thumbnail critique cannot use
+ * {@link AssistProvenance}: its answer is deliberately never stored, so it has
+ * no `at` to age and nothing to call "from earlier", and its line is about the
+ * images rather than the voice guide. What it *does* share is the one sentence
+ * that must never be missing from any of them — a panel that quietly showed
+ * fixtures would be the only lie this app is capable of telling.
+ *
+ * `provider` comes from the stored entry for the text assists and from
+ * `meta.provider` for the critique; either way it is what `lib/assist`
+ * reported, not a guess from the environment.
+ */
+export function AssistFixtureNotice({
+  prefix,
+  provider,
+}: {
+  prefix: string;
+  /** `"fake"`, `"anthropic"`, or null when nothing has been asked for yet. */
+  provider: string | null;
+}) {
+  if (provider !== "fake") return null;
+  return (
+    <p data-testid={`${prefix}-fixtures`} className="text-xs text-attention">
+      These came from this app’s built-in fixtures, not from Claude — so nothing
+      here is a model’s opinion of your video. Giving this deployment an
+      Anthropic API key is what makes these real; the README says which
+      environment variables to set.
+    </p>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* The line between a proposal and your writing                                */
 /* -------------------------------------------------------------------------- */
 
@@ -395,14 +512,29 @@ export function AssistPanel({
  */
 export function AssistPillButton({
   verb,
+  label,
   title,
   expanded,
   disabled = false,
   badge,
   onClick,
 }: {
-  /** The verb on the pill: "Suggest concepts", "Critique at tile size". */
+  /**
+   * The verb on the pill: "Suggest concepts", "Critique at tile size".
+   *
+   * Also the control's identity — it is what `data-assist` carries, and what
+   * every spec locates it by — so it names the *assist*, not the state of its
+   * panel. A pill whose identity changed when it was pressed would be a
+   * different control depending on whether you had pressed it.
+   */
   verb: string;
+  /**
+   * What the pill says, when that is not the verb. Only "Generate 20" uses
+   * this, to say "Hide brainstorm" while its panel is open: the panel is the
+   * tallest thing on the block and its pill is the way back out. The others
+   * leave it alone and let `aria-expanded` carry the state.
+   */
+  label?: string;
   /** What it will do, in a sentence, for the tooltip. */
   title: string;
   /** Whether the panel it opens is open. */
@@ -423,7 +555,7 @@ export function AssistPillButton({
       onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
     >
-      <span>{verb}</span>
+      <span>{label ?? verb}</span>
       {badge ? (
         <span
           data-testid="assist-pill-badge"

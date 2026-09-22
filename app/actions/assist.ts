@@ -24,6 +24,7 @@ import {
   type ThumbnailRole,
 } from "@/lib/storage";
 import { CONCEPTS_WANT, HOOKS_MAX, TITLES_WANT } from "@/lib/assist/clamp";
+import { assistFallbackWarning, selectAssistProvider } from "@/lib/assist/select";
 import { requireUser } from "@/lib/supabase/require-user";
 import {
   readStoredBrainstorm,
@@ -88,11 +89,25 @@ const WANT: Record<StoredAssistKind, number> = {
   hooks: HOOKS_MAX,
 };
 
+/**
+ * What an ask comes back as.
+ *
+ * Deliberately field-for-field the shape `useAssistRun` consumes
+ * (`AssistAttempt<T>` in `components/assist/run.ts`), which is why the answer
+ * is called `data` rather than `entry`: a control asks with
+ * `run.ask(() => assist({ videoId, kind }))` and translates nothing. The one
+ * extra field, `kind`, is the question this answer is about — carried so a
+ * late reply can be matched to what was asked, never re-mapped.
+ *
+ * `critiqueThumbnails` below returns the same shape for the same reason. Two
+ * questions, one result contract, one error contract, and no call site that
+ * gets to invent a third.
+ */
 export type AssistState =
   | {
       ok: true;
       kind: StoredAssistKind;
-      entry: StoredAssistEntryValue;
+      data: StoredAssistEntryValue;
       /** Counts from the module: what it asked for, what came back, what was cut. */
       meta: AssistMeta;
       /** False when the answer could not be written to `brainstorm_last`. */
@@ -116,23 +131,36 @@ const Input = z.object({
 /**
  * Which implementation answers.
  *
- * `ASSIST_PROVIDER=fake` selects the deterministic fixtures — what the
- * Playwright suite and a local run without a key use. Anything else, including
- * unset, selects Claude. The default is deliberately the real one: a
- * deployment with no key gets "the brainstorm has no API key configured",
- * which is true and fixable, where a default of `fake` would hand somebody
- * invented titles and let them believe a model wrote them.
+ * The rule itself, with every case and the reasoning for each, is
+ * `selectAssistProvider` in `lib/assist/select.ts` — a pure function taking an
+ * explicit environment, because it is the one part of this feature that cannot
+ * be checked by running it here. In short: an explicit `ASSIST_PROVIDER=fake`
+ * always wins; a key means Claude; no key in production still means Claude, and
+ * therefore a "no API key configured" sentence rather than a silent
+ * substitution; no key anywhere else means the fixtures, and the panel says so
+ * on every answer.
  *
- * Both are imported lazily, so a process running the fake never loads the
- * vendor SDK at all.
+ * Both are imported lazily, so a process running the fixtures never loads the
+ * vendor SDK at all — and, more to the point, never reaches a module that reads
+ * the key.
  */
 async function provider(): Promise<AssistProvider> {
-  if ((process.env.ASSIST_PROVIDER ?? "").toLowerCase() === "fake") {
+  if (selectAssistProvider(process.env) === "fake") {
+    const warning = assistFallbackWarning(process.env);
+    if (warning !== null) warnOnce(warning);
     const { createFakeProvider } = await import("@/lib/assist/fake");
     return createFakeProvider();
   }
   const { createAnthropicProvider } = await import("@/lib/assist/anthropic");
   return createAnthropicProvider();
+}
+
+/** Said once per server process, not once per brainstorm. */
+let warned = false;
+function warnOnce(message: string): void {
+  if (warned) return;
+  warned = true;
+  console.warn(message);
 }
 
 export async function assist(input: {
@@ -283,7 +311,7 @@ export async function assist(input: {
     })
     .eq("id", videoId);
 
-  return { ok: true, kind, entry, meta: result.meta, persisted: !writeError };
+  return { ok: true, kind, data: entry, meta: result.meta, persisted: !writeError };
 }
 
 /**

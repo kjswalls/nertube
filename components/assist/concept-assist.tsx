@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import { assist } from "@/app/actions/assist";
-import { formatAge } from "@/components/video-detail/age";
 import { sameLabel } from "@/lib/text";
 
 import {
@@ -13,6 +12,7 @@ import {
   AssistPanel,
   AssistPending,
   AssistPillButton,
+  AssistProvenance,
   Proposal,
   useAssistFocus,
 } from "./chrome";
@@ -85,24 +85,10 @@ export function ConceptAssist({
   const { state } = run;
   const entry = state.data;
 
-  const ask = () =>
-    void run.ask(async () => {
-      const answer = await assist({ videoId, kind: "concepts" });
-      return answer.ok
-        ? {
-            ok: true as const,
-            data: answer.entry,
-            meta: answer.meta,
-            persisted: answer.persisted,
-          }
-        : {
-            ok: false as const,
-            code: answer.code,
-            message: answer.message,
-            retryable: answer.retryable,
-            retryAfterSeconds: answer.retryAfterSeconds,
-          };
-    });
+  // No mapping: `assist()` already answers in the shape `useAssistRun`
+  // consumes, which is the same shape `critiqueThumbnails()` answers in. One
+  // result contract across every assist in the app.
+  const ask = () => void run.ask(() => assist({ videoId, kind: "concepts" }));
 
   function press() {
     if (open) {
@@ -165,23 +151,13 @@ export function ConceptAssist({
               >
                 Brainstorm — thumbnail concepts, proposed
               </h3>
-              <p data-testid={`${PREFIX}-provenance`} className="text-xs text-muted">
-                {state.pending
-                  ? "Asking now…"
-                  : entry === null
-                    ? "Nothing asked for yet."
-                    : state.fresh
-                      ? `Fresh, just now. ${
-                          entry.voiceGuide
-                            ? "Written against this channel’s voice guide."
-                            : "This channel has no voice guide, so this is generic advice — write one in settings and ask again."
-                        }`
-                      : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${
-                          entry.voiceGuide
-                            ? "It used the voice guide as it was then."
-                            : "It was written without a voice guide."
-                        }`}
-              </p>
+              <AssistProvenance
+                prefix={PREFIX}
+                entry={entry}
+                pending={state.pending}
+                fresh={state.fresh}
+                now={now}
+              />
             </div>
 
             <div className="flex shrink-0 items-center gap-2">

@@ -7337,4 +7337,330 @@ is that a proposal has a field to land in.
   floor is one round trip per variant; running them together makes it one wait
   rather than three. It has never been measured against real Storage latency.
 
+
+### Gates for this slice
+
+Every one of these was run after the last edit, in this container, and the
+numbers below are the output rather than a summary of it.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs (app and the harness `tsconfig.harness.json`) |
+| Lint | `npx eslint .` | clean, no errors and no warnings |
+| Unit | `npm test` | **494 passing in 30 files** (vitest); nothing in this slice needed a new unit test that the provider module's suites do not already cover |
+| Build | `npm run build` | succeeds; `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` appear **nowhere** under `.next/static` — the vendor host is in server chunks only, which is PLAN.md's first M8 review item proved again with the critique action in place |
+| Database | `./scripts/verify-db.sh m8_fields` | **OK — migrations applied, 16 test files passed.** This slice adds no migration; the run is the proof that it needed none |
+| End to end | `npx playwright test` | **256 passed, 1 skipped, 0 failed (19.0m)** — the whole suite, against the real stack, with `ASSIST_PROVIDER=fake` |
+| This slice's walk | `npx playwright test assist-fields` | **12 passed (52s)** |
+
+The skipped one is `session-refresh`, which only runs under `npm run e2e:refresh`
+with its own short-lived tokens; it has been skipped in the default run since M1.
+
+`e2e/assist-fields.spec.ts` is the new suite: twelve walks covering concepts
+(generate, present, accept into the box, replace-with-undo, reopen from the
+column), the third hook landing in `videos.hooks`, the critique (judging only
+what was uploaded, shipping the first one, the swap dialog pre-filled and
+edited, the log row that records what was confirmed), a refusal, a rate limit,
+an unusable answer being clamped and said out loud, the in-flight row with its
+Cancel, and one keyboard walk that opens all three panels and closes each with
+Escape. Every assertion that claims something was written is paired with a read
+of Postgres.
+
+
+## M8 — Integration: one seam, one machine, and what a key would still have to prove
+
+> Scope: the join between the three M8 slices above. `app/actions/assist.ts`
+> (result shape, provider chooser), `lib/assist/select.ts` and
+> `lib/assist/select.test.ts` (new), `components/assist/brainstorm-assist.tsx`
+> (rewritten onto `run.ts`), `components/assist/brainstorm-panel.tsx`,
+> `components/assist/concept-assist.tsx`, `components/assist/critique-assist.tsx`,
+> `components/assist/chrome.tsx` (`AssistProvenance`, `AssistFixtureNotice`, one
+> pill), `app/videos/[id]/page.tsx` (one key), `eslint.config.mjs`,
+> `e2e/m8-acceptance.spec.ts` (new), `e2e/brainstorm.spec.ts`,
+> `e2e/assist-fields.spec.ts`, `README.md`, `.env.example`. **No migration; no
+> new runtime dependency.** The dependency ceiling is unchanged:
+> `@anthropic-ai/sdk` was already in the committed `package.json` and is the
+> only addition M8 makes to it.
+
+### The first thing, because it is the one that cannot be fixed after deploy
+
+PLAN.md's first M8 review item is that **the key never reaches the client
+bundle**. Checked on a clean `rm -rf .next && npm run build`, over all 52 files
+of `.next/static`:
+
+| Needle | `.next/static` | `.next/server` (positive control) |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | **0 files** | 7 files |
+| `api.anthropic.com` | **0 files** | 5 files |
+| `x-api-key` | **0 files** | 7 files |
+| `server-side-fallback`, `claude-opus` | **0 files** | present |
+
+The right-hand column is the part that makes the left-hand column mean
+something: the same grep, run against the server chunks, finds all three. A
+clean left column with an empty right column would only have proved that the
+grep was broken.
+
+`lib/assist/anthropic.ts` is the one file that reads the key and its first line
+is `import "server-only"`, so a client component that reached it would fail the
+build rather than ship a key to a browser. `app/actions/assist.ts` imports both
+implementations lazily, so a process answering from the fixtures never loads a
+module that reads a key at all. And the client sends a video id and a kind and
+nothing else — the prompt, the voice guide and the fifty past titles are all
+assembled server-side, so a browser cannot spend the key on a prompt of its
+own.
+
+`e2e/m8-acceptance.spec.ts` adds the runtime half of the same claim, with the
+feature actually in use: no request leaves the origin while a brainstorm runs
+(in particular none to `api.anthropic.com`), and every `<script src>` the page
+loaded is fetched back and searched for all three strings.
+
+**One thing changed because of this check.** The fixtures notice described
+below first read "…ASSIST_PROVIDER is set to `fake`", and that put the literal
+string `ANTHROPIC_API_KEY` into `.next/static` — the *name*, never a value, and
+harmless in itself. It was still rewritten, because a review item phrased as
+"grep the build output" is only useful while the answer is *nothing*. One
+known-benign hit turns a bright line into a judgement call somebody has to make
+on every build, and a gate people learn to ignore is not a gate. The panel
+points at the README instead. The failure sentences that *do* name the variable
+(`not_configured`, `unauthorized`) are written on the server and arrive as
+data, so they never enter a bundle.
+
+### What was found when the three slices were read together
+
+Three agents wrote `lib/assist/**`, `components/assist/**` and the pills
+concurrently, in one tree, and each reported the collision honestly. Read as one
+feature, the seams were:
+
+1. **Two copies of the in-flight machine.** `components/assist/run.ts`'s
+   `useAssistRun` — request id, pending, elapsed, failure, notice, cancel,
+   settle, forget — was used by the concept control and the critique, while
+   `brainstorm-assist.tsx` kept its own `Record<PanelKind, KindView>` with its
+   own request-id ref, its own transport-failure sentence and its own words for
+   cancelling. They agreed, by hand. Both slices named this as the first thing
+   to fix and both left it undone rather than do it blind while the other was
+   still writing. It is now two `useAssistRun` instances, one per question, and
+   `KindView` is a type alias for `AssistRunState<StoredAssistEntryValue>`
+   rather than a second declaration of the same fields.
+2. **Two result shapes from one action file.** `critiqueThumbnails()` already
+   returned exactly what `useAssistRun` consumes; `assist()` returned the same
+   thing with the answer called `entry`, so both of its call sites hand-wrote
+   the same eight-line translation. Renamed to `data`. Every control is now
+   `run.ask(() => assist({ videoId, kind }))` and nothing translates, which
+   means a new kind of assist cannot invent a fifth way to say "it failed".
+3. **Two pills.** `AssistPillButton` is the shared control, and three of the
+   four used it; the brainstorm pill drew its own button with its own badge
+   test id. Collapsed. The pill's `verb` is its identity (`data-assist`, which
+   every spec locates it by) and a new optional `label` carries the one case
+   where the text differs from the verb — "Hide brainstorm" while its panel is
+   open. A control whose identity changed when you pressed it would be a
+   different control depending on whether you had pressed it.
+4. **Two copies of the provenance sentence.** Both text panels computed "Fresh,
+   just now / From earlier — asked for N ago… / …voice guide…" themselves, from
+   the same fields, in two copies that happened to agree. It is now one
+   `AssistProvenance` in `chrome.tsx`. A claim about *where an answer came
+   from* is precisely the kind of thing that must not be able to disagree with
+   itself — which is also how it became the place for the paragraph below.
+
+What was **not** collapsed, deliberately: the concept control stays separate
+from the two-tab panel. That was the sibling slices' decision and it is the
+right one — accepting a title *appends a row*, accepting a concept *overwrites
+a field somebody may have written*, and those need different gestures and
+different undo. Same hook, same chrome, same envelope, different question.
+
+### A fixture must never pass itself off as a model
+
+This is the failure this feature has that nothing else in the app does, and the
+integration pass is where it was closed.
+
+`lib/assist/fake.ts` returns plausible titles with plausible reasons. Nothing
+about them looks wrong — that is what makes them useful, and it is exactly what
+makes them dangerous. Until this pass, nothing on screen said which
+implementation had answered, so a person shown fixtures while believing a model
+wrote them would have been wrong about the only thing the panel is for, and the
+app would not have contradicted them.
+
+Now `AssistProvenance` says so, on every answer, in the attention colour: *these
+came from this app's built-in fixtures, not from Claude — so nothing here is a
+model's opinion of your video.* It is a property of the **answer**, not of the
+sitting: `videos.brainstorm_last` already stored `provider`, so a panel reopened
+tomorrow makes the same admission. `e2e/brainstorm.spec.ts` asserts it, and that
+spec is the one in this repository that is *supposed* to fail the day a real key
+is deployed — which is the correct failure, and says out loud that the suite has
+stopped testing the fixtures.
+
+### Which implementation answers, and why production does not fall back
+
+The task for this pass asked that "the fake is the default where no key
+exists". The panel slice had shipped the opposite default, for a good reason:
+a `fake` in production hands somebody invented titles and lets them believe a
+model wrote them. Both are right about different environments, so the rule
+splits on `NODE_ENV`. It is one pure function, `selectAssistProvider` in
+`lib/assist/select.ts`, with a unit test per row:
+
+| `ASSIST_PROVIDER` | key present | `NODE_ENV` | answers |
+|---|---|---|---|
+| `fake` | either | any | the fixtures |
+| anything else non-empty | either | any | Claude |
+| unset | yes | any | Claude |
+| unset | no | `production` | Claude — and the panel says "no API key configured" |
+| unset | no | anything else | the fixtures, and the panel says they are fixtures |
+
+A **production** deployment with no key deliberately does not fall back: it
+fails with a sentence naming the variable, which is true and fixable. A
+**development** checkout with no key does, so a fresh clone is reviewable
+without a paid account — and the notice above is what makes that safe. `fake`
+written explicitly outranks both inferences, because `playwright.config.ts` and
+`.env.local` both set it and a statement should outrank a guess.
+
+This container's permanent state — no `ANTHROPIC_API_KEY`, no egress to
+`api.anthropic.com` — is therefore a *working* state, not a broken one, by two
+independent routes: `.env.local` names the fixtures explicitly, and the
+inference would choose them anyway.
+
+### Two things this pass found that were not about M8's seams
+
+**A React key warning on every render of `/videos/[id]`.** The dev server logged
+*"Each child in a list should have a unique key … Check the render method of
+`ThumbnailsSection`. It was passed a child from VideoDetailPage"* on every load
+of the detail page, in the full-suite output where nobody was looking. The cause
+is M8's: the critique control is a **client** component handed to a section as a
+prop from a server component, and until this milestone the pill in that slot was
+an inert server component that never crossed the boundary. Every other client
+element the page hands down already carried a key — `assist-candidates`,
+`assist-concept`, `assist-hooks`, `title-truncation-warning` — so this was the
+last one without. Fixed, with the reason written beside it rather than the key
+alone, because a bare `key="…"` on a single element reads like superstition.
+
+**`npm run lint` was not deterministic.** `eslint.config.mjs` overrides
+`eslint-config-next`'s default ignores and did not re-add Playwright's output,
+so linting while (or shortly after) a suite ran picked up the temporary
+JavaScript in `test-results/.playwright-artifacts-*` — **4,660 problems, 286 of
+them errors**, from files that are build output. One of this project's six gates
+should not answer differently depending on whether a browser happens to be open.
+`test-results*/**`, `playwright-report/**` and `blob-report/**` now match what
+`.gitignore` has said since M1.
+
+### PLAN.md's acceptance, walked in a browser
+
+`e2e/m8-acceptance.spec.ts`, five walks, against the real app, the real save
+queue, the real column and real PostgREST with RLS on. Screenshots in the
+gitignored `e2e/screenshots/`.
+
+| PLAN.md | Walked |
+|---|---|
+| *10–20 titles with rationale and a highlighted pick* | 20 proposals; both ends of the range asserted, not just the lower one; a non-trivial rationale on **every** one; exactly one `data-recommended="true"` with its badge and "Why it picked this one:"; every row drawn as a proposal. Accepting lands it as an ordinary candidate row, `source: "ai"`, note = the rationale, through the packaging block's one save queue, read back out of Postgres. |
+| *changing the voice guide visibly changes output* | With no guide the panel says so and says what to do about it; the guide is written; "Ask again" returns a different list, asserted as a set rather than by one string. |
+| *key never reaches the client bundle* | The table above, plus the runtime walk: nothing leaves the origin, and every loaded script is re-fetched and searched. |
+| *a 21-title answer is clamped, not discarded* | 20 on screen, `brainstorm-meta` says it overshot and by how much, and the twenty that arrived are all still acceptable. |
+| *a refusal surfaces as a message, not a crash* | The sentence, plus "Nothing was changed"; no `pageerror` at all; the page still the page; the packaging fields still saving to Postgres afterwards; and `brainstorm_last` still null, so a refusal leaves nothing behind to be mistaken for an answer. |
+
+### The honest limit, stated as plainly as it can be
+
+**The real provider has never been exercised against the live API in this
+environment.** There is no `ANTHROPIC_API_KEY` in this container and outbound
+egress to `api.anthropic.com` is blocked. Not one HTTP request has ever been
+made to Anthropic from here, in this pass or in any of the three slices.
+
+What **is** proved:
+
+- The app, end to end, against `lib/assist/fake.ts` behind the same
+  `AssistProvider` interface — panel, pills, server action, clamping, failure
+  sentences, `brainstorm_last`, the save queue, RLS. **262 Playwright walks in
+  the whole suite**, of which 38 are M8's: 22 in `brainstorm.spec.ts`, 12 in
+  `assist-fields.spec.ts`, 5 in `m8-acceptance.spec.ts`, and the "assists,
+  live" case in `preview.spec.ts`.
+- `lib/assist/anthropic.ts`'s **own** behaviour, against a stubbed transport:
+  that it sends `effort: "medium"`, the `server-side-fallback-2026-07-01` beta
+  and `fallbacks: "default"`; that it checks `stop_reason === "refusal"` before
+  it reads any content; and that a 429, a 5xx, a 401, a 400, a dropped socket,
+  a timeout, an abort, a non-JSON body, a wrong-shaped body and an empty list
+  each become the right `AssistError` with the right sentence. **103 unit tests
+  across six suites in `lib/assist`, 23 of them on the real provider.**
+- That every parameter it sends exists and is spelled the way the installed
+  SDK spells it, read from `node_modules/@anthropic-ai/sdk`'s own `.d.ts` files
+  and cross-checked against the bundled `claude-api` skill — never from recall.
+  This pass re-checked the four that would be silently wrong from memory, and
+  all four hold: the model id is `claude-opus-5`; `effort` lives **inside**
+  `output_config` and takes `low | medium | high | xhigh | max`; the scalar
+  `fallbacks: "default"` pairs with the `server-side-fallback-2026-07-01` beta
+  (the array form takes `-2026-06-01`, and crossing them is a 400 — this sends
+  the matched pair); and on Opus 5 thinking is adaptive **by default**, so
+  sending no `thinking` parameter at all is right rather than an omission.
+
+What is **not** proved, and cannot be from here:
+
+- That Anthropic accepts the request as built. The SDK's types say the shape is
+  legal; only the API can say the request is.
+- That the model id is live, that the beta header is still current, or that
+  `fallbacks: "default"` behaves as documented on the account the key belongs
+  to.
+- Anything at all about latency, cost or token usage. PLAN.md's 10–40 s
+  estimate is PLAN.md's; the 45 s deadline inside `maxDuration = 60` is a
+  budget, not a measurement.
+- That a real refusal carries the `category` and `explanation` the parser
+  reads, or that a real answer fits the schema well enough that the clamp is a
+  rare path rather than a common one.
+- The thumbnail critique's whole shape as an expense: it is the only call that
+  sends images, and nothing about three base64 photographs has been measured.
+
+**The first three things to check when a key exists in Vercel**, in order: that
+a brainstorm returns at all; that the outgoing request carries `effort`
+`"medium"`, the `anthropic-beta` header and `fallbacks: "default"`; and that a
+refusal arrives as the panel's sentence rather than a crash. The first two are
+asserted here only against a stub, and the third is the one PLAN.md singles
+out.
+
+### Decisions taken without the user
+
+1. **The fixtures announce themselves, in the attention colour, on every
+   answer.** Nobody asked for this line. It exists because the alternative —
+   fixtures that are indistinguishable from a model's answer — is the one
+   failure in this feature that cannot be noticed from outside, and this
+   milestone is the only chance to close it. It costs a line of the panel.
+2. **The fallback splits on `NODE_ENV` rather than picking one default.** Both
+   defaults were defensible and each was wrong in the other's environment. The
+   split is the only answer that is right in both, and it is testable.
+3. **The panel's copy does not name `ANTHROPIC_API_KEY`**, to keep PLAN.md's
+   grep a bright line. Reasoning above, and repeated in the doc comment on
+   `AssistProvenance` so the next person to write that sentence finds out why
+   before they write it.
+4. **`AssistState.entry` was renamed to `data`.** A rename that touches two
+   call sites, in exchange for every assist in the app returning one shape.
+5. **The thumbnail critique makes the fixture admission too**, through a
+   component split out of `AssistProvenance` rather than a fourth sentence. Its
+   provenance line is genuinely different — the verdict is never stored, so it
+   has no age and no "from earlier" — but the one thing all three must never
+   omit is the same. A confident paragraph about somebody's thumbnails that no
+   model ever looked at is the worst version of this failure, because it reads
+   as expertise.
+6. **`e2e/m8-acceptance.spec.ts` exists at all**, rather than trusting the two
+   slice suites. Every milestone from M1 has an acceptance spec that walks
+   PLAN.md's own words; M8's runnables and review items were spread across two
+   files written by two agents who could not see each other's work.
+7. **The pill keeps its verb as its identity.** Making `data-assist` change
+   when the panel opens would have been the smaller diff, and would have made
+   every pill selector in three suites state-dependent.
+
+### Deviations from PLAN.md, stated plainly
+
+- **`lib/brainstorm/{types,anthropic}.ts` is `lib/assist/**`**, and
+  `BrainstormProvider.generate(input)` is `AssistProvider.run(request)` over a
+  discriminated union of four kinds. PLAN.md wrote the module when the
+  brainstorm was one question; the user's "assist on every field that makes
+  sense" made it four. The substance PLAN.md pins — structural-only zod schema,
+  counts in the prompt and clamped in code, `stop_reason === "refusal"` checked
+  first, slice to 20 titles / 3 hooks, clamp `recommended_index`, flag over-55
+  titles rather than rejecting them — is all there, in
+  `lib/assist/{schema,clamp,prompts,anthropic}.ts`.
+- **The server action is `assist(videoId, kind)` and `critiqueThumbnails`,
+  not `brainstorm(videoId)`.** Same segment, same `maxDuration = 60`, same
+  single write path.
+- **`videos.brainstorm_last` holds an envelope keyed by kind**, not one result.
+  Three text assists share the column, and asking for hooks must not throw away
+  twenty titles nobody has accepted yet.
+- PLAN.md's M8 does not mention the thumbnail critique, the concept control or
+  a fallback provider at all. Those come from BRIEF.md and from the pills M2
+  and M4 placed; none of them contradicts PLAN.md, and each is recorded in its
+  own slice's section above.
+
 <!-- GATES -->

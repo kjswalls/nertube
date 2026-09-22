@@ -164,7 +164,13 @@ interface Row {
   hooks: { id: string; text: string; chosen?: boolean }[];
   brainstorm_last: {
     v: number;
-    titles?: { at: string; suggestions: { text: string }[]; recommended: number | null };
+    titles?: {
+      at: string;
+      /** Which implementation answered — asserted, not decorative. */
+      provider: string;
+      suggestions: { text: string }[];
+      recommended: number | null;
+    };
     hooks?: { at: string; suggestions: { text: string }[] };
   } | null;
 }
@@ -369,6 +375,54 @@ test('the answer is kept: closing and reopening shows it as from earlier, and co
   await page.getByTestId('brainstorm-ask-again').click();
   await expect(page.getByTestId('brainstorm-provenance')).toContainText('Fresh, just now');
   expect((await readRow(videoId)).brainstorm_last!.titles!.at).not.toBe(askedAt);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 3b. A fixture never passes itself off as a model                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The one failure in this feature that cannot be seen from the outside.
+ *
+ * Everything in this suite, and every browser walk that was ever done in the
+ * container this was built in, runs against `lib/assist/fake.ts`: there is no
+ * `ANTHROPIC_API_KEY` here and no route to `api.anthropic.com`. The fixtures
+ * return plausible titles with plausible reasons — they read *exactly* like an
+ * answer. A person shown these while believing a model wrote them would be
+ * wrong about the only thing the panel is for, and nothing on the screen would
+ * contradict them.
+ *
+ * So the panel says which answered, every time, and this is the assertion that
+ * keeps it saying it. It is the one spec in here that would still be worth
+ * running the day a real key exists: on that deployment `ASSIST_PROVIDER` is
+ * unset, the line is absent, and this test would fail — which is the correct
+ * failure, and says out loud that the suite is no longer testing the fixtures.
+ */
+test('an answer from the fixtures says so, and names the variable that caused it', async ({
+  page,
+}) => {
+  const videoId = await capture('Sharpening a chisel properly');
+  await signIn(page);
+  await openPanel(page, videoId);
+  await expectAnswered(page);
+
+  const said = page.getByTestId('brainstorm-fixtures');
+  await expect(said).toBeVisible();
+  await expect(said).toContainText('not from Claude');
+  await expect(said).toContainText('built-in fixtures');
+
+  // The sentence deliberately does not spell `ANTHROPIC_API_KEY`: this is a
+  // client component, and that string in `.next/static` would cost PLAN.md's
+  // "grep the build output" review item its bright line. It points at the
+  // README instead. See the doc comment on `AssistProvenance`.
+  await expect(said).not.toContainText('ANTHROPIC_API_KEY');
+
+  // And it is a property of the answer, not of the sitting: the stored entry
+  // records who answered, so a reopened panel makes the same admission.
+  expect((await readRow(videoId)).brainstorm_last!.titles!.provider).toBe('fake');
+  await page.getByTestId('brainstorm-close').click();
+  await pill(page).click();
+  await expect(page.getByTestId('brainstorm-fixtures')).toBeVisible();
 });
 
 /* -------------------------------------------------------------------------- */

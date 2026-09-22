@@ -492,6 +492,13 @@ test('critique: judges the uploaded variants, and accepting ships one', async ({
   // a file, and the panel says the verdict is not kept.
   await expect(panel).toContainText('Not kept');
 
+  // And, because this suite runs on ASSIST_PROVIDER=fake, the panel says that
+  // a fixture wrote this — the same sentence the other two panels show, from
+  // the same component. A confident paragraph about somebody's thumbnails that
+  // no model ever looked at is the one thing this feature must never imply.
+  await expect(page.getByTestId('critique-fixtures')).toBeVisible();
+  await expect(page.getByTestId('critique-fixtures')).toContainText('not from Claude');
+
   // Accepting means shipping the one it would ship. Nothing is live yet, so
   // this is the first ship: one click, logged as chosen at launch.
   await wild.getByTestId('critique-ship').click();

@@ -743,7 +743,26 @@ export default async function VideoDetailPage({
                      makes an image; BRIEF.md principle 2 is that the concept
                      and the assets are two things, and this section is the
                      assets. */
-                  assist={<ThumbnailCritiqueAssist videoId={video.id} />}
+                  /*
+                    The `key` is not decoration. Every other client element this
+                    server component hands to a section carries one
+                    (`assist-candidates`, `assist-concept`, `assist-hooks`,
+                    `title-truncation-warning`) for the same reason: an element
+                    created here and rendered *there*, across the server/client
+                    boundary, lands in that component's children array without
+                    an owner React can derive a key from, and the dev build
+                    says so on every render of this page. This one was the
+                    last without it — "Each child in a list should have a
+                    unique key" in `ThumbnailsSection` — because until M8 the
+                    pill in this slot was an inert server component and never
+                    crossed the boundary at all.
+                  */
+                  assist={
+                    <ThumbnailCritiqueAssist
+                      key="assist-critique"
+                      videoId={video.id}
+                    />
+                  }
                 />
               ),
 

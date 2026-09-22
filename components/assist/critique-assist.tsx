@@ -12,6 +12,7 @@ import type { ThumbnailRole } from "@/lib/storage";
 
 import {
   AssistFailure,
+  AssistFixtureNotice,
   AssistMetaLine,
   AssistNoticeLine,
   AssistPanel,
@@ -168,6 +169,16 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                           : "the title alone — no concept is written, so this is half the comparison"
                       }. Not kept: it is about the images as they are now, so ask again after you change one.`}
               </p>
+              {/*
+                The same admission the other two panels make, from the same
+                component: a verdict written by the fixtures is not a judgement
+                about these pictures, and a panel that did not say so would be
+                the only place in this app capable of implying otherwise.
+              */}
+              <AssistFixtureNotice
+                prefix={PREFIX}
+                provider={state.meta?.provider ?? null}
+              />
             </div>
 
             <div className="flex shrink-0 items-center gap-2">

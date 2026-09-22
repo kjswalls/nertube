@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { assist } from "@/app/actions/assist";
 
-import { BrainstormPanel, type KindView, type PanelKind } from "./brainstorm-panel";
+import { AssistPillButton } from "./chrome";
+import { BrainstormPanel, type PanelKind } from "./brainstorm-panel";
 import { useAssistPanel, useAssistTarget } from "./packaging-assist";
-import type { StoredAssistKind, StoredBrainstormView } from "./stored";
+import { useAssistRun, type AssistRun } from "./run";
+import type {
+  StoredAssistEntryValue,
+  StoredAssistKind,
+  StoredBrainstormView,
+} from "./stored";
 
 /**
  * A kind this panel can show. `concepts` belongs to the thumbnail concept
@@ -20,12 +26,13 @@ const panelKind = (kind: StoredAssistKind): PanelKind =>
  * The assist control on the packaging block, made real — and the thing that
  * actually holds the conversation with the server.
  *
- * `components/preview/assist-pill.tsx` has sat on this page since M2,
- * deliberately inert, with a doc comment saying why: *where the button is* is a
- * decision about the packaging block rather than about the API, and a listener
- * for a button that cannot be pressed is the illusion of a feature. This is the
- * other half of that comment — same place, same row, now with an action behind
- * it.
+ * `components/preview/assist-pill.tsx` sat on this page from M2, deliberately
+ * inert, with a doc comment saying why: *where the button is* is a decision
+ * about the packaging block rather than about the API, and a listener for a
+ * button that cannot be pressed is the illusion of a feature. This is the other
+ * half of that comment — same place, same row, now with an action behind it.
+ * That file is gone; `AssistPillButton` below is the one pill every assist in
+ * the app renders, and the reasoning moved into it.
  *
  * ## Why the state is here and not in the panel
  *
@@ -43,6 +50,17 @@ const panelKind = (kind: StoredAssistKind): PanelKind =>
  *
  * The panel below is therefore presentational: it renders what it is given and
  * calls back.
+ *
+ * ## Why there are two runs rather than one hand-written machine
+ *
+ * This component used to keep its own `Record<PanelKind, KindView>`, its own
+ * request-id ref, its own transport-failure sentence and its own words for
+ * cancelling — a second copy of `components/assist/run.ts`, which the concept
+ * and critique controls already used. Two copies of a state machine that must
+ * behave identically agree only for as long as somebody keeps them agreeing.
+ * So the machine is `useAssistRun`, twice: one conversation per question,
+ * because asking for hooks must not throw away twenty titles nobody has
+ * accepted yet, and the two are genuinely separate calls behind the interface.
  */
 export function BrainstormAssist({
   videoId,
@@ -55,10 +73,17 @@ export function BrainstormAssist({
   const panel = useAssistPanel();
   const target = useAssistTarget();
 
-  const [view, setView] = useState<Record<PanelKind, KindView>>(() => ({
-    titles: { ...EMPTY, entry: initial.titles },
-    hooks: { ...EMPTY, entry: initial.hooks },
-  }));
+  /*
+    One run per question. `useAssistRun` seeds itself from the column, so an
+    answer written yesterday is on screen the moment the panel opens and
+    reopening costs nothing — which is the whole job of `brainstorm_last`.
+  */
+  const titles = useAssistRun<StoredAssistEntryValue>(initial.titles);
+  const hooks = useAssistRun<StoredAssistEntryValue>(initial.hooks);
+  const runs: Record<PanelKind, AssistRun<StoredAssistEntryValue>> = {
+    titles,
+    hooks,
+  };
 
   /**
    * The clock, read in the handler that opens the panel rather than while
@@ -67,83 +92,43 @@ export function BrainstormAssist({
    */
   const [now, setNow] = useState(0);
 
-  /**
-   * Which request each kind is still interested in.
-   *
-   * A server action cannot be recalled — the model is already thinking and the
-   * row will still be written — so "cancel" honestly means *stop waiting for
-   * this one*, and an answer that lands afterwards is ignored rather than
-   * dropped into a panel the person has moved on from. Closing does the same.
-   */
-  const request = useRef<Record<PanelKind, number>>({ titles: 0, hooks: 0 });
-
-  const patch = useCallback((kind: PanelKind, next: Partial<KindView>) => {
-    setView((previous) => ({ ...previous, [kind]: { ...previous[kind], ...next } }));
-  }, []);
+  /*
+    The two `ask` functions are stable (`useCallback` inside the hook), so the
+    handler below is too — which matters because it is what the sibling hook
+    pill registers through the context.
+  */
+  const askTitles = titles.ask;
+  const askHooks = hooks.ask;
 
   const ask = useCallback(
-    async (kind: PanelKind) => {
-      const id = request.current[kind] + 1;
-      request.current[kind] = id;
-      patch(kind, { pending: true, failure: null, startedAt: Date.now(), notice: null });
-
-      let answer: Awaited<ReturnType<typeof assist>>;
-      try {
-        answer = await assist({ videoId, kind });
-      } catch {
-        // The action itself never throws; this is the transport under it — the
-        // browser offline, the deployment restarting mid-request.
-        if (request.current[kind] !== id) return;
-        patch(kind, {
-          pending: false,
-          failure: {
-            code: "unreachable",
-            message:
-              "The request never reached the server. Nothing was changed — check the connection and ask again.",
-            retryable: true,
-            retryAfterSeconds: null,
-          },
-        });
-        return;
-      }
-
-      if (request.current[kind] !== id) return;
-
-      if (!answer.ok) {
-        patch(kind, {
-          pending: false,
-          failure: {
-            code: answer.code,
-            message: answer.message,
-            retryable: answer.retryable,
-            retryAfterSeconds: answer.retryAfterSeconds,
-          },
-        });
-        return;
-      }
-
-      patch(kind, {
-        pending: false,
-        entry: answer.entry,
-        fresh: true,
-        meta: answer.meta,
-        persisted: answer.persisted,
-        failure: null,
-      });
+    (kind: PanelKind) => {
+      /*
+        No mapping. `assist()` returns exactly the shape `useAssistRun`
+        consumes, failure branch included — one result contract for every
+        assist in the app, so a new kind cannot invent a fifth way to say
+        "it failed".
+      */
+      const attempt = () => assist({ videoId, kind });
+      void (kind === "hooks" ? askHooks(attempt) : askTitles(attempt));
     },
-    [patch, videoId],
+    [askHooks, askTitles, videoId],
   );
 
-  const cancel = useCallback(
+  const titlesState = titles.state;
+  const hooksState = hooks.state;
+
+  /**
+   * Whether asking now would cost a call for nothing: there is an answer on
+   * screen, or something is already in flight, or the last attempt failed and
+   * the person is looking at the sentence saying so. Read from the run state
+   * rather than remembered separately, so it cannot drift from it.
+   */
+  const askedAlready = useCallback(
     (kind: PanelKind) => {
-      request.current[kind] += 1;
-      patch(kind, {
-        pending: false,
-        notice:
-          "Stopped waiting. If the answer did arrive it is kept — it will be here, as “from earlier”, next time you open this.",
-      });
+      const { data, pending, failure } = kind === "hooks" ? hooksState : titlesState;
+      return data !== null || pending || failure !== null;
     },
-    [patch],
+    [hooksState, titlesState],
   );
 
   /**
@@ -158,12 +143,9 @@ export function BrainstormAssist({
       const kind = panelKind(requested);
       setNow(Date.now());
       panel?.show(kind);
-      const current = view[kind];
-      if (current.entry === null && !current.pending && current.failure === null) {
-        void ask(kind);
-      }
+      if (!askedAlready(kind)) ask(kind);
     },
-    [ask, panel, view],
+    [ask, askedAlready, panel],
   );
 
   /*
@@ -174,7 +156,8 @@ export function BrainstormAssist({
     here. Registering `open` is what makes "Draft a third" mean the same thing
     as "Generate 20" — open, and ask if there is nothing to show. A ref through
     the context, written in an effect and cleared on unmount, so no render
-    depends on it.
+    depends on it. Exactly one component may register; a second would silently
+    win, which is why only this one does.
   */
   useEffect(() => panel?.register(open), [open, panel]);
 
@@ -188,56 +171,45 @@ export function BrainstormAssist({
     );
   }
 
+  const current = panelKind(panel.kind);
+  const run = runs[current];
+
   return (
     <div className="flex w-full flex-col gap-2">
       <div className="flex justify-end">
-        <button
-          type="button"
-          data-testid="assist-pill"
-          data-assist="Generate 20"
-          aria-expanded={panel.open}
+        <AssistPillButton
+          verb="Generate 20"
+          label={panel.open ? "Hide brainstorm" : "Generate 20"}
           title="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+          expanded={panel.open}
+          badge={titlesState.data && !panel.open ? "saved" : undefined}
           onClick={() => (panel.open ? panel.hide() : open("titles"))}
-          className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
-        >
-          <span>{panel.open ? "Hide brainstorm" : "Generate 20"}</span>
-          {view.titles.entry && !panel.open ? (
-            <span
-              data-testid="assist-pill-stored"
-              className="font-mono text-[11px] uppercase tracking-wide text-muted"
-            >
-              saved
-            </span>
-          ) : null}
-        </button>
+        />
       </div>
 
       {panel.open ? (
         <BrainstormPanel
-          kind={panelKind(panel.kind)}
+          kind={current}
           nonce={panel.nonce}
           now={now}
-          view={view[panelKind(panel.kind)]}
+          view={run.state}
           otherHasAnswer={
-            view[panelKind(panel.kind) === "titles" ? "hooks" : "titles"].entry !== null
+            runs[current === "titles" ? "hooks" : "titles"].state.data !== null
           }
-          onAsk={() => void ask(panelKind(panel.kind))}
-          onCancel={() => cancel(panelKind(panel.kind))}
+          onAsk={() => ask(current)}
+          onCancel={() => run.cancel()}
           onKind={(kind) => {
             panel.setKind(kind);
-            const current = view[kind];
-            if (current.entry === null && !current.pending && current.failure === null) {
-              void ask(kind);
-            }
+            if (!askedAlready(kind)) ask(kind);
           }}
-          onNotice={(notice) => patch(panelKind(panel.kind), { notice })}
+          onNotice={(notice) => run.note(notice)}
           onClose={() => {
-            const kind = panelKind(panel.kind);
-            request.current[kind] += 1;
-            // Closing ends the sitting: what it showed is kept, and the next
-            // open says "from earlier" rather than "just now" about an answer
-            // that may be an hour old by then.
-            patch(kind, { fresh: false });
+            // Closing ends the sitting: whatever was in flight is no longer
+            // wanted, what it showed is kept, and the next open says "from
+            // earlier" rather than "just now" about an answer that may be an
+            // hour old by then. `settle()` is that, without a notice — Cancel
+            // is the gesture that earns one.
+            run.settle();
             panel.hide();
           }}
         />
@@ -245,17 +217,6 @@ export function BrainstormAssist({
     </div>
   );
 }
-
-const EMPTY: KindView = {
-  entry: null,
-  fresh: false,
-  meta: null,
-  persisted: true,
-  pending: false,
-  startedAt: null,
-  failure: null,
-  notice: null,
-};
 
 /**
  * The same panel, asked for from the hooks list.
@@ -269,15 +230,10 @@ export function BrainstormHookPill() {
   if (!panel) return null;
 
   return (
-    <button
-      type="button"
-      data-testid="assist-pill"
-      data-assist="Draft a third"
+    <AssistPillButton
+      verb="Draft a third"
       title="Opens the brainstorm on the spoken hooks it proposes."
       onClick={() => panel.request("hooks")}
-      className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
-    >
-      Draft a third
-    </button>
+    />
   );
 }
