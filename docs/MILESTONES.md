@@ -7566,9 +7566,8 @@ What **is** proved:
 - The app, end to end, against `lib/assist/fake.ts` behind the same
   `AssistProvider` interface — panel, pills, server action, clamping, failure
   sentences, `brainstorm_last`, the save queue, RLS. **262 Playwright walks in
-  the whole suite**, of which 38 are M8's: 22 in `brainstorm.spec.ts`, 12 in
-  `assist-fields.spec.ts`, 5 in `m8-acceptance.spec.ts`, and the "assists,
-  live" case in `preview.spec.ts`.
+  the whole suite**, of which 39 are M8's: 22 in `brainstorm.spec.ts`, 12 in
+  `assist-fields.spec.ts` and 5 in `m8-acceptance.spec.ts`.
 - `lib/assist/anthropic.ts`'s **own** behaviour, against a stubbed transport:
   that it sends `effort: "medium"`, the `server-side-fallback-2026-07-01` beta
   and `fallbacks: "default"`; that it checks `stop_reason === "refusal"` before
@@ -7662,5 +7661,29 @@ out.
   a fallback provider at all. Those come from BRIEF.md and from the pills M2
   and M4 placed; none of them contradicts PLAN.md, and each is recorded in its
   own slice's section above.
+
+### Gates for this pass
+
+Every one of these was run after the last edit, on the settled tree, in this
+container. The numbers are the output rather than a summary of it.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs (the app, and the harness `tsconfig.harness.json`) |
+| Lint | `npm run lint` | clean — **and now deterministic**; see the Playwright-output ignore above |
+| Build | `npm run build` | succeeds, from `rm -rf .next` |
+| Key leak | grep of `.next/static` | **0 files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `server-side-fallback`, `claude-opus` and `ASSIST_PROVIDER`, across all 52 files. The same grep over `.next/server` finds 7, 5, 7, 2, 2 and 3 — the control that makes the zeroes mean something |
+| Database | `./scripts/verify-db.sh m8_check` | **OK — migrations applied, 16 test files passed.** M8 adds no migration; this run is the proof it needed none |
+| Unit | `npm test` | **501 passing in 31 files** (was 494 in 30; `lib/assist/select.test.ts` is the new file and its seven cases) |
+| End to end | `npm run e2e` | **262 passed, 1 skipped, 0 failed (18.9m)** — the whole suite, against the real stack, with `ASSIST_PROVIDER=fake` |
+
+The skipped one is `session-refresh`, which only runs under `npm run e2e:refresh`
+with its own short-lived tokens; it has been skipped in the default run since M1.
+
+An earlier full run of the same tree reported the same 262/1/0, and this one was
+re-run from scratch because the first had a `rm -rf .next` land underneath its
+dev server — my mistake, and the kind that produces one unexplained failure
+(`board.m1`'s WIP warning) that looks like a flake and is not. The number above
+is from the clean run, with nothing else touching the tree while it ran.
 
 <!-- GATES -->
