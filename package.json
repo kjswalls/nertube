@@ -19,6 +19,7 @@
     "e2e:refresh": "DEV_STACK_ACCESS_TOKEN_TTL=5 DEV_STACK_REQUIRE_SHORT_TTL=1 E2E_REUSE=0 DEV_STACK_PORT=54331 DEV_STACK_POSTGREST_PORT=54332 NERTUBE_DEV_DB=nertube_e2e_refresh E2E_PORT=3112 playwright test session-refresh"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
     "next": "16.3.5",
