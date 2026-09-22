@@ -506,10 +506,25 @@ test('Wednesday: the calendar draws the Saturday as its own kind of event', asyn
     .getByRole('link', { name: 'Calendar', exact: true });
   await expect(link).toHaveAttribute('href', '/calendar');
   await expect(link).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByTestId('sidebar-calendar-count')).toHaveAttribute(
-    'data-count',
-    String(await targetsIn(SHOOT_MONTH)),
-  );
+  /*
+    The badge counts the month `/calendar` opens on *by default* — today's —
+    not the `?month=` this walk is looking at. Those are the same month most of
+    the time and differ whenever `TODAY + 10` crosses into the next one, which
+    is the same date-dependence recorded on `PUBLISH` above: on 22 September the
+    shoot is 2 October, September holds no targets, and the badge correctly
+    renders nothing while this line asked it for October's count.
+
+    So it is asserted against the month the badge actually counts, including the
+    case where that month is empty and the element is deliberately absent.
+  */
+  const badgeMonth = monthKey(monthOf(TODAY)!);
+  const badgeCount = await targetsIn(badgeMonth);
+  const badge = page.getByTestId('sidebar-calendar-count');
+  if (badgeCount === 0) {
+    await expect(badge).toHaveCount(0);
+  } else {
+    await expect(badge).toHaveAttribute('data-count', String(badgeCount));
+  }
 });
 
 test('Wednesday: the day expands, in place, to the videos it is for', async ({
