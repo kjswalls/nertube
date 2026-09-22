@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
 import { SaveStatus } from "@/components/autosave";
 import { useMoveFocus } from "@/components/settings/move-button";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/checklist-templates";
 import type { StageKind } from "@/lib/defaults";
 import { NEEDS_A_BLOCK } from "@/lib/next-action";
+import { cleanLabel } from "@/lib/text";
 
 import { TemplateRow } from "./template-row";
 import { useTemplateEditor } from "./use-template-editor";
@@ -54,6 +55,14 @@ export interface TemplateStage {
  * about this screen that is not obvious from looking at it, so the stage says
  * how many videos are in it *now* and keeping their lists, and a removal is
  * followed by a sentence saying exactly which videos it did not touch.
+ *
+ * "Future videos" means a video entering the stage **for the first time**.
+ * `move_video` copies a template only when the stage is not yet in the
+ * video's `checklist_seeded_stages` (0005), so a video that leaves and comes
+ * back keeps the list it was first given, ticks included, and never sees the
+ * edit unless "Reset from template" on its page re-copies it. The copy below
+ * says so, because M7's review read the earlier wording as "every entry
+ * copies" and proved it did not.
  */
 export function StageTemplateEditor({
   stage,
@@ -71,10 +80,43 @@ export function StageTemplateEditor({
   // Focus follows a moved row, as it does in the other two editors: the
   // arrows are disabled while the write is on the wire, and a disabled button
   // drops focus on <body>.
-  const focus = useMoveFocus(
-    [editor.items, editor.pending],
-    (itemId) => `[data-template-id="${itemId}"] [data-testid="template-text"]`,
-  );
+  const focus = useMoveFocus({
+    deps: [editor.items],
+    inFlight: editor.pending,
+    nameField: (itemId) => `[data-template-id="${itemId}"] [data-testid="template-text"]`,
+  });
+  const addTextId = useId();
+  // An attribute selector, not `#id`: `useId` ids need escaping as a hash
+  // selector, and `CSS.escape` does not exist where this also renders (Node).
+  const addSelector = `[id="${addTextId}"]`;
+
+  /*
+    After a Retry lands, the button that was pressed is gone with the error
+    it belonged to, so focus would fall on <body>. It goes to the text of the
+    first row the retried operations touched, or to the add box. Asked for
+    when Retry is pressed and consumed when the queue settles — on failure
+    the Retry button is still there with focus on it, and the request is
+    dropped rather than moved away from it.
+  */
+  const retryFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (editor.state.kind === "saving" || retryFocus.current === null) return;
+    const wanted = retryFocus.current;
+    retryFocus.current = null;
+    if (editor.state.kind === "saved") {
+      document.querySelector<HTMLElement>(wanted)?.focus();
+    }
+  }, [editor.state]);
+
+  function retry(): void {
+    const ops = editor.state.kind === "error" ? editor.state.payload : [];
+    const first = ops.find((op) => op.kind !== "add");
+    retryFocus.current =
+      first && "id" in first
+        ? `[data-template-id="${first.id}"] [data-testid="template-text"]`
+        : addSelector;
+    editor.retry();
+  }
 
   const total = stageMinutes(editor.items);
   const quick = quickCount(editor.items, stage.kind);
@@ -133,10 +175,10 @@ export function StageTemplateEditor({
         {!stage.isEnabled
           ? `${stage.name} is switched off, so nothing can enter it and this list is not being copied. It stays here for when the lane comes back.`
           : occupied === 0
-            ? `Nothing is in ${stage.name} right now. The next video to enter it gets this list.`
+            ? `Nothing is in ${stage.name} right now. The next video to enter it for the first time gets this list; one that comes back keeps the list it was first given.`
             : occupied === 1
-              ? `One video is in ${stage.name} now and keeps the list it was given. The next one to enter gets this list.`
-              : `${occupied} videos are in ${stage.name} now and keep the lists they were given. The next one to enter gets this list.`}
+              ? `One video is in ${stage.name} now and keeps the list it was given. The next video to enter for the first time gets this list; one that comes back keeps its own, unless its page resets it from the template.`
+              : `${occupied} videos are in ${stage.name} now and keep the lists they were given. The next video to enter for the first time gets this list; one that comes back keeps its own, unless its page resets it from the template.`}
         {needsBlock ? (
           <>
             {" "}
@@ -166,7 +208,17 @@ export function StageTemplateEditor({
               stageKind={stage.kind}
               busy={editor.pending}
               onEdit={editor.edit}
-              onRemove={editor.remove}
+              onRemove={(id) => {
+                // The row goes with the button that removed it: focus moves
+                // to the next row's text, or to the add box when it was last.
+                const next = editor.items[index + 1] ?? editor.items[index - 1];
+                focus.requestField(
+                  next
+                    ? `[data-template-id="${next.id}"] [data-testid="template-text"]`
+                    : addSelector,
+                );
+                editor.remove(id);
+              }}
               onMove={(id, direction) => {
                 focus.requestFocus(id, direction);
                 editor.move(id, direction);
@@ -177,7 +229,7 @@ export function StageTemplateEditor({
         </ol>
       )}
 
-      <AddTemplateItem onAdd={editor.add} />
+      <AddTemplateItem textId={addTextId} stageName={stage.name} onAdd={editor.add} />
 
       <SaveStatus
         state={editor.state}
@@ -186,12 +238,14 @@ export function StageTemplateEditor({
           editor.lastRemoved !== null
             ? ""
             : occupied === 0
-              ? `Saved on blur. Changes reach the next video to enter ${stage.name}.`
+              ? `Saved on blur. Changes reach the next video to enter ${stage.name} for the first time.`
               : occupied === 1
-                ? `Saved on blur. Changes reach the next video to enter ${stage.name}; the one already there keeps its list.`
-                : `Saved on blur. Changes reach the next video to enter ${stage.name}; the ${occupied} already there keep theirs.`
+                ? `Saved on blur. Changes reach the next video to enter ${stage.name} for the first time; the one already there keeps its list.`
+                : `Saved on blur. Changes reach the next video to enter ${stage.name} for the first time; the ${occupied} already there keep theirs.`
         }
-        onRetry={editor.retry}
+        // A Retry with nothing to re-send is not a Retry: a refused operation
+        // is final and is not in the payload.
+        onRetry={editor.state.kind === "error" && editor.state.payload.length > 0 ? retry : undefined}
       />
 
       {editor.lastRemoved !== null && editor.state.kind !== "error" ? (
@@ -202,10 +256,10 @@ export function StageTemplateEditor({
         >
           Removed &ldquo;{editor.lastRemoved}&rdquo; from the template.{" "}
           {occupied === 0
-            ? `Nothing is in ${stage.name} now; the next video to enter it will not get this item.`
+            ? `Nothing is in ${stage.name} now; the next video to enter it for the first time will not get this item.`
             : occupied === 1
-              ? `The video already in ${stage.name} keeps it; the next one to enter will not get it.`
-              : `The ${occupied} videos already in ${stage.name} keep it; the next one to enter will not get it.`}
+              ? `The video already in ${stage.name} keeps it; the next one to enter for the first time will not get it.`
+              : `The ${occupied} videos already in ${stage.name} keep it; the next one to enter for the first time will not get it.`}
         </p>
       ) : null}
     </section>
@@ -219,20 +273,26 @@ export function StageTemplateEditor({
  * same ten a custom item on a video reads as when it has none.
  */
 function AddTemplateItem({
+  textId,
+  stageName,
   onAdd,
 }: {
+  /** The text box's id, so the editor can send focus here after a removal. */
+  textId: string;
+  /** In the controls' names: nine add forms on one page are otherwise nine "Add"s. */
+  stageName: string;
   onAdd: (text: string, estMinutes: number) => void;
 }) {
   const [text, setText] = useState("");
   const [minutes, setMinutes] = useState(String(DEFAULT_TEMPLATE_MINUTES));
   const [error, setError] = useState<string | null>(null);
   const textInput = useRef<HTMLInputElement | null>(null);
-  const textId = useId();
   const minutesId = useId();
+  const errorId = useId();
 
   function submit(event: FormEvent): void {
     event.preventDefault();
-    const trimmed = text.trim();
+    const trimmed = cleanLabel(text);
     if (trimmed === "") return;
     const raw = minutes.trim();
     const parsed = EstMinutesSchema.safeParse(raw === "" ? Number.NaN : Number(raw));
@@ -247,10 +307,18 @@ function AddTemplateItem({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-1">
+    <form
+      onSubmit={submit}
+      // The browser's own constraint validation would stop a `0` at the
+      // minutes box's `min` with a tooltip and no submit; the refusal is this
+      // form's, in a sentence, so the native one is off — as it is on the
+      // bucket add forms, which M7's channel slice found the same way.
+      noValidate
+      className="flex flex-col gap-1"
+    >
       <div className="flex items-center gap-2">
         <label htmlFor={textId} className="sr-only">
-          New item
+          New item for {stageName}
         </label>
         <input
           id={textId}
@@ -264,7 +332,7 @@ function AddTemplateItem({
           className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none placeholder:font-sans placeholder:text-[13px] placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
         />
         <label htmlFor={minutesId} className="sr-only">
-          Minutes for the new item
+          Minutes for the new {stageName} item
         </label>
         <input
           id={minutesId}
@@ -277,6 +345,7 @@ function AddTemplateItem({
           value={minutes}
           onChange={(event) => setMinutes(event.target.value)}
           aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
         <span aria-hidden="true" className="font-mono text-[11px] text-muted">
@@ -285,13 +354,13 @@ function AddTemplateItem({
         <button
           type="submit"
           data-testid="template-add-submit"
-          disabled={text.trim() === ""}
+          disabled={cleanLabel(text) === ""}
           className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none enabled:hover:border-accent/50 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
         >
-          Add
+          Add<span className="sr-only"> to {stageName}</span>
         </button>
       </div>
-      {error ? <Refusal testId="template-add-error" message={error} /> : null}
+      {error ? <Refusal id={errorId} testId="template-add-error" message={error} /> : null}
     </form>
   );
 }

@@ -29,7 +29,9 @@ import type { MoveDirection, MoveVerdict } from "@/lib/stage-settings";
  * the top has no "up" left), and a disabled button drops focus on `<body>`.
  * M6's review filed exactly that against the filming-day panel. The hook
  * below keeps focus on the row: the same arrow if it is still offered,
- * otherwise the other one, otherwise the row's own name field.
+ * otherwise the other one, otherwise the row's own name field — and it waits
+ * for the write to settle before it looks, so the arrow it finds is the one
+ * that is offered afterwards, not the one disabled by the wait.
  */
 
 /** The reason a row at either end of its list cannot go further. */
@@ -91,37 +93,73 @@ export interface MoveFocus {
   /** A stable ref for one row's arrow, for `MoveButton`'s `buttonRef`. */
   readonly buttonRef: (rowId: string, direction: MoveDirection) => RefObject<HTMLButtonElement | null>;
   /**
-   * Ask for focus to follow this row once the list has re-rendered. Call it
-   * just before the state change that moves the row; it is consumed once.
+   * Ask for focus to follow this row once the list has settled. Call it
+   * just before the move is asked for; it is consumed once, and not while
+   * `inFlight` is true.
    */
   readonly requestFocus: (rowId: string, direction: MoveDirection) => void;
+  /**
+   * Ask for focus to land on whatever `selector` finds once the list has
+   * settled — the next row's name field after a removal, the add form's box
+   * when there is no next row. Consumed once, after the next change to
+   * `deps`.
+   */
+  readonly requestField: (selector: string) => void;
 }
 
 /**
- * Keep focus on the row that was moved.
+ * Keep focus on the row that was moved — or, after a removal, on the row
+ * that took its place.
  *
- * `deps` are whatever changes when the list re-renders after a move — the
+ * `deps` are whatever changes when the list re-renders after a write — the
  * list itself and the in-flight marker — and `nameField` is a selector for
  * the row's own text input, the last resort when neither arrow is offered any
- * more. A ref rather than state for the request: it is written just before
- * the list changes and read once in the effect that runs after that change
- * commits, so there is nothing to render from and no second render to cause.
+ * more.
+ *
+ * `inFlight` is the reason the request is *kept* rather than consumed on the
+ * first render after it was made. Every arrow is disabled while a write is on
+ * the wire, so an effect that ran then would find no arrow to land on, fall
+ * through to the name field and throw the request away — which is exactly
+ * what the template editor did (M7's review: focus on the text box, not the
+ * arrow, after every move there). Requesting before the write and consuming
+ * after it also covers the write that fails: the list is unchanged, the
+ * arrows come back, and focus goes back to the one that was pressed.
+ *
+ * A ref rather than state for the request: it is written just before the
+ * list changes and read in the effect that runs after the change commits,
+ * so there is nothing to render from and no second render to cause.
  */
-export function useMoveFocus(
-  deps: readonly unknown[],
-  nameField: (rowId: string) => string,
-): MoveFocus {
+export function useMoveFocus({
+  deps,
+  inFlight,
+  nameField,
+}: {
+  deps: readonly unknown[];
+  inFlight: boolean;
+  nameField: (rowId: string) => string;
+}): MoveFocus {
   const buttons = useRef(new Map<string, RefObject<HTMLButtonElement | null>>());
-  const request = useRef<{ rowId: string; direction: MoveDirection } | null>(null);
+  const request = useRef<
+    | { kind: "row"; rowId: string; direction: MoveDirection }
+    | { kind: "field"; selector: string }
+    | null
+  >(null);
   const nameFieldRef = useRef(nameField);
   useEffect(() => {
     nameFieldRef.current = nameField;
   });
 
   useEffect(() => {
+    if (inFlight) return;
     const wanted = request.current;
     if (!wanted) return;
     request.current = null;
+
+    if (wanted.kind === "field") {
+      document.querySelector<HTMLElement>(wanted.selector)?.focus();
+      return;
+    }
+
     const { rowId, direction } = wanted;
     const other = direction === "up" ? "down" : "up";
     const candidates = [
@@ -136,7 +174,7 @@ export function useMoveFocus(
     }
     // The caller's deps are the trigger; the effect reads only refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [inFlight, ...deps]);
 
   return {
     buttonRef(rowId, direction) {
@@ -149,7 +187,10 @@ export function useMoveFocus(
       return ref;
     },
     requestFocus(rowId, direction) {
-      request.current = { rowId, direction };
+      request.current = { kind: "row", rowId, direction };
+    },
+    requestField(selector) {
+      request.current = { kind: "field", selector };
     },
   };
 }

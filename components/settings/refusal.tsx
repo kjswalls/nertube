@@ -24,15 +24,18 @@ export function Refusal({
   message,
   href,
   label,
+  id,
 }: {
   testId: string;
   message: string;
   /** Where the thing that caused the refusal is, if it is somewhere. */
   href?: string;
   label?: string;
+  /** For a field's `aria-describedby`, when this line is why it is invalid. */
+  id?: string;
 }) {
   return (
-    <p role="alert" data-testid={testId} className="text-[12px] leading-5 text-attention">
+    <p id={id} role="alert" data-testid={testId} className="text-[12px] leading-5 text-attention">
       {message}
       {href && label ? (
         <>

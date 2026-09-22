@@ -40,9 +40,26 @@ import {
  * screen is recomputed — so an edit made while an add was in flight is neither
  * lost under the server's answer nor applied twice.
  *
- * A failure rolls the screen back to `confirmed` — the row never took it — and
- * offers one Retry carrying the failed operation and everything parked behind
- * it, in order.
+ * ## Two kinds of failure, two answers
+ *
+ * A **refusal** — the server answered, and said no — is final: the operation
+ * that was refused comes off the screen (a refused edit's text is put back,
+ * a refused add's row disappears) and the sentence says why. Everything
+ * parked behind it stays on screen, unsaved, and goes with the next send or
+ * the Retry.
+ *
+ * A **transport failure** — no answer at all — is not final, and nothing
+ * comes off the screen: the operations that did not land stay drawn exactly
+ * as they were, the status line says nothing on screen has been lost (which
+ * is now true), and they are re-sent by the Retry *or by whatever the person
+ * does next*. M7's review found the earlier version rolling a typed edit
+ * back under a line saying nothing had been lost, and then dropping it for
+ * good on the next successful save.
+ *
+ * Either way the Retry carries only what did not land. The queue's `unsent`
+ * is how: `save` applies operations one at a time and reports the tail that
+ * was never applied, so a landed add is never inserted twice and a landed
+ * move is never swapped back (the review's blocker).
  *
  * ## Moves are relative until they are sent
  *
@@ -67,7 +84,7 @@ export interface TemplateEditor {
   readonly edit: (id: string, patch: { text?: string; estMinutes?: number }) => void;
   readonly remove: (id: string) => void;
   readonly move: (id: string, direction: "up" | "down") => void;
-  /** Re-send the operations that were rolled back. */
+  /** Re-send the operations that did not land. */
   readonly retry: () => void;
   /**
    * The text of the row most recently removed, once the server confirms it
@@ -177,21 +194,36 @@ export function useTemplateEditor({
     [stageId],
   );
 
+  /**
+   * Operations a transport failure left on screen and unsent. The next
+   * dispatch sends them first, so a person who carries on working after a
+   * dropped connection is not silently losing the edit they made before it.
+   */
+  const carried = useRef<readonly TemplateOp[]>([]);
+
   const queue = useSaveQueue<readonly TemplateOp[]>({
     merge: (queued, next) => [...queued, ...next],
     save: async (ops) => {
-      for (const op of ops) {
+      for (let index = 0; index < ops.length; index += 1) {
+        const op = ops[index];
         let result: TemplateResult | null;
         try {
           result = await runOp(op);
         } catch {
+          // No answer: this op and the rest stay on screen and unsent.
           return {
             ok: false,
             error:
               "Could not reach the server, so this is not saved. Nothing on screen has been lost — try again.",
+            unsent: ops.slice(index),
           };
         }
-        if (result && !result.ok) return { ok: false, error: result.error };
+        if (result && !result.ok) {
+          // Refused: this op is put back; the rest stay on screen, unsent.
+          pendingOps.current = pendingOps.current.filter((pending) => pending !== op);
+          redraw();
+          return { ok: false, error: result.error, unsent: ops.slice(index + 1) };
+        }
         if (result) confirmed.current = sortTemplates(result.items);
         // This operation is the first pending one: they are sent in order.
         pendingOps.current = pendingOps.current.filter((pending) => pending !== op);
@@ -200,11 +232,10 @@ export function useTemplateEditor({
       }
       return { ok: true };
     },
-    onFailure: () => {
-      // Everything not landed — the failed op and whatever was parked behind
-      // it — comes off the screen. The Retry payload carries the same ops.
-      pendingOps.current = [];
-      redraw();
+    onFailure: (_parked, payload) => {
+      // Nothing comes off the screen here: what is unsent is still drawn.
+      // It is remembered so the next send carries it.
+      carried.current = payload;
     },
   });
 
@@ -213,7 +244,9 @@ export function useTemplateEditor({
       setLastRemoved(null);
       pendingOps.current = [...pendingOps.current, op];
       redraw();
-      queue.send([op]);
+      const batch = [...carried.current, op];
+      carried.current = [];
+      queue.send(batch);
     },
     [queue, redraw],
   );
@@ -255,8 +288,14 @@ export function useTemplateEditor({
     if (queue.state.kind !== "error") return;
     const ops = queue.state.payload;
     if (ops.length === 0) return;
-    pendingOps.current = [...ops];
-    redraw();
+    // Still on screen since the failure; only a refused op was taken off, and
+    // a refused op is not in the payload.
+    const missing = ops.filter((op) => !pendingOps.current.includes(op));
+    if (missing.length > 0) {
+      pendingOps.current = [...pendingOps.current, ...missing];
+      redraw();
+    }
+    carried.current = [];
     queue.send(ops);
   }, [queue, redraw]);
 

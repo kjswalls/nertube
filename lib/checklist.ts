@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { TITLE_WARN_LENGTH } from "./packaging";
+import { cleanLabel } from "./text";
 
 /**
  * Everything about a stage checklist that is a *rule* rather than a screen.
@@ -136,7 +137,10 @@ export const MAX_ITEM_LENGTH = 300;
  */
 export const ChecklistItemTextSchema = z
   .string()
-  .transform((value) => value.trim())
+  // `cleanLabel`, not `trim()`: a row made of zero-width characters is a row
+  // with no words on it (lib/text.ts), and a NUL byte is refused by Postgres
+  // in a sentence nobody should read.
+  .transform(cleanLabel)
   .pipe(
     z
       .string()

@@ -12,6 +12,7 @@ import {
   type TemplateItem,
 } from "@/lib/checklist-templates";
 import type { StageKind } from "@/lib/defaults";
+import { cleanLabel } from "@/lib/text";
 
 import { isUnsaved } from "./use-template-editor";
 
@@ -58,6 +59,7 @@ export function TemplateRow({
   const quick = fitsTenMinutes(item.estMinutes, stageKind);
   const textId = useId();
   const minutesId = useId();
+  const minutesErrorId = useId();
 
   /*
     Drafts, tagged with the value they were taken from. A server-confirmed
@@ -81,7 +83,8 @@ export function TemplateRow({
   }
 
   function commitText(): void {
-    const next = textDraft.trim();
+    // `cleanLabel`: a row of zero-width characters is an emptied row.
+    const next = cleanLabel(textDraft);
     if (next === "") {
       // An emptied row is not an edit — it is a removal, and that is a button.
       setTextDraft(item.text);
@@ -167,6 +170,7 @@ export function TemplateRow({
             value={minutesDraft}
             disabled={unsaved}
             aria-invalid={minutesError ? true : undefined}
+            aria-describedby={minutesError ? minutesErrorId : undefined}
             onChange={(event) => setMinutesDraft(event.target.value)}
             onBlur={commitMinutes}
             onKeyDown={(event) => {
@@ -212,7 +216,7 @@ export function TemplateRow({
 
       {minutesError ? (
         <div className="pl-7">
-          <Refusal testId="template-minutes-error" message={minutesError} />
+          <Refusal id={minutesErrorId} testId="template-minutes-error" message={minutesError} />
         </div>
       ) : null}
     </li>

@@ -13,7 +13,7 @@ import {
   sortBuckets,
 } from "@/lib/bucket-settings";
 import { AXIS_LABEL, NO_BUCKETS, type BucketChoices } from "@/lib/buckets";
-import { isPermutationOf } from "@/lib/checklist-templates";
+import { isPermutationOf } from "@/lib/ordering";
 import { requireUser } from "@/lib/supabase/require-user";
 
 /**
@@ -517,8 +517,12 @@ export type RemoveBucketResult =
       ok: true;
       axis: "vertical" | "horizontal";
       buckets: SettingsBucket[];
-      /** The name it had, and how many videos were unfiled by its going. */
-      removed: { name: string; unfiled: number };
+      /**
+       * The name it had, and how many videos were unfiled by its going —
+       * the ones on the board (the row's count, the matrix's number) and,
+       * separately, the archived ones, which carried the bucket too.
+       */
+      removed: { name: string; unfiled: number; archived: number };
     }
   | { ok: false; error: string };
 
@@ -543,11 +547,24 @@ export async function removeBucket(input: RemoveBucketInput): Promise<RemoveBuck
   if ("error" in found) return { ok: false, error: found.error };
   const { bucket, slug } = found;
 
+  // Two counts, because the row's count is non-archived only (the matrix's
+  // number) and the key unfiles archived rows too. Reported apart so the
+  // sentence before the click and the note after it name the same facts.
   const column = bucket.axis === "vertical" ? "vertical_id" : "horizontal_id";
-  const { count, error: countError } = await supabase
-    .from("videos")
-    .select("id", { count: "exact", head: true })
-    .eq(column, bucketId);
+  const [{ count: live, error: liveError }, { count: archived, error: archivedError }] =
+    await Promise.all([
+      supabase
+        .from("videos")
+        .select("id", { count: "exact", head: true })
+        .eq(column, bucketId)
+        .is("archived_at", null),
+      supabase
+        .from("videos")
+        .select("id", { count: "exact", head: true })
+        .eq(column, bucketId)
+        .not("archived_at", "is", null),
+    ]);
+  const countError = liveError ?? archivedError;
   if (countError) {
     return { ok: false, error: `Could not check what is filed under ${bucket.name}: ${countError.message}` };
   }
@@ -569,6 +586,6 @@ export async function removeBucket(input: RemoveBucketInput): Promise<RemoveBuck
     ok: true,
     axis: bucket.axis,
     buckets: after.buckets,
-    removed: { name: bucket.name, unfiled: count ?? 0 },
+    removed: { name: bucket.name, unfiled: live ?? 0, archived: archived ?? 0 },
   };
 }

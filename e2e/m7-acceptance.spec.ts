@@ -339,8 +339,9 @@ test('toggle Repurposed off and rename Packaging on the settings screen: the boa
   // And the behaviour does not: on the video page the stage select offers the
   // new label and not the lane, moving into the renamed stage is allowed, and
   // moving *out* of it with no concept and no hook is refused by the gate —
-  // which names the missing fields, not the stage's old or new name, because
-  // `move_video` compares kinds.
+  // which names the missing field by the gate's wording and the stage by the
+  // channel's *new* label, because `move_video` compares kinds and the
+  // sentence is about the column the video is still in (M7's review).
   // The stage select lives in the Schedule section, the way m2-review opens it.
   await page.goto(`/videos/${videoId}?section=schedule`);
   await hydrated(page);
@@ -358,7 +359,7 @@ test('toggle Repurposed off and rename Packaging on the settings screen: the boa
   await select.selectOption(scriptingId);
   const status = page.getByTestId('stage-select-status');
   await expect(status).toContainText('Could not move to Scripting.');
-  await expect(status).toContainText('Packaging still needs');
+  await expect(status).toContainText('Packaging & hook still needs');
   await expect(select).toHaveValue(packagingId);
   const stored = await db.query<{ stage_id: string }>(
     'select stage_id from public.videos where id = $1',

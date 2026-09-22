@@ -318,8 +318,12 @@ test('editing a template leaves a video already in the stage untouched, and the 
     PACKAGING.length - 1,
   );
   await expect(editor.getByTestId('template-removed-note')).toContainText(
-    `Removed “${PACKAGING[3]}” from the template. The video already in Packaging (TTH) keeps it; the next one to enter will not get it.`,
+    `Removed “${PACKAGING[3]}” from the template. The video already in Packaging (TTH) keeps it; the next one to enter for the first time will not get it.`,
   );
+  // The row went with the button that removed it; focus moved to the row
+  // that took its place rather than falling on <body>.
+  await expect(editor.getByTestId('template-text').nth(3)).toBeFocused();
+  await expect(editor.getByTestId('template-text').nth(3)).toHaveValue(PACKAGING[4]);
 
   // Add one at the end, with its own estimate.
   const added = 'Read the title out loud to somebody who has not seen the video';
@@ -386,6 +390,11 @@ test('reorder persists, renumbers 1..n as one statement, and survives a reload',
     afterDown,
   );
   expect(await rowTexts(editor)).toEqual(afterDown);
+  // Focus followed the row to the same arrow, which is still offered — after
+  // the write settled, not on the text box the in-flight arrows fall through
+  // to (M7's review).
+  await expect(editor.getByTestId('template-save-status')).toHaveAttribute('data-state', 'saved');
+  await expect(editor.getByTestId('template-move-down').nth(1)).toBeFocused();
 
   // The row that is now third, up one — so the two moves compose.
   await editor.getByTestId('template-move-up').nth(2).click();
@@ -538,4 +547,165 @@ test('a stage with no template can be given one, and capture copies it like a mo
   await page.goto('/settings/checklists');
   await page.waitForURL(/\/settings\/checklists\/[^/?]+$/);
   await expect(page.getByTestId('settings-checklists')).toBeVisible();
+});
+
+/* -------------------------------------------------------------------------- */
+/* 5. The add form's refusal is the form's, and its controls are named        */
+/* -------------------------------------------------------------------------- */
+
+test('the add form refuses zero minutes in its own words, and every control names its stage', async ({
+  page,
+}) => {
+  await signIn(page);
+  await openSettings(page);
+  const editor = stageEditor(page, 'packaging');
+  await expect(rows(editor)).toHaveCount(PACKAGING.length);
+
+  // Nine add forms on one page: each control carries the stage's name, so a
+  // screen reader's form list is not nine "Add"s (M7's review).
+  const text = editor.getByRole('textbox', { name: 'New item for Packaging (TTH)' });
+  const minutes = editor.getByRole('spinbutton', { name: 'Minutes for the new Packaging (TTH) item' });
+  const add = editor.getByRole('button', { name: 'Add to Packaging (TTH)' });
+  await expect(text).toBeVisible();
+  await expect(minutes).toBeVisible();
+  await expect(add).toBeVisible();
+
+  // Zero minutes, submitted with Enter: the browser's own constraint check
+  // would swallow this at `min` with a tooltip and no submit (the bucket add
+  // forms had exactly that bug); the refusal is this form's, in a sentence,
+  // and no row is written.
+  await text.fill('Zero-minute probe');
+  await minutes.fill('0');
+  await minutes.press('Enter');
+  const error = editor.getByTestId('template-add-error');
+  await expect(error).toContainText('An item that takes no time is not an item');
+  await expect(minutes).toHaveAttribute('aria-invalid', 'true');
+  // ...and the box points at the reason, so it can be re-read on return.
+  expect(await minutes.getAttribute('aria-describedby')).toBe(await error.getAttribute('id'));
+  await expect(rows(editor)).toHaveCount(PACKAGING.length);
+  expect((await readTemplate('packaging')).length).toBe(PACKAGING.length);
+
+  // The Add button says the same thing.
+  await add.click();
+  await expect(error).toBeVisible();
+  await expect(rows(editor)).toHaveCount(PACKAGING.length);
+
+  // A row's own estimate box points at its refusal the same way.
+  await commit(editor.getByTestId('template-minutes').nth(0), '0');
+  const rowError = editor.getByTestId('template-minutes-error');
+  await expect(rowError).toBeVisible();
+  expect(await editor.getByTestId('template-minutes').nth(0).getAttribute('aria-describedby')).toBe(
+    await rowError.getAttribute('id'),
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* 6. A failure re-sends only what did not land, and loses nothing on screen */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Server actions are POSTs to the page's own address carrying a
+ * `Next-Action` header; nothing else on this page POSTs. The route below
+ * counts them and can hold, drop or pass each one, which is how a batch is
+ * made and how its third member is made to fail.
+ */
+function interceptActions(
+  page: Page,
+  decide: (n: number) => 'pass' | 'hold' | 'drop',
+): { count: () => number; stop: () => Promise<void> } {
+  let n = 0;
+  const handler = async (route: import('@playwright/test').Route) => {
+    const request = route.request();
+    if (request.method() !== 'POST' || !request.headers()['next-action']) {
+      await route.continue();
+      return;
+    }
+    n += 1;
+    const verdict = decide(n);
+    if (verdict === 'drop') {
+      await route.abort('failed');
+      return;
+    }
+    if (verdict === 'hold') await new Promise((resolve) => setTimeout(resolve, 2500));
+    await route.continue();
+  };
+  void page.route('**/settings/checklists/**', handler);
+  return {
+    count: () => n,
+    stop: () => page.unroute('**/settings/checklists/**', handler),
+  };
+}
+
+test('a batch that fails part-way re-sends only the unsent operations, and a failed edit stays on screen until it is sent', async ({
+  page,
+}) => {
+  await signIn(page);
+  await openSettings(page);
+
+  // Scheduled is seeded empty, so the rows below are the whole template.
+  const editor = stageEditor(page, 'scheduled');
+  await expect(editor.getByTestId('template-empty')).toBeVisible();
+  const text = editor.getByTestId('template-add-text');
+  const submit = editor.getByTestId('template-add-submit');
+
+  /*
+    The first add is held on the wire, so the second and third queue behind
+    it as one batch; the third's request is dropped. The batch is applied one
+    operation at a time, so R2 lands and R3 does not — and the Retry must
+    carry R3 alone. Re-sending the batch inserted R2 twice (the review's
+    blocker).
+  */
+  const first = interceptActions(page, (n) => (n === 1 ? 'hold' : n === 3 ? 'drop' : 'pass'));
+  await text.fill('R1');
+  await submit.click();
+  await text.fill('R2');
+  await submit.click();
+  await text.fill('R3');
+  await submit.click();
+
+  const status = editor.getByTestId('template-save-status');
+  await expect(status).toHaveAttribute('data-state', 'error');
+  await expect(status).toContainText('Nothing on screen has been lost');
+  expect(first.count()).toBe(3);
+  await first.stop();
+
+  // Postgres has the two that landed; the screen has all three, the third
+  // still marked unsaved rather than gone.
+  expect((await readTemplate('scheduled')).map((r) => r.text)).toEqual(['R1', 'R2']);
+  expect(await rowTexts(editor)).toEqual(['R1', 'R2', 'R3']);
+  await expect(editor.locator('[data-testid="template-row"][data-unsaved="true"]')).toHaveCount(1);
+
+  await editor.getByTestId('template-save-status-retry').click();
+  await expect(status).toHaveAttribute('data-state', 'saved');
+  await expect.poll(async () => (await readTemplate('scheduled')).map((r) => r.text)).toEqual([
+    'R1',
+    'R2',
+    'R3',
+  ]);
+  expect(await rowTexts(editor)).toEqual(['R1', 'R2', 'R3']);
+  await expect(editor.locator('[data-testid="template-row"][data-unsaved="true"]')).toHaveCount(0);
+  expect((await readTemplate('scheduled')).map((r) => r.position)).toEqual([1, 2, 3]);
+  // Retry's button is gone with the error; focus landed somewhere useful
+  // rather than on <body> — the add box, since what was retried was an add.
+  await expect(editor.getByTestId('template-add-text')).toBeFocused();
+
+  /*
+    A failed edit. The typed text stays in the box — the status line says
+    nothing on screen has been lost, and that has to be true — and the next
+    thing the person does carries it, so it is not silently dropped under a
+    later "Saved" (the review's major).
+  */
+  const second = interceptActions(page, () => 'drop');
+  await commit(editor.getByTestId('template-text').nth(0), 'Edited offline');
+  await expect(status).toHaveAttribute('data-state', 'error');
+  await expect(editor.getByTestId('template-text').nth(0)).toHaveValue('Edited offline');
+  expect((await readTemplate('scheduled'))[0].text).toBe('R1');
+  await second.stop();
+
+  // Another operation, with the wire back: the failed edit goes first.
+  await commit(editor.getByTestId('template-minutes').nth(1), '7');
+  await expect(status).toHaveAttribute('data-state', 'saved');
+  await expect.poll(async () => (await readTemplate('scheduled'))[0].text).toBe('Edited offline');
+  expect((await readTemplate('scheduled'))[1].est_minutes).toBe(7);
+  await expect(editor.getByTestId('template-text').nth(0)).toHaveValue('Edited offline');
 });

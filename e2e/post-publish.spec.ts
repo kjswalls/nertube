@@ -681,7 +681,13 @@ test('the Repurposed lane can be switched off, unless it is holding something', 
 
   await openPublish(page, ids.published);
   await expect(page.getByTestId('repurposed-toggle')).toBeDisabled();
+  // The settings area's one refusal line, with the link the settings row has.
   await expect(page.getByTestId('repurposed-note')).toContainText(
     'switching the stage off would hide it',
+  );
+  await expect(page.getByTestId('repurposed-note')).toHaveRole('alert');
+  await expect(page.getByTestId('repurposed-note-link')).toHaveAttribute(
+    'href',
+    `/c/${CHANNEL.slug}/board`,
   );
 });

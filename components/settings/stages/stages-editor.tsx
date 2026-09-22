@@ -65,10 +65,11 @@ export function StagesEditor({
   const [moving, setMoving] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
 
-  const focus = useMoveFocus(
-    [list, moving],
-    (stageId) => `[data-stage-id="${stageId}"] [data-testid="stage-name"]`,
-  );
+  const focus = useMoveFocus({
+    deps: [list],
+    inFlight: moving !== null,
+    nameField: (stageId) => `[data-stage-id="${stageId}"] [data-testid="stage-name"]`,
+  });
 
   /* ---------------------------------------------------------------- moves -- */
 
@@ -79,6 +80,9 @@ export function StagesEditor({
 
     setMoving(stageId);
     setMoveError(null);
+    // Asked for before the write, consumed after it settles: a failed move
+    // leaves the list as it was and focus goes back to the arrow pressed.
+    focus.requestFocus(stageId, direction);
     try {
       const result = await moveStage({ stageId, direction });
       if (!result.ok) {
@@ -86,7 +90,6 @@ export function StagesEditor({
         return;
       }
       const positions = new Map(result.order.map((row) => [row.id, row.position]));
-      focus.requestFocus(stageId, direction);
       setList((current) =>
         [...current]
           .map((stage) => ({ ...stage, position: positions.get(stage.id) ?? stage.position }))
@@ -135,6 +138,7 @@ export function StagesEditor({
           <StageRow
             key={stage.id}
             stage={stage}
+            channelSlug={channel.slug}
             index={index}
             total={list.length}
             upVerdict={moving !== null ? IN_FLIGHT : canMove(list, index, "up")}
@@ -149,6 +153,14 @@ export function StagesEditor({
               router.refresh();
             }}
             onRemoved={() => {
+              // The row is gone with the button that removed it; focus goes
+              // to the next row's name, or to the add form when it was last.
+              const next = list[index + 1] ?? list[index - 1];
+              focus.requestField(
+                next
+                  ? `[data-stage-id="${next.id}"] [data-testid="stage-name"]`
+                  : "#add-stage-name",
+              );
               setList((current) => current.filter((other) => other.id !== stage.id));
               router.refresh();
             }}
@@ -221,11 +233,14 @@ function AddStageForm({
       }
       onAdded({ ...result.stage, occupied: 0 });
       setName("");
-      input.current?.focus();
     } catch {
       setError("Could not reach the server, so nothing was added. Try again.");
     } finally {
       setBusy(false);
+      // Back to the box on every outcome: the next stage, or the same name
+      // to fix. The button is not disabled while the add is out, so focus
+      // was never dropped; this is for the Enter-in-the-box path too.
+      input.current?.focus();
     }
   }
 
@@ -257,7 +272,10 @@ function AddStageForm({
         <button
           type="submit"
           data-testid="add-stage-submit"
-          disabled={busy || trimmed === "" || duplicate}
+          // Not disabled while busy: `submit` ignores re-entry, and a button
+          // that disables itself under the cursor drops focus on <body>.
+          aria-busy={busy ? true : undefined}
+          disabled={trimmed === "" || duplicate}
           className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
         >
           {busy ? "Adding…" : "Add stage"}
@@ -268,8 +286,8 @@ function AddStageForm({
       ) : (
         <p data-testid="add-stage-status" className="text-[12px] leading-5 text-muted">
           It lands at the end of the board, switched on, with no behaviour: no
-          gate, no badge, no template, and not on /now&rsquo;s path. Move it
-          with the arrows.
+          gate, no badge, and not on /now&rsquo;s path. Its checklist template
+          starts empty and is edited under Checklists. Move it with the arrows.
         </p>
       )}
     </form>

@@ -72,12 +72,15 @@ export interface LinkableDay {
 export function VideoFilmingDay({
   videoId,
   videoTitle,
+  filmingName,
   today,
   currentDayId,
   days,
 }: {
   videoId: string;
   videoTitle: string;
+  /** The channel's label for its filming-kind stage. */
+  filmingName: string;
   /** `YYYY-MM-DD`, from the page's one clock read. */
   today: string;
   currentDayId: string | null;
@@ -317,8 +320,8 @@ export function VideoFilmingDay({
       ) : null}
 
       <p className="text-[11px] text-muted">
-        Filming is the one step that needs a real block of time. A day gathers
-        videos from every channel — one creator, one camera.
+        {filmingName} is the one step that needs a real block of time. A day
+        gathers videos from every channel — one creator, one camera.
       </p>
     </div>
   );

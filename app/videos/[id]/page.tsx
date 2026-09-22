@@ -11,7 +11,8 @@ import {
   type EvidenceFacts,
 } from "@/lib/checklist";
 import { readPaged } from "@/lib/paged";
-import { compareKinds } from "@/lib/defaults";
+import { compareKinds, isStageKind, type StageKind } from "@/lib/defaults";
+import { stageName } from "@/lib/channel-settings";
 import { GATE_ANCHOR, readHooks, readTitleCandidates } from "@/lib/packaging";
 import {
   cacheBusted,
@@ -178,11 +179,14 @@ export default async function VideoDetailPage({
     // column order. `position` is display order and this is a display list —
     // behaviour (the gate, "the next stage") compares CORE_KIND_ORDER instead,
     // and that comparison happens inside `move_video`, not here.
+    // Every stage, switched-off ones included, because two things are read
+    // from the list: the select's options (enabled only, below) and what
+    // this channel calls each kind, for the sentences on this page that name
+    // a column ("nothing leaves Packaging", "on the way into Scripting").
     supabase
       .from("stages")
-      .select("id, name, position")
+      .select("id, name, kind, position, is_enabled")
       .eq("channel_id", video.channel_id)
-      .eq("is_enabled", true)
       .order("position", { ascending: true }),
     /*
       The current stage's checklist, and only the current stage's.
@@ -442,10 +446,20 @@ export default async function VideoDetailPage({
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
 
-  const flowStages: FlowStage[] = (stageRows ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-  }));
+  const flowStages: FlowStage[] = (stageRows ?? [])
+    .filter((row) => row.is_enabled)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+    }));
+
+  // The channel's own label for each core kind, falling back to the seed's
+  // word for a kind a hand-edited channel is missing.
+  const names: Record<string, string> = {};
+  for (const row of stageRows ?? []) {
+    if (isStageKind(row.kind)) names[row.kind] = row.name;
+  }
+  const nameOf = (kind: StageKind): string => names[kind] ?? stageName({}, kind);
 
   /*
     The filming days this video could be put on (M6).
@@ -588,6 +602,10 @@ export default async function VideoDetailPage({
                 <>
                   <PackagingBlock
                     videoId={video.id}
+                    stageNames={{
+                      packaging: nameOf("packaging"),
+                      scripting: nameOf("scripting"),
+                    }}
                     initial={{
                       title: video.title,
                       thumbnailConcept: video.thumbnail_concept,
@@ -600,6 +618,7 @@ export default async function VideoDetailPage({
                       <ConceptSketch
                         key="concept-sketch"
                         videoId={video.id}
+                        packagingName={nameOf("packaging")}
                         userId={user.id}
                         title={video.title}
                         url={sketchUrl}
@@ -668,6 +687,7 @@ export default async function VideoDetailPage({
                     compareKinds(sectionFacts.stageKind, "scripting") >= 0
                   }
                   stageName={stage?.name ?? "this stage"}
+                  scriptingName={nameOf("scripting")}
                 />
               ),
 
@@ -707,6 +727,7 @@ export default async function VideoDetailPage({
                 <FlowFields
                   videoId={video.id}
                   videoTitle={video.title}
+                  filmingName={nameOf("filming")}
                   channelSlug={channel?.slug ?? ""}
                   stages={flowStages}
                   currentStageId={video.stage_id}
@@ -772,6 +793,7 @@ export default async function VideoDetailPage({
                       : null
                   }
                   repurposedOccupied={repurposedOccupied ?? 0}
+                  channelSlug={channel?.slug ?? ""}
                 />
               ),
             }}

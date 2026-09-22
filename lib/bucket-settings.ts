@@ -1,6 +1,15 @@
 import { z } from "zod";
 
 import { AXIS_LABEL, type BucketAxis } from "./buckets";
+import {
+  movedByPosition,
+  nameTaken,
+  nextPosition,
+  sortByPosition,
+  type MoveDirection,
+  type Positioned,
+} from "./ordering";
+import { cleanLabel } from "./text";
 
 /**
  * Everything about editing a channel's buckets that is a rule rather than a
@@ -35,9 +44,15 @@ export const BUCKET_NAME_MAX = 40;
 
 export const BucketNameSchema = z
   .string({ error: "A bucket needs a name." })
-  .trim()
-  .min(1, "A bucket needs a name — a row with no heading is one nobody can file under.")
-  .max(BUCKET_NAME_MAX, `Keep a bucket name under ${BUCKET_NAME_MAX} characters; it is a matrix heading.`);
+  // Invisible characters are not a heading; `lib/text.ts` says why, and the
+  // database's `has_visible_text()` CHECK says it again.
+  .transform(cleanLabel)
+  .pipe(
+    z
+      .string()
+      .min(1, "A bucket needs a name — a row with no heading is one nobody can file under.")
+      .max(BUCKET_NAME_MAX, `Keep a bucket name under ${BUCKET_NAME_MAX} characters; it is a matrix heading.`),
+  );
 
 /**
  * Two buckets on one axis of one channel may not share a name, whatever the
@@ -49,13 +64,7 @@ export const BucketNameSchema = z
  * same word on them. The rule is stated here, case-insensitively, and the
  * database's is the backstop.
  */
-export function bucketNameTaken(
-  name: string,
-  others: readonly { readonly name: string }[],
-): boolean {
-  const wanted = name.trim().toLocaleLowerCase();
-  return others.some((other) => other.name.trim().toLocaleLowerCase() === wanted);
-}
+export const bucketNameTaken: typeof nameTaken = nameTaken;
 
 /** The sentence for a name the axis already has. */
 export function duplicateSentence(axis: BucketAxis, name: string): string {
@@ -188,27 +197,16 @@ export function unfiledSentence(
 /* Order                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** The least a bucket has to be for the order helpers to move it. */
-export interface OrderedBucket {
-  readonly id: string;
-  readonly position: number;
-}
+// The arithmetic is `lib/ordering.ts`'s, shared with the stages and template
+// editors. The names below are the ones the bucket editor and its action have
+// always imported.
 
-/** Position ascending, then id, so the comparator is total before a write. */
-export function compareBuckets<T extends OrderedBucket>(a: T, b: T): number {
-  if (a.position !== b.position) return a.position - b.position;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
+export type OrderedBucket = Positioned;
 
-export function sortBuckets<T extends OrderedBucket>(items: readonly T[]): T[] {
-  return [...items].sort(compareBuckets);
-}
+export const sortBuckets: <T extends OrderedBucket>(items: readonly T[]) => T[] = sortByPosition;
 
 /** Where a new bucket goes: after the last one on its axis. */
-export function nextBucketPosition(items: readonly OrderedBucket[]): number {
-  if (items.length === 0) return 1;
-  return Math.max(...items.map((item) => item.position)) + 1;
-}
+export const nextBucketPosition = nextPosition;
 
 /**
  * The axis with one bucket moved one step, renumbered 1..n, or `null` when the
@@ -219,15 +217,7 @@ export function nextBucketPosition(items: readonly OrderedBucket[]): number {
 export function moveBucket<T extends OrderedBucket>(
   items: readonly T[],
   id: string,
-  direction: "up" | "down",
+  direction: MoveDirection,
 ): T[] | null {
-  const sorted = sortBuckets(items);
-  const index = sorted.findIndex((item) => item.id === id);
-  if (index === -1) return null;
-  const target = direction === "up" ? index - 1 : index + 1;
-  if (target < 0 || target >= sorted.length) return null;
-  const swapped = [...sorted];
-  swapped[index] = sorted[target];
-  swapped[target] = sorted[index];
-  return swapped.map((item, position) => ({ ...item, position: position + 1 }));
+  return movedByPosition(items, id, direction);
 }

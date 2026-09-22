@@ -456,13 +456,25 @@ export async function confirmLive(
       one rule.
     */
     const missing = readGateField(moveError.message);
+    if (missing) {
+      // Named by the channel's own label for its packaging stage, as the
+      // board's refusal is.
+      const { data: packaging } = await supabase
+        .from("stages")
+        .select("name")
+        .eq("channel_id", video.channel_id)
+        .eq("kind", "packaging")
+        .maybeSingle();
+      return {
+        ok: false,
+        // The URL landed; only the move did not. Said plainly, because the next
+        // thing the user does depends on which half failed.
+        error: `The URL is saved, but it was not moved: ${packaging?.name ?? "Packaging"} still needs ${GATE_WORDING[missing]}.`,
+      };
+    }
     return {
       ok: false,
-      // The URL landed; only the move did not. Said plainly, because the next
-      // thing the user does depends on which half failed.
-      error: missing
-        ? `The URL is saved, but it was not moved: packaging still needs ${GATE_WORDING[missing]}.`
-        : `The URL is saved, but the move was refused: ${moveError.message}`,
+      error: `The URL is saved, but the move was refused: ${moveError.message}`,
     };
   }
   if (!moved) {

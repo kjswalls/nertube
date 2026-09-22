@@ -7,6 +7,8 @@ import { isStageKind, type StageKind } from "@/lib/defaults";
 import {
   StageNameSchema,
   canMove,
+  ideaStaysOnSentence,
+  isIdeaStageRefusal,
   moved,
   nameTaken,
   occupiedHref,
@@ -32,7 +34,8 @@ import { requireUser } from "@/lib/supabase/require-user";
  * matter into two SQL functions:
  *
  * - `set_stage_enabled(stage, enabled)` refuses a stage holding non-archived
- *   videos (`occupied:<n>`) and refuses switching off the last enabled stage;
+ *   videos (`occupied:<n>`), refuses switching off the Idea stage (capture
+ *   must always have a column to land in — 0008) and the last enabled stage;
  * - `reorder_stages(channel, ids)` writes the whole order in ONE statement —
  *   the `unique (channel_id, position)` is deferrable precisely so that a swap
  *   can pass through a colliding intermediate state — and refuses a core
@@ -366,6 +369,9 @@ export async function setStageEnabled(
         error: occupiedSentence(stage.name, occupied),
       };
     }
+    if (isIdeaStageRefusal(error.message)) {
+      return { ok: false, error: ideaStaysOnSentence(stage.name) };
+    }
     if (/last enabled stage/.test(error.message)) {
       return {
         ok: false,
@@ -450,9 +456,11 @@ export async function addStage(input: AddStageInput): Promise<AddStageResult> {
         ? 1
         : Math.max(...order.stages.map((stage) => stage.position)) + 1;
 
+    // `kind` and `is_enabled` are not named: neither is in the client's
+    // INSERT grant (0008), so the row is inert and on by construction.
     const { data, error } = await supabase
       .from("stages")
-      .insert({ channel_id: channelId, name, position, kind: null })
+      .insert({ channel_id: channelId, name, position })
       .select("id, name, position, is_enabled")
       .maybeSingle();
 

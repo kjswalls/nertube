@@ -217,6 +217,18 @@ export async function captureVideo(input: CaptureVideoInput): Promise<CaptureSta
   });
 
   if (error || !video) {
+    /*
+      `capture_video` refuses a switched-off Idea stage (0008) the way
+      `move_video` refuses any switched-off stage. `set_stage_enabled` will
+      not switch Idea off, so this is the hand-edited-row case — but a
+      refusal is still a sentence, not `stage Idea is disabled`.
+    */
+    if (error && /is disabled$/.test(error.message)) {
+      return {
+        ok: false,
+        error: `${channel.name}'s Idea stage is switched off, so there is no column for a new idea to land in. Switch it on in Settings first.`,
+      };
+    }
     return {
       ok: false,
       error: `Could not capture that: ${error?.message ?? "the database returned no row."}`,
@@ -504,8 +516,47 @@ export async function updateVideo(
     patch.horizontal_id = fields.horizontalId;
   }
   if (fields.tags !== undefined) patch.tags = [...fields.tags];
+
+  /*
+    Archive and restore are not a column write any more.
+
+    `archived_at` left the client's UPDATE grant in 0008_settings_boundary.sql:
+    a restore puts the video back in the column it left, and that column may
+    have been switched off in between — archived videos do not count toward
+    the occupancy refusal, and rightly (PLAN.md review item 10) — so a plain
+    `archived_at = null` was a way to put a live video where the board and
+    /now cannot show it. `set_video_archived` refuses that restore with the
+    stage's name; the sentence below says where to go.
+  */
   if (fields.archived !== undefined) {
-    patch.archived_at = fields.archived ? new Date().toISOString() : null;
+    const { data: row, error } = await supabase.rpc("set_video_archived", {
+      p_video: videoId,
+      p_archived: fields.archived,
+    });
+    if (error) {
+      const disabled = /^stage disabled:(.+)$/.exec(error.message);
+      if (disabled) {
+        return {
+          ok: false,
+          error: `${disabled[1]} is switched off, so restoring this video would hide it from the board and from /now. Switch ${disabled[1]} on in Settings first, or move the video to another stage.`,
+        };
+      }
+      if (/not found for this user/.test(error.message)) {
+        return { ok: false, error: "That video does not exist any more." };
+      }
+      return { ok: false, error: `That did not save: ${error.message}` };
+    }
+    if (!row) return { ok: false, error: "That video does not exist any more." };
+
+    // The archive button sends the flag alone. Should a patch ever carry
+    // other fields beside it, they take the ordinary path below, against the
+    // version the function just stamped.
+    const rest = { ...fields, archived: undefined };
+    const hasOthers = Object.values(rest).some((value) => value !== undefined);
+    if (!hasOthers) {
+      await revalidateVideoViews(supabase, videoId, row.channel_id);
+      return { ok: true, video: stateOf(row) };
+    }
   }
 
   if (fields.waitingOn !== undefined) {
@@ -614,22 +665,30 @@ export async function updateVideo(
     slug is looked up rather than passed in, so a caller cannot aim a
     revalidation at a path it does not own.
   */
+  await revalidateVideoViews(supabase, videoId, data.channel_id);
+
+  return { ok: true, video: stateOf(data) };
+}
+
+/**
+ * The detail page and the video's board, in that order; then the calendar,
+ * which is cross-channel and needs no slug — `target_publish_date` is the
+ * whole of what it draws, and archiving takes a video off the grid too. The
+ * slug is looked up rather than passed in, so a caller cannot aim a
+ * revalidation at a path it does not own.
+ */
+async function revalidateVideoViews(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  videoId: string,
+  channelId: string,
+): Promise<void> {
   revalidatePath(`/videos/${videoId}`);
-
-  /*
-    And the calendar, which is cross-channel and therefore needs no slug.
-
-    `target_publish_date` is one of the fields this action writes, and it is the
-    whole of what `/calendar` draws — archiving takes a video off the grid too.
-    Without this the Router Cache can hand back a month rendered before the date
-    was changed.
-  */
   revalidatePath("/calendar");
 
   const { data: channel } = await supabase
     .from("channels")
     .select("slug")
-    .eq("id", data.channel_id)
+    .eq("id", channelId)
     .maybeSingle();
 
   if (channel) {
@@ -638,6 +697,4 @@ export async function updateVideo(
     // can change, and the matrix's counts are the filing itself.
     revalidatePath(`/c/${channel.slug}/ideas`);
   }
-
-  return { ok: true, video: stateOf(data) };
 }

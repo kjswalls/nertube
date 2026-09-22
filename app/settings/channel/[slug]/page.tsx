@@ -4,6 +4,8 @@ import type { ChannelSettings } from "@/app/actions/channels";
 import { AppShell } from "@/components/app-shell";
 import { ChannelForm } from "@/components/settings/channel/channel-form";
 import { SettingsHeader } from "@/components/settings/settings-header";
+import type { StageNames } from "@/lib/channel-settings";
+import { isStageKind } from "@/lib/defaults";
 import { requireUser } from "@/lib/supabase/require-user";
 
 export async function generateMetadata({
@@ -19,10 +21,13 @@ export async function generateMetadata({
  * `/settings/channel/[slug]` — the channel's own settings: the voice guide,
  * the script template, and the three thresholds.
  *
- * One read of one row. Everything on this page is a column on `channels`,
- * and every field saves on blur through `updateChannelSettings`, which reads
- * the row back and answers with what was stored. A slug that does not belong
- * to this user is a 404, like the board's.
+ * One read of one row, plus the channel's stage names. Everything edited on
+ * this page is a column on `channels`, and every field saves on blur through
+ * `updateChannelSettings`, which reads the row back and answers with what was
+ * stored. The stage names are read so the notes under the fields say
+ * "copied on the way into <what you call Scripting>" rather than the seed's
+ * word for a column that may have been renamed next door. A slug that does
+ * not belong to this user is a 404, like the board's.
  */
 export default async function ChannelSettingsPage({
   params,
@@ -44,6 +49,15 @@ export default async function ChannelSettingsPage({
   const channels = channelRows ?? [];
   const channel = channels.find((row) => row.slug === slug);
   if (!channel) notFound();
+
+  const { data: stageRows } = await supabase
+    .from("stages")
+    .select("kind, name")
+    .eq("channel_id", channel.id);
+  const stageNames: Record<string, string> = {};
+  for (const row of stageRows ?? []) {
+    if (isStageKind(row.kind)) stageNames[row.kind] = row.name;
+  }
 
   const settings: ChannelSettings = {
     voiceGuide: channel.voice_guide,
@@ -68,7 +82,12 @@ export default async function ChannelSettingsPage({
           </p>
         </SettingsHeader>
 
-        <ChannelForm channelId={channel.id} channelSlug={channel.slug} initial={settings} />
+        <ChannelForm
+          channelId={channel.id}
+          channelSlug={channel.slug}
+          stageNames={stageNames as StageNames}
+          initial={settings}
+        />
       </div>
     </AppShell>
   );

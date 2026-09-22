@@ -34,6 +34,7 @@ import type { RowIssue } from "./row-issue";
  */
 export function HooksEditor({
   anchorId,
+  scriptingName,
   hooks,
   issue,
   onAdd,
@@ -51,6 +52,8 @@ export function HooksEditor({
    * followed by hunting.
    */
   anchorId: string;
+  /** The channel's label for the stage the chosen hook is spliced in on the way into. */
+  scriptingName: string;
   hooks: readonly Hook[];
   /** The element the last save could not write, and why. Shown on its own row. */
   issue: RowIssue | null;
@@ -125,8 +128,8 @@ export function HooksEditor({
 
       <p className="text-xs text-muted">
         Write three openings and pick the strongest. The chosen one is what gets
-        spliced into the script template at Scripting, and it is what the gate
-        counts.
+        spliced into the script template at {scriptingName}, and it is what the
+        gate counts.
       </p>
 
       <form

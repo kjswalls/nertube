@@ -64,6 +64,15 @@ begin
   if n <> 9 then raise exception 'FAILED: a-main is down to % core stages', n; end if;
 end $$;
 
+-- The two blocks below are about the constraint, not the grant, so they run as
+-- the owner: since 0007_stage_settings.sql a client cannot write `position` at
+-- all and goes through reorder_stages(), which 35_stage_settings.test.sql
+-- exercises. What is proved here is the property that function relies on.
+-- Since 0008_settings_boundary.sql the same is true of `kind` on INSERT: a
+-- client insert may not name it (20_column_privileges.test.sql), so the
+-- partial unique below is exercised as the owner too.
+reset role;
+
 do $$
 declare ok boolean := false; st text;
 begin
@@ -90,11 +99,6 @@ begin
   if n <> 2 then raise exception 'FAILED: inert stages are constrained by kind, got %', n; end if;
 end $$;
 
--- The two blocks below are about the constraint, not the grant, so they run as
--- the owner: since 0007_stage_settings.sql a client cannot write `position` at
--- all and goes through reorder_stages(), which 35_stage_settings.test.sql
--- exercises. What is proved here is the property that function relies on.
-reset role;
 
 do $$
 declare

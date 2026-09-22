@@ -9,10 +9,13 @@ set local role authenticated;
 
 do $$
 declare
-  cols text[] := array['stage_id','stage_entered_at','published_at','shipped_role'];
+  -- archived_at joined the list in 0008_settings_boundary.sql: archive and
+  -- restore go through set_video_archived(), which refuses a restore into a
+  -- switched-off stage -- a plain PATCH would not.
+  cols text[] := array['stage_id','stage_entered_at','published_at','shipped_role','archived_at'];
   vals text[] := array[
     format('%L::uuid', fx.stage(fx.channel('a-main'), 'packaging')),
-    'now()', 'now()', $q$'safe'$q$];
+    'now()', 'now()', $q$'safe'$q$, 'now()'];
   i int; ok boolean; st text; msg text;
 begin
   for i in 1 .. array_length(cols, 1) loop
@@ -271,6 +274,67 @@ begin
   if st <> '42501' then raise exception 'FAILED: expected 42501, got %', st; end if;
 end $$;
 
+-- channels, from the client: the settings columns write, slug and name do not.
+do $$
+declare ok boolean; st text; n int;
+begin
+  update public.channels set wip_threshold = 3, stale_days = 9, voice_guide = 'calm'
+   where id = fx.channel('a-main');
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'FAILED: a client cannot write the channel settings columns'; end if;
+
+  ok := false;
+  begin
+    update public.channels set slug = '' where id = fx.channel('a-main');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client blanked channels.slug'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501 on slug, got %', st; end if;
+
+  ok := false;
+  begin
+    update public.channels set name = 'Renamed by PATCH' where id = fx.channel('a-main');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client rewrote channels.name'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501 on name, got %', st; end if;
+end $$;
+
+-- stages, from the client: an insert that names kind or is_enabled is refused
+-- by the grant; one that names neither lands as an inert, enabled stage.
+do $$
+declare ok boolean; st text; s public.stages;
+begin
+  ok := false;
+  begin
+    insert into public.stages (user_id, channel_id, name, position, kind)
+    values (fx.user_a(), fx.channel('a-side'), 'Forged core', 11, 'packaging');
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client inserted a stage naming kind'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501 on kind, got %', st; end if;
+
+  ok := false;
+  begin
+    insert into public.stages (user_id, channel_id, name, position, is_enabled)
+    values (fx.user_a(), fx.channel('a-side'), 'Forged off', 11, false);
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: a client inserted a switched-off stage'; end if;
+  if st <> '42501' then raise exception 'FAILED: expected 42501 on is_enabled, got %', st; end if;
+
+  insert into public.stages (channel_id, name, position)
+  values (fx.channel('a-side'), 'Sponsor review', 11)
+  returning * into s;
+  if s.kind is not null or not s.is_enabled or s.user_id <> fx.user_a() then
+    raise exception 'FAILED: an added stage is not (kind null, enabled, mine)';
+  end if;
+end $$;
+
 -- The catalogue itself: the four columns carry no UPDATE grant for authenticated.
 reset role;
 do $$
@@ -280,7 +344,7 @@ begin
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'videos'
      and privilege_type = 'UPDATE' and grantee = 'authenticated'
-     and column_name in ('stage_id','stage_entered_at','published_at','shipped_role');
+     and column_name in ('stage_id','stage_entered_at','published_at','shipped_role','archived_at');
   if n <> 0 then raise exception 'FAILED: % protected video columns are still UPDATE-grantable', n; end if;
 
   select count(*) into n
@@ -297,20 +361,44 @@ begin
      and column_name in ('id', 'created_at');
   if n <> 0 then raise exception 'FAILED: % identity columns are still UPDATE-grantable', n; end if;
 
-  -- stages: kind, id, created_at and — since 0007 — position and is_enabled
-  -- are out; user_id, channel_id and name remain.
+  -- stages: kind, id, created_at, position and is_enabled (0007) and
+  -- user_id and channel_id (0008) are out; only the label remains.
   select count(*) into n
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
      and privilege_type = 'UPDATE' and grantee = 'authenticated'
-     and column_name in ('kind', 'position', 'is_enabled');
+     and column_name in ('kind', 'position', 'is_enabled', 'channel_id', 'user_id');
   if n <> 0 then raise exception 'FAILED: % protected stage columns are still UPDATE-grantable', n; end if;
 
   select count(*) into n
     from information_schema.column_privileges
    where table_schema = 'public' and table_name = 'stages'
      and privilege_type = 'UPDATE' and grantee = 'authenticated';
-  if n <> 3 then raise exception 'FAILED: % stage columns are updatable, expected 3', n; end if;
+  if n <> 1 then raise exception 'FAILED: % stage columns are updatable, expected 1 (name)', n; end if;
+
+  -- stages INSERT (0008): an added stage is always kind null and enabled.
+  select count(*) into n
+    from information_schema.column_privileges
+   where table_schema = 'public' and table_name = 'stages'
+     and privilege_type = 'INSERT' and grantee = 'authenticated'
+     and column_name in ('kind', 'is_enabled', 'id', 'created_at');
+  if n <> 0 then raise exception 'FAILED: % protected stage columns are INSERT-grantable', n; end if;
+
+  -- channels (0008): the five settings columns and nothing else. slug and
+  -- name are set by create_channel and editable nowhere; a client that could
+  -- blank the slug would leave the channel unreachable at /c//board.
+  select count(*) into n
+    from information_schema.column_privileges
+   where table_schema = 'public' and table_name = 'channels'
+     and privilege_type = 'UPDATE' and grantee = 'authenticated'
+     and column_name in ('voice_guide', 'script_template', 'wip_threshold', 'stale_days', 'expected_ctr');
+  if n <> 5 then raise exception 'FAILED: only % of the 5 channel settings columns are updatable', n; end if;
+
+  select count(*) into n
+    from information_schema.column_privileges
+   where table_schema = 'public' and table_name = 'channels'
+     and privilege_type = 'UPDATE' and grantee = 'authenticated';
+  if n <> 5 then raise exception 'FAILED: % channel columns are updatable, expected 5', n; end if;
 end $$;
 
 -- TRUNCATE is not subject to RLS, so a role holding it empties a table for every

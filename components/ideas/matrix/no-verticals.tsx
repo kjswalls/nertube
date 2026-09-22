@@ -83,7 +83,13 @@ export function NoVerticals({
             data-testid="add-buckets"
             className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Name your pillars
+            {/* The link says what is missing, as the heading does: pillars,
+                formats, or both. */}
+            {missing.length === 2
+              ? "Set up buckets"
+              : verticals.length === 0
+                ? "Name your pillars"
+                : "Add formats"}
           </Link>
 
           <a

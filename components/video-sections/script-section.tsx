@@ -30,6 +30,7 @@ export function ScriptSection({
   script,
   reachedScripting,
   stageName,
+  scriptingName,
 }: {
   /** `videos.script`, or null when the video has never entered Scripting. */
   script: string | null;
@@ -37,6 +38,13 @@ export function ScriptSection({
   reachedScripting: boolean;
   /** The current stage's name, for the sentence explaining an empty script. */
   stageName: string;
+  /**
+   * What this channel calls its scripting-kind stage. The sentence below
+   * names both the column the video is in and the one it is going to, and
+   * naming the first by its label and the second by the seed's word was one
+   * sentence with two vocabularies (M7's review).
+   */
+  scriptingName: string;
 }) {
   const text = script?.trim() ?? "";
 
@@ -51,7 +59,7 @@ export function ScriptSection({
           Script
         </h2>
         <p className="text-xs text-muted">
-          Written from the channel&rsquo;s template on the way into Scripting,
+          Written from the channel&rsquo;s template on the way into {scriptingName},
           with the chosen hook already spliced in.{" "}
           <strong className="font-medium">Read-only for now</strong> — the
           editor and its save path arrive together, so that nothing typed here
@@ -62,8 +70,8 @@ export function ScriptSection({
       {text === "" ? (
         <p data-testid="script-empty" className="text-xs text-muted">
           {reachedScripting
-            ? "This video is past Scripting and its script column is empty — it was cleared, or it entered the stage before the template existed."
-            : `Nothing here yet. The script is filled in when this video moves from ${stageName} into Scripting.`}
+            ? `This video is past ${scriptingName} and its script column is empty — it was cleared, or it entered the stage before the template existed.`
+            : `Nothing here yet. The script is filled in when this video moves from ${stageName} into ${scriptingName}.`}
         </p>
       ) : (
         <pre

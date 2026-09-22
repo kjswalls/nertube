@@ -21,11 +21,13 @@ import {
 } from "@/lib/defaults";
 import { slugify } from "@/lib/slug";
 import { requireUser } from "@/lib/supabase/require-user";
+import { cleanLabel } from "@/lib/text";
 
 /** What the create-a-channel form renders. `null` before the first submit. */
 export type CreateChannelState = { error: string } | null;
 
-const ChannelName = z.string().min(1).max(80);
+// `cleanLabel`: a channel called "\u200b" is a channel with no name and no slug.
+const ChannelName = z.string().transform(cleanLabel).pipe(z.string().min(1).max(80));
 
 /**
  * Create a channel and seed everything a channel needs to be usable: its nine
@@ -49,7 +51,7 @@ export async function createChannel(
 ): Promise<CreateChannelState> {
   const { supabase } = await requireUser();
 
-  const parsed = ChannelName.safeParse(name.trim());
+  const parsed = ChannelName.safeParse(name);
   if (!parsed.success) {
     return { error: "Give the channel a name of 1–80 characters." };
   }

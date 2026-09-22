@@ -8,7 +8,17 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { apiKey } from '../scripts/dev-stack/jwt';
+import {
+  API_KEY_EXP,
+  API_KEY_IAT,
+  GATEWAY_URL,
+  PG,
+  SEED_EMAIL,
+  SEED_PASSWORD,
+} from '../scripts/dev-stack/shared';
+
+const ANON_KEY = apiKey('anon', API_KEY_IAT, API_KEY_EXP);
 
 /**
  * M7 — buckets, quotas and the channel's own settings:
@@ -590,14 +600,20 @@ test('changing the WIP threshold changes the warning on the board, and the other
   const wip = page.getByTestId('wip-threshold');
   await expect(wip).toHaveValue(String(CHANNEL_DEFAULTS.wip_threshold));
 
-  // Zero is refused in words; the box keeps what was typed.
+  // Zero is refused in words; the box keeps what was typed, is marked
+  // invalid, and points at the sentence so it can be re-read on return.
   await commit(wip, '0');
   await expect(page.getByTestId('wip-threshold-status')).toContainText('One is the lowest');
   await expect(page.getByTestId('wip-threshold-status')).toHaveAttribute('data-state', 'error');
+  await expect(wip).toHaveAttribute('aria-invalid', 'true');
+  expect(await wip.getAttribute('aria-describedby')).toContain(
+    await page.getByTestId('wip-threshold-status').getAttribute('id'),
+  );
   expect((await readChannel()).wip_threshold).toBe(CHANNEL_DEFAULTS.wip_threshold);
 
   await commit(wip, '2');
   await expect(page.getByTestId('wip-threshold-status')).toHaveText(/^Saved$/);
+  await expect(wip).not.toHaveAttribute('aria-invalid', /.*/);
   await expect.poll(async () => (await readChannel()).wip_threshold).toBe(2);
 
   await openBoard(page);
@@ -739,6 +755,13 @@ test('removing a bucket unfiles the videos under it and changes nothing else; re
   await file(first, { vertical: money, horizontal: tutorial });
   await file(second, { vertical: money });
   await file(other, { vertical: health, horizontal: tutorial });
+  // An archived video under the pillar too: not on the row's count (that is
+  // the matrix's number), but unfiled by the key all the same, so the note
+  // afterwards has to name it apart rather than fold it into a number that
+  // disagrees with the sentence before the click (M7's review).
+  const archived = await capture('Budgeting, the first attempt');
+  await file(archived, { vertical: money });
+  await db.query('update public.videos set archived_at = now() where id = $1', [archived]);
 
   await signIn(page);
   await openBuckets(page);
@@ -746,28 +769,38 @@ test('removing a bucket unfiles the videos under it and changes nothing else; re
   const row = rowByName(page, 'money');
   await expect(row.getByTestId('bucket-filed')).toHaveAttribute('data-count', '2');
   await expect(row.getByTestId('bucket-filed')).toHaveText('2 videos');
+  // The row's controls carry its name: eight "a month" boxes and eight
+  // "Remove" buttons are eight of nothing to a screen reader.
+  await expect(row.getByRole('spinbutton', { name: 'Monthly quota for money, a month' })).toBeVisible();
+  const remove = row.getByRole('button', { name: 'Remove money' });
 
   // The sentence before the click says what the click does, with the count.
-  await row.getByTestId('bucket-remove').click();
+  await remove.click();
   await expect(row.getByTestId('bucket-remove-confirm')).toContainText(
     '2 videos are filed under “money”. Removing it leaves them with no topic pillar — nothing else about them changes',
   );
-  // Keeping it is a real option.
+  // The question took focus as it appeared...
+  await expect(row.getByTestId('bucket-remove-yes')).toBeFocused();
+  // ...and keeping it is a real option, which hands focus back to Remove.
   await row.getByTestId('bucket-remove-keep').click();
   await expect(row.getByTestId('bucket-remove-confirm')).toHaveCount(0);
+  await expect(row.getByTestId('bucket-remove')).toBeFocused();
   expect((await readAxis('vertical')).map((b) => b.name)).toEqual(['money', 'health']);
 
   await row.getByTestId('bucket-remove').click();
   await row.getByTestId('bucket-remove-yes').click();
   await expect(rowByName(page, 'money')).toHaveCount(0);
   await expect(page.getByTestId('bucket-removed-note')).toContainText(
-    'Removed “money” and unfiled 2 videos',
+    'Removed “money” and unfiled 2 videos and one archived video',
   );
+  // The row went with its button; focus moved to the row that follows it.
+  await expect(rowByName(page, 'health').getByTestId('bucket-name')).toBeFocused();
 
-  // The videos are all still there; the two lose the pillar and keep the format.
+  // The videos are all still there; the three lose the pillar and keep the format.
   expect((await readAxis('vertical')).map((b) => b.name)).toEqual(['health']);
   expect(await readVideo(first)).toMatchObject({ vertical_id: null, horizontal_id: tutorial, archived_at: null });
   expect(await readVideo(second)).toMatchObject({ vertical_id: null, horizontal_id: null });
+  expect(await readVideo(archived)).toMatchObject({ vertical_id: null });
   expect(await readVideo(other)).toMatchObject({ vertical_id: health, horizontal_id: tutorial });
 
   // Reorder: `review` up one, and the whole axis is renumbered 1..n.
@@ -814,4 +847,127 @@ test('removing a bucket unfiles the videos under it and changes nothing else; re
     }),
   ).rejects.toMatchObject({ code: '23505' });
   expect((await readAxis('horizontal')).map((b) => b.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Typed text survives leaving the page                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every field here saves on blur, and two ways of leaving do not blur: the
+ * browser's Back button (a client-side popstate that unmounts the field) and
+ * a reload. M7's review typed a page of voice guide and pressed Back; it was
+ * gone with no warning. The one save queue now commits on unmount and asks
+ * before an unload.
+ */
+test('text typed into the voice guide survives the browser’s Back button, and a reload asks first', async ({
+  page,
+}) => {
+  await signIn(page);
+  // Arrive by an in-app link, so Back is a client-side navigation — the
+  // case that unmounts the field with the text still in it.
+  await page.goto(`/settings/stages/${CHANNEL.slug}`);
+  await hydrated(page);
+  await page.locator('[data-testid="settings-nav-link"][data-section="channel"]').click();
+  await page.waitForURL(`**/settings/channel/${CHANNEL.slug}`);
+  await hydrated(page);
+
+  const voice = page.getByTestId('voice-guide');
+  await voice.fill('Draft typed, then Back — never blurred.');
+  await page.goBack();
+  await page.waitForURL(`**/settings/stages/${CHANNEL.slug}`);
+  await expect
+    .poll(async () => (await readChannel()).voice_guide)
+    .toBe('Draft typed, then Back — never blurred.');
+
+  // A reload with text in the box: the browser asks. The dialog is the
+  // browser's own, accepted here so the test can go on; what is asserted is
+  // that it was raised at all, and only while something was unsaved.
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.accept();
+  });
+  await openChannel(page);
+  await expect(page.getByTestId('voice-guide')).toHaveValue('Draft typed, then Back — never blurred.');
+  await page.reload();
+  await hydrated(page);
+  expect(dialogs).toEqual([]);
+
+  await page.getByTestId('voice-guide').fill('Draft typed, then reload.');
+  await page.reload();
+  await hydrated(page);
+  expect(dialogs).toEqual(['beforeunload']);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The channel row's grant is the five settings columns and nothing else      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * With a real session token against PostgREST: the columns the screen edits
+ * write; `slug` and `name` — editable nowhere in the app, and a blank slug
+ * leaves the channel unreachable at `/c//board` — are not the client's to
+ * write at all; and the numbers the screen bounds are bounded by the
+ * database too (0008_settings_boundary.sql).
+ */
+test('a forged PATCH cannot blank the channel’s slug or name, nor zero its thresholds', async ({
+  page,
+}) => {
+  await signIn(page);
+  await openChannel(page);
+
+  const result = await page.evaluate(
+    async ({ gateway, anon, email, password, channelId }) => {
+      const session = await fetch(`${gateway}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: anon, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const { access_token: token } = (await session.json()) as { access_token?: string };
+      const headers = {
+        apikey: anon,
+        Authorization: `Bearer ${token ?? ''}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      };
+      async function patch(body: unknown) {
+        const response = await fetch(`${gateway}/rest/v1/channels?id=eq.${channelId}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(body),
+        });
+        return { status: response.status, body: await response.text() };
+      }
+      return {
+        control: await patch({ stale_days: 9 }),
+        slug: await patch({ slug: '' }),
+        name: await patch({ name: '' }),
+        wip: await patch({ wip_threshold: 0 }),
+        stale: await patch({ stale_days: -1 }),
+        ctr: await patch({ expected_ctr: 0 }),
+        script: await patch({ script_template: '' }),
+        ghost: await patch({ script_template: '\u200b' }),
+      };
+    },
+    { gateway: GATEWAY_URL, anon: ANON_KEY, email: SEED_EMAIL, password: SEED_PASSWORD, channelId },
+  );
+
+  // The session is good: a settings column writes.
+  expect(result.control.status).toBe(200);
+  await expect.poll(async () => (await readChannel()).stale_days).toBe(9);
+  // The address and the name are not the client's.
+  expect(result.slug.status).toBe(403);
+  expect(result.slug.body).toContain('42501');
+  expect(result.name.status).toBe(403);
+  // The floors are the database's: 23514, not a quiet 200.
+  for (const refused of [result.wip, result.stale, result.ctr, result.script, result.ghost]) {
+    expect(refused.status).toBe(400);
+    expect(refused.body).toContain('23514');
+  }
+  const after = await readChannel();
+  expect(after.wip_threshold).toBe(CHANNEL_DEFAULTS.wip_threshold);
+  expect(after.stale_days).toBe(9);
+  expect(after.expected_ctr).toBeNull();
+  expect(after.script_template).toBe(SCRIPT_TEMPLATE);
 });

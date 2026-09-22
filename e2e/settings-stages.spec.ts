@@ -291,12 +291,15 @@ test('renaming Packaging relabels the board column and changes nothing about the
   );
 
   // Out of it with an empty concept and no hook: refused, by kind. The toast
-  // names the column by its new label and the missing field by the gate's
-  // wording — the label changed, the rule did not.
+  // names the column by its new label — in both sentences, because "Packaging
+  // still needs … It is still in Packaging & hook" was one column under two
+  // names (M7's review) — and the missing field by the gate's wording. The
+  // label changed, the rule did not.
   await dragCardTo(page, cardIn(page, 'Packaging & hook', 'Rename me not'), 'Scripting');
   const toast = page.getByTestId('toast');
   await expect(toast).toContainText('Could not move “Rename me not” to Scripting.');
-  await expect(toast).toContainText('Packaging still needs');
+  await expect(toast).toContainText('Packaging & hook still needs');
+  await expect(toast).not.toContainText('Packaging still needs');
   await expect(cardIn(page, 'Packaging & hook', 'Rename me not')).toBeVisible();
   await expect(cardIn(page, 'Scripting', 'Rename me not')).toHaveCount(0);
   expect(await videoStageId(ideaId)).toBe(packaging.id);
@@ -327,9 +330,12 @@ test('switching off a stage that holds a video is refused with the count and a l
   const row = rowByKind(page, 'scripting');
   await expect(row.getByTestId('stage-count')).toHaveAttribute('data-count', '1');
 
-  const toggle = row.getByTestId('stage-enabled');
+  // The control's name carries the stage, so nine switches are not nine
+  // "On the board"s to a screen reader.
+  const toggle = row.getByRole('checkbox', { name: 'Scripting: On the board' });
   await expect(toggle).toBeChecked();
-  await toggle.click();
+  await toggle.focus();
+  await toggle.press('Space');
 
   const refusal = row.getByTestId('stage-refusal');
   await expect(refusal).toContainText('Scripting still holds a video');
@@ -338,8 +344,12 @@ test('switching off a stage that holds a video is refused with the count and a l
     'href',
     `/c/${CHANNEL.slug}/board`,
   );
-  // The switch sprang back, and the row never went off.
+  // The switch sprang back, the row never went off, and focus never left the
+  // box: it is not disabled for the round trip (that is what drops focus on
+  // <body>); the row is `aria-busy` and the status line says "Saving…" instead.
   await expect(toggle).toBeChecked();
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeFocused();
   expect((await stageByKind(channel.id, 'scripting')).is_enabled).toBe(true);
 
   // Archived videos are off the board already, so they are not in the way.
@@ -351,9 +361,70 @@ test('switching off a stage that holds a video is refused with the count and a l
   );
   await rowByKind(page, 'scripting').getByTestId('stage-enabled').click();
   await expect(rowByKind(page, 'scripting')).toHaveAttribute('data-enabled', 'false');
+  await expect(rowByKind(page, 'scripting').getByTestId('stage-switch-status')).toHaveText(/^Saved$/);
   await expect
     .poll(async () => (await stageByKind(channel.id, 'scripting')).is_enabled)
     .toBe(false);
+
+  // The door that was open: restoring the archived video would put a live
+  // video into the switched-off column. `set_video_archived` refuses; the
+  // video page says where to go (flow-fields.spec.ts walks the click). And a
+  // row hand-edited into that state is said, not merely counted.
+  await db.query('update public.videos set archived_at = null where id = $1', [videoId]);
+  await openSettings(page, CHANNEL.slug);
+  const hidden = rowByKind(page, 'scripting').getByTestId('stage-hidden-videos');
+  await expect(hidden).toContainText('Scripting is switched off but still holds a video');
+  await expect(rowByKind(page, 'scripting').getByTestId('stage-hidden-videos-link')).toHaveAttribute(
+    'href',
+    `/c/${CHANNEL.slug}/board`,
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* 2b. The Idea stage stays on                                                  */
+/* -------------------------------------------------------------------------- */
+
+test('the Idea stage cannot be switched off: the switch says so, and the function refuses a forged call', async ({
+  page,
+}) => {
+  await openSettings(page, CHANNEL.slug);
+
+  const row = rowByKind(page, 'idea');
+  const toggle = row.getByRole('checkbox', { name: 'Idea: On the board' });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toBeDisabled();
+  await expect(row.getByTestId('stage-pinned-on')).toHaveText('Stays on: capture lands here.');
+  // The note is the checkbox's description.
+  expect(await toggle.getAttribute('aria-describedby')).toBe(
+    await row.getByTestId('stage-pinned-on').getAttribute('id'),
+  );
+
+  // The rule is the database's, not the greyed-out box's.
+  const idea = await stageByKind(channel.id, 'idea');
+  const forged = await page.evaluate(
+    async ({ gateway, anon, email, password, stageId }) => {
+      const session = await fetch(`${gateway}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: anon, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const { access_token: token } = (await session.json()) as { access_token?: string };
+      const response = await fetch(`${gateway}/rest/v1/rpc/set_stage_enabled`, {
+        method: 'POST',
+        headers: {
+          apikey: anon,
+          Authorization: `Bearer ${token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ p_stage: stageId, p_enabled: false }),
+      });
+      return { status: response.status, body: await response.text() };
+    },
+    { gateway: GATEWAY_URL, anon: ANON_KEY, email: SEED_EMAIL, password: SEED_PASSWORD, stageId: idea.id },
+  );
+  expect(forged.status).toBe(400);
+  expect(forged.body).toContain('idea stage');
+  expect((await stageByKind(channel.id, 'idea')).is_enabled).toBe(true);
 });
 
 /* -------------------------------------------------------------------------- */
@@ -402,15 +473,17 @@ test('switching off an empty stage removes its column, and switching it on bring
  */
 async function forgedWrites(
   page: Page,
-  input: { channelId: string; swappedIds: string[]; stageId: string },
+  input: { channelId: string; otherChannelId: string; swappedIds: string[]; stageId: string },
 ): Promise<{
   control: { status: number };
   reorder: { status: number; body: string };
   position: { status: number; body: string };
   enabled: { status: number; body: string };
+  reparent: { status: number; body: string };
+  forgedCore: { status: number; body: string };
 }> {
   return page.evaluate(
-    async ({ gateway, anon, email, password, channelId, swappedIds, stageId }) => {
+    async ({ gateway, anon, email, password, channelId, otherChannelId, swappedIds, stageId }) => {
       const session = await fetch(`${gateway}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: { apikey: anon, 'Content-Type': 'application/json' },
@@ -443,7 +516,16 @@ async function forgedWrites(
       const enabled = await attempt(`${gateway}/rest/v1/stages?id=eq.${stageId}`, 'PATCH', {
         is_enabled: false,
       });
-      return { control: { status: control.status }, reorder, position, enabled };
+      const reparent = await attempt(`${gateway}/rest/v1/stages?id=eq.${stageId}`, 'PATCH', {
+        channel_id: otherChannelId,
+      });
+      const forgedCore = await attempt(`${gateway}/rest/v1/stages`, 'POST', {
+        channel_id: channelId,
+        name: 'Forged core',
+        position: 42,
+        kind: 'packaging',
+      });
+      return { control: { status: control.status }, reorder, position, enabled, reparent, forgedCore };
     },
     {
       gateway: GATEWAY_URL,
@@ -480,6 +562,7 @@ test('a core stage is never offered a move across another core stage, and a forg
 
   const result = await forgedWrites(page, {
     channelId: channel.id,
+    otherChannelId: other.id,
     swappedIds: swapped,
     stageId: filming.id,
   });
@@ -494,6 +577,11 @@ test('a core stage is never offered a move across another core stage, and a forg
   expect(result.position.body).toContain('42501');
   expect(result.enabled.status).toBe(403);
   expect(result.enabled.body).toContain('42501');
+  // ...nor is the channel a stage belongs to (0008), nor `kind` on an insert.
+  expect(result.reparent.status).toBe(403);
+  expect(result.reparent.body).toContain('42501');
+  expect(result.forgedCore.status).toBe(403);
+  expect(result.forgedCore.body).toContain('42501');
 
   // Nothing moved and nothing went off.
   const after = await stagesOf(channel.id);
@@ -584,6 +672,12 @@ test('an added stage gets a column, moves between core stages, holds a video, an
   await openSettings(page, CHANNEL.slug);
   const again = rowByName(page, 'Sponsor review');
   await expect(again.getByTestId('stage-count')).toHaveAttribute('data-count', '1');
+  // Remove is named for what it removes; the question takes focus when it
+  // appears, and Keep hands it back to Remove — nothing lands on <body>.
+  await again.getByRole('button', { name: 'Remove Sponsor review' }).click();
+  await expect(again.getByTestId('stage-remove-yes')).toBeFocused();
+  await again.getByTestId('stage-remove-keep').click();
+  await expect(again.getByTestId('stage-remove')).toBeFocused();
   await again.getByTestId('stage-remove').click();
   await again.getByTestId('stage-remove-yes').click();
   await expect(again.getByTestId('stage-refusal')).toContainText('Sponsor review still holds a video');
@@ -608,6 +702,8 @@ test('an added stage gets a column, moves between core stages, holds a video, an
   await expect
     .poll(async () => (await stagesOf(channel.id)).some((stage) => stage.id === sponsor.id))
     .toBe(false);
+  // The row went with its button; focus moved to the row that follows it.
+  await expect(rowByKind(page, 'published').getByTestId('stage-name')).toBeFocused();
 });
 
 /* -------------------------------------------------------------------------- */

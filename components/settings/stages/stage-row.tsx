@@ -1,12 +1,21 @@
 "use client";
 
-import { useId, useState, type KeyboardEvent, type RefObject } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 
 import { renameStage, removeStage, setStageEnabled } from "@/app/actions/stages";
-import { SaveStatus, useAutosave } from "@/components/autosave";
+import { SaveStatus, useAutosave, type SaveState } from "@/components/autosave";
 import { MoveButton } from "@/components/settings/move-button";
 import { Refusal } from "@/components/settings/refusal";
-import { INERT_NOTE, KIND_NOTES, STAGE_NAME_MAX, type MoveVerdict } from "@/lib/stage-settings";
+import { RemoveConfirm } from "@/components/settings/remove-confirm";
+import {
+  INERT_NOTE,
+  KIND_NOTES,
+  STAGE_NAME_MAX,
+  hiddenVideosSentence,
+  ideaStaysOnSentence,
+  occupiedHref,
+  type MoveVerdict,
+} from "@/lib/stage-settings";
 
 import type { SettingsStage } from "./types";
 
@@ -31,11 +40,21 @@ import type { SettingsStage } from "./types";
  *   a controlled checkbox that springs back until the round trip lands reads
  *   as "the click did nothing", and it is put back with the reason when the
  *   database refuses. The refusal (`Refusal`, the area's one refusal line)
- *   names the count and links to the videos.
- * - **Remove** exists only on an inert stage, behind a second click.
+ *   names the count and links to the videos. While the round trip is out the
+ *   row is `aria-busy` and its own status line says "Saving…"; the box is
+ *   *not* disabled, because a disabled control drops keyboard focus on
+ *   `<body>` — re-entry is guarded in the handler instead.
+ * - **Remove** exists only on an inert stage, behind a second click
+ *   (`RemoveConfirm`, which also owns where focus goes between the two).
+ *
+ * The Idea stage's switch is the one control here that is offered disabled:
+ * capture always lands in it, so `set_stage_enabled` refuses to switch it off
+ * (0008), and a switch that can never do anything is more honest greyed out
+ * with the reason beside it than live and refusing every time.
  */
 export function StageRow({
   stage,
+  channelSlug,
   index,
   total,
   upVerdict,
@@ -47,6 +66,7 @@ export function StageRow({
   moveButtonRef,
 }: {
   stage: SettingsStage;
+  channelSlug: string;
   /** Zero-based place in the list, for the "3 of 10" a screen reader hears. */
   index: number;
   total: number;
@@ -63,6 +83,7 @@ export function StageRow({
   const nameId = useId();
   const switchId = useId();
   const noteId = useId();
+  const switchNoteId = useId();
 
   /* ---------------------------------------------------------------- name -- */
 
@@ -88,7 +109,8 @@ export function StageRow({
   /* -------------------------------------------------------------- switch -- */
 
   const [enabled, setEnabled] = useState(stage.isEnabled);
-  const [switching, setSwitching] = useState(false);
+  const [switchState, setSwitchState] = useState<SaveState<never>>({ kind: "idle" });
+  const switching = useRef(false);
   const [refusal, setRefusal] = useState<{
     message: string;
     href?: string;
@@ -104,14 +126,19 @@ export function StageRow({
   }
 
   async function toggle(next: boolean): Promise<void> {
+    // Re-entry is guarded here rather than by disabling the box: a disabled
+    // checkbox drops keyboard focus on <body> for the length of the round trip.
+    if (switching.current) return;
+    switching.current = true;
     const previous = enabled;
     setEnabled(next);
-    setSwitching(true);
+    setSwitchState({ kind: "saving" });
     setRefusal(null);
     try {
       const result = await setStageEnabled({ stageId: stage.id, enabled: next });
       if (!result.ok) {
         setEnabled(previous);
+        setSwitchState({ kind: "idle" });
         setRefusal({
           message: result.error,
           href: result.occupiedHref,
@@ -125,14 +152,16 @@ export function StageRow({
         return;
       }
       setEnabled(result.enabled);
+      setSwitchState({ kind: "saved" });
       onEnabledChanged(result.enabled);
     } catch {
       setEnabled(previous);
+      setSwitchState({ kind: "idle" });
       setRefusal({
         message: "Could not reach the server, so the stage is unchanged. Try again.",
       });
     } finally {
-      setSwitching(false);
+      switching.current = false;
     }
   }
 
@@ -167,6 +196,11 @@ export function StageRow({
 
   const inert = stage.kind === null;
   const count = stage.occupied;
+  // Idea stays on: the switch is offered greyed out, with the reason.
+  const pinnedOn = stage.kind === "idea" && enabled;
+  // A switched-off stage still holding videos: unreachable from any screen
+  // since 0008, so when it is seen it is said, with the link.
+  const hidden = !enabled && count > 0;
 
   return (
     <li
@@ -175,6 +209,7 @@ export function StageRow({
       data-stage-name={stage.name}
       data-kind={stage.kind ?? "inert"}
       data-enabled={enabled ? "true" : "false"}
+      aria-busy={switchState.kind === "saving" || removing === "busy" ? true : undefined}
       className={[
         "grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 gap-y-2 rounded-card border bg-surface px-4 py-3",
         inert ? "border-dashed border-border" : "border-border",
@@ -244,6 +279,13 @@ export function StageRow({
             href={refusal.href}
             label={refusal.label}
           />
+        ) : hidden ? (
+          <Refusal
+            testId="stage-hidden-videos"
+            message={hiddenVideosSentence(stage.name, count)}
+            href={occupiedHref(stage.kind, channelSlug)}
+            label={stage.kind === "idea" ? "Open Ideas" : "Open the video page from the board"}
+          />
         ) : null}
       </div>
 
@@ -261,52 +303,51 @@ export function StageRow({
           {count === 0 ? "empty" : `${count} ${count === 1 ? "video" : "videos"}`}
         </span>
 
-        <div className="flex items-center gap-2">
-          <input
-            id={switchId}
-            type="checkbox"
-            data-testid="stage-enabled"
-            checked={enabled}
-            disabled={switching || removing === "busy"}
-            onChange={(event) => void toggle(event.target.checked)}
-            className="size-4 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          />
-          <label htmlFor={switchId} className="text-[12px]">
-            {enabled ? "On the board" : "Off"}
-          </label>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <input
+              id={switchId}
+              type="checkbox"
+              data-testid="stage-enabled"
+              checked={enabled}
+              disabled={pinnedOn || removing === "busy"}
+              aria-describedby={pinnedOn ? switchNoteId : undefined}
+              title={pinnedOn ? ideaStaysOnSentence(stage.name) : undefined}
+              onChange={(event) => void toggle(event.target.checked)}
+              className="size-4 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            />
+            <label htmlFor={switchId} className="text-[12px]">
+              {/* The stage's name is part of the control's name, so nine
+                  checkboxes are not nine "On the board"s to a screen reader;
+                  the visible word is the state. */}
+              <span className="sr-only">{stage.name}: </span>
+              {enabled ? "On the board" : "Off"}
+            </label>
+          </div>
+          {pinnedOn ? (
+            <span
+              id={switchNoteId}
+              data-testid="stage-pinned-on"
+              className="max-w-[16rem] text-right text-[11px] leading-4 text-muted"
+            >
+              Stays on: capture lands here.
+            </span>
+          ) : (
+            <SaveStatus state={switchState} testId="stage-switch-status" />
+          )}
         </div>
 
         {inert ? (
-          removing === "confirm" ? (
-            <span className="flex items-center gap-1 text-[12px]">
-              <span className="text-muted">Remove?</span>
-              <button
-                type="button"
-                data-testid="stage-remove-yes"
-                onClick={() => void remove()}
-                className="rounded-button border border-attention/50 px-2 py-0.5 text-attention outline-none hover:bg-attention/10 focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                Yes, remove
-              </button>
-              <button
-                type="button"
-                onClick={() => setRemoving("idle")}
-                className="rounded-button border border-border px-2 py-0.5 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                Keep
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              data-testid="stage-remove"
-              disabled={removing === "busy"}
-              onClick={() => setRemoving("confirm")}
-              className="text-[12px] text-muted underline decoration-border underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
-            >
-              {removing === "busy" ? "Removing…" : "Remove"}
-            </button>
-          )
+          <RemoveConfirm
+            state={removing}
+            onAsk={() => setRemoving("confirm")}
+            onConfirm={() => void remove()}
+            onKeep={() => setRemoving("idle")}
+            confirmLabel="Yes, remove"
+            question="Remove?"
+            subject={stage.name}
+            testIdPrefix="stage"
+          />
         ) : null}
       </div>
     </li>

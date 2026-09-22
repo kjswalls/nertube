@@ -8,7 +8,17 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { apiKey } from '../scripts/dev-stack/jwt';
+import {
+  API_KEY_EXP,
+  API_KEY_IAT,
+  GATEWAY_URL,
+  PG,
+  SEED_EMAIL,
+  SEED_PASSWORD,
+} from '../scripts/dev-stack/shared';
+
+const ANON_KEY = apiKey('anon', API_KEY_IAT, API_KEY_EXP);
 
 /**
  * M2 — the flow half of the video detail page.
@@ -424,6 +434,64 @@ test('archiving takes the card off the board without deleting it, and restoring 
     page.getByTestId('board-card').filter({ hasText: 'Archive me' }),
   ).toHaveCount(0);
 
+  /*
+    The door M7's review found: archived videos do not count toward the
+    occupancy refusal, so the column can be switched off while this one is
+    archived — and a restore would then put a live video where the board and
+    /now cannot show it. `set_video_archived` refuses, with the stage's name,
+    and `archived_at` is no longer a column a client can write around it.
+  */
+  const scripting = await db.query<{ id: string }>(
+    `select s.id from public.stages s join public.videos v on v.stage_id = s.id where v.id = $1`,
+    [videos.get('Archive me')],
+  );
+  await asUser(() =>
+    db.query('select set_stage_enabled($1::uuid, false)', [scripting.rows[0].id]),
+  );
+  await openVideo(page, 'Archive me');
+  await page.getByTestId('archive-toggle').click();
+  await expect(page.getByTestId('archive-status')).toHaveAttribute('data-state', 'error');
+  await expect(page.getByTestId('archive-status')).toContainText(
+    `${SCRIPTING} is switched off, so restoring this video would hide it from the board and from /now.`,
+  );
+  await expect(page.getByTestId('archive-toggle')).toHaveAttribute('data-archived', 'true');
+  expect((await row('Archive me'))?.archived_at).not.toBeNull();
+
+  const forged = await page.evaluate(
+    async ({ gateway, anon, email, password, videoId }) => {
+      const session = await fetch(`${gateway}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: anon, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const { access_token: token } = (await session.json()) as { access_token?: string };
+      const response = await fetch(`${gateway}/rest/v1/videos?id=eq.${videoId}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: anon,
+          Authorization: `Bearer ${token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ archived_at: null }),
+      });
+      return { status: response.status, body: await response.text() };
+    },
+    {
+      gateway: GATEWAY_URL,
+      anon: ANON_KEY,
+      email: SEED_EMAIL,
+      password: SEED_PASSWORD,
+      videoId: videos.get('Archive me'),
+    },
+  );
+  expect(forged.status).toBe(403);
+  expect(forged.body).toContain('42501');
+  expect((await row('Archive me'))?.archived_at).not.toBeNull();
+
+  await asUser(() =>
+    db.query('select set_stage_enabled($1::uuid, true)', [scripting.rows[0].id]),
+  );
+
   // Restore. It goes back to the column it was in, because archiving never
   // moved it — there is no "Archived" stage to come back from.
   await openVideo(page, 'Archive me');
@@ -458,7 +526,11 @@ test('the stage select refuses a gated move in the board’s own words', async (
   await expect(toast).toBeVisible();
   const toastText = (await toast.innerText()).replace(/\s+/g, ' ');
 
-  const gateSentence = /Packaging still needs [^.]+\./.exec(toastText)?.[0];
+  // The stage is named by the channel's label for it (the seed's here), the
+  // field by the gate's wording.
+  const gateSentence = new RegExp(`${PACKAGING.replace(/[()]/g, '\\$&')} still needs [^.]+\\.`).exec(
+    toastText,
+  )?.[0];
   expect(
     gateSentence,
     'the board toast must name the missing packaging field',

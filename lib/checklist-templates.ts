@@ -1,8 +1,21 @@
 import { z } from "zod";
 
 import { ChecklistItemTextSchema, DEFAULT_EST_MINUTES } from "./checklist";
-import { NEEDS_A_BLOCK, QUICK_MINUTES } from "./next-action";
 import type { StageKind } from "./defaults";
+import { NEEDS_A_BLOCK, QUICK_MINUTES } from "./next-action";
+import {
+  comparePositioned,
+  isPermutationOf,
+  movedByPosition,
+  nextPosition,
+  renumber,
+  sortByPosition,
+  type MoveDirection,
+} from "./ordering";
+
+// The order arithmetic is `lib/ordering.ts`'s, shared with the stages and
+// bucket editors; re-exported under the names this editor has always used.
+export { isPermutationOf, nextPosition, renumber };
 
 /**
  * Everything about a stage's checklist *template* that is a rule rather than a
@@ -62,27 +75,11 @@ export function readTemplateItem(row: TemplateRow): TemplateItem {
   };
 }
 
-/**
- * Template order: `position` ascending, then id.
- *
- * There is a unique on `(stage_id, position)`, so the id is only there to make
- * the comparator total for a list that has not been written yet.
- */
-export function compareTemplates(a: TemplateItem, b: TemplateItem): number {
-  if (a.position !== b.position) return a.position - b.position;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
+/** Template order: `position` ascending, then id (`lib/ordering.ts`). */
+export const compareTemplates: (a: TemplateItem, b: TemplateItem) => number = comparePositioned;
 
-export function sortTemplates(
-  items: readonly TemplateItem[],
-): TemplateItem[] {
-  return [...items].sort(compareTemplates);
-}
-
-/** Where a new template row goes: the end, after everything already there. */
-export function nextPosition(items: readonly { position: number }[]): number {
-  if (items.length === 0) return 1;
-  return Math.max(...items.map((item) => item.position)) + 1;
+export function sortTemplates(items: readonly TemplateItem[]): TemplateItem[] {
+  return sortByPosition(items);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -185,51 +182,15 @@ export function quickCount(
 /* -------------------------------------------------------------------------- */
 
 /**
- * The list with one row moved one step up or down, or `null` when the move is
- * off the end. The positions are renumbered 1..n in the new order, so the
- * caller has a complete assignment to send as one statement.
- *
- * Pure so the editor can show the result before the write lands and the test
- * can check the arithmetic without a database.
+ * The list with one row moved one step up or down, renumbered 1..n, or `null`
+ * when the move is off the end — so the caller has a complete assignment to
+ * send as one statement. Pure, so the editor can show the result before the
+ * write lands.
  */
 export function moveTemplate(
   items: readonly TemplateItem[],
   id: string,
-  direction: "up" | "down",
+  direction: MoveDirection,
 ): TemplateItem[] | null {
-  const sorted = sortTemplates(items);
-  const index = sorted.findIndex((item) => item.id === id);
-  if (index === -1) return null;
-  const target = direction === "up" ? index - 1 : index + 1;
-  if (target < 0 || target >= sorted.length) return null;
-  const swapped = [...sorted];
-  swapped[index] = sorted[target];
-  swapped[target] = sorted[index];
-  return renumber(swapped);
-}
-
-/** Positions 1..n in the order given. */
-export function renumber(items: readonly TemplateItem[]): TemplateItem[] {
-  return items.map((item, index) => ({ ...item, position: index + 1 }));
-}
-
-/**
- * True when `orderedIds` is exactly the stage's set of rows, each once.
- *
- * This is the check that makes a forged reorder harmless: an id from another
- * stage, a missing row or a duplicate all fail it, and the write is refused
- * before any position is touched.
- */
-export function isPermutationOf(
-  orderedIds: readonly string[],
-  items: readonly { id: string }[],
-): boolean {
-  if (orderedIds.length !== items.length) return false;
-  const seen = new Set<string>();
-  const have = new Set(items.map((item) => item.id));
-  for (const id of orderedIds) {
-    if (seen.has(id) || !have.has(id)) return false;
-    seen.add(id);
-  }
-  return true;
+  return movedByPosition(items, id, direction);
 }

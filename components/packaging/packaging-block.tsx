@@ -324,9 +324,18 @@ export function PackagingBlock({
   sketch,
   titleWarning,
   assist,
+  stageNames,
 }: {
   videoId: string;
   initial: PackagingInitial;
+  /**
+   * What this channel calls its packaging and scripting stages. The block is
+   * about packaging the *concept* (BRIEF.md's TTH) and keeps that word for
+   * itself; the sentences that talk about the *columns* — nothing leaves
+   * this one, the hook is spliced in on the way into that one — use the
+   * channel's own labels.
+   */
+  stageNames: { packaging: string; scripting: string };
   /**
    * The concept sketch uploader, rendered beside the written concept.
    *
@@ -649,8 +658,8 @@ export function PackagingBlock({
         <p className="text-xs text-muted">
           Title, thumbnail concept and hook — decided here, before a word of
           script is written. About a fifth of the work, and most of the result.
-          Nothing leaves Packaging until these three are filled in or the gate
-          is deliberately skipped.
+          Nothing leaves {stageNames.packaging} until these three are filled in
+          or the gate is deliberately skipped.
         </p>
       </div>
 
@@ -731,6 +740,7 @@ export function PackagingBlock({
 
       <HooksEditor
         anchorId={GATE_ANCHOR.hook}
+        scriptingName={stageNames.scripting}
         hooks={draft.hooks}
         issue={hookIssue}
         onAdd={addHook}

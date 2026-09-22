@@ -61,6 +61,8 @@ export interface FlowFieldsProps {
   videoId: string;
   /** The working title, for the messages a filming-day change announces. */
   videoTitle: string;
+  /** The channel's label for its filming-kind stage, for the day panel's note. */
+  filmingName: string;
   /** The channel's slug, for the board revalidation a move triggers. */
   channelSlug: string;
   /** Enabled stages, in `position` order — the board's column order. */
@@ -206,6 +208,7 @@ export function FlowFields(props: FlowFieldsProps) {
       <VideoFilmingDay
         videoId={props.videoId}
         videoTitle={props.videoTitle}
+        filmingName={props.filmingName}
         today={props.today}
         currentDayId={props.filmingDayId}
         days={props.filmingDays}

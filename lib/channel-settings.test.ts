@@ -13,6 +13,7 @@ import {
   parseExpectedCtr,
   parseStaleDays,
   parseWipThreshold,
+  settingNotes,
 } from "./channel-settings";
 import { SCRIPT_TEMPLATE } from "./defaults";
 import { EXPECTATION_SAMPLE, MIN_MEDIAN_SAMPLE } from "./next-action";
@@ -89,6 +90,16 @@ describe("the three numbers", () => {
 });
 
 describe("the notes", () => {
+  it("name the channel's own stages, and fall back to the seed's words", () => {
+    const renamed = settingNotes({ scripting: "Draft", packaging: "Grue", scheduled: "Queued" });
+    expect(renamed.scriptTemplate).toContain("enters Draft");
+    expect(renamed.scriptTemplate).toContain("past Draft");
+    expect(renamed.wipThreshold).toContain("Grue through Queued");
+    expect(renamed.wipThreshold).toContain("Idea, Published and Repurposed never warn");
+    expect(SETTING_NOTES.scriptTemplate).toContain("enters Scripting");
+    expect(SETTING_NOTES.wipThreshold).toContain("Packaging through Scheduled");
+  });
+
   it("quote the sample sizes the swap prompt actually uses", () => {
     expect(SETTING_NOTES.expectedCtr).toContain(`last ${EXPECTATION_SAMPLE} published`);
     expect(SETTING_NOTES.expectedCtr).toContain(`at least ${MIN_MEDIAN_SAMPLE}`);

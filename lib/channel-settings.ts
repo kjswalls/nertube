@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import type { StageKind } from "./defaults";
 import { MIN_MEDIAN_SAMPLE, EXPECTATION_SAMPLE } from "./next-action";
+import { cleanProse, isBlank } from "./text";
 
 /**
  * The channel's own settings — the five columns on `channels` that are not
@@ -9,9 +11,9 @@ import { MIN_MEDIAN_SAMPLE, EXPECTATION_SAMPLE } from "./next-action";
  * sentence the settings screen prints beside the field.
  *
  * Nothing here writes anything. `app/actions/channels.ts` applies these
- * schemas on the server; the database has only two opinions of its own
- * (`script_template not null`, `expected_ctr numeric(5,2)`), and both are
- * stricter here so they are never reached as raw errors.
+ * schemas on the server, and since `0008_settings_boundary.sql` the database
+ * holds the same bounds as CHECKs — the same floors and ceilings, the same
+ * non-blank rule — so a forged write is refused where a typed one is.
  *
  * ## Why the consequences are data
  *
@@ -52,7 +54,7 @@ export function hasHookPlaceholder(template: string): boolean {
  * whole, never per line, never the leading indent of a bullet.
  */
 function normaliseText(value: string): string {
-  return value.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+  return cleanProse(value).replace(/\r\n?/g, "\n").replace(/\s+$/, "");
 }
 
 /** Empty means null: a channel with no voice guide has none, not "". */
@@ -64,7 +66,7 @@ export const VoiceGuideSchema = z
   )
   .transform((value) => {
     const text = normaliseText(value);
-    return text === "" ? null : text;
+    return isBlank(text) ? null : text;
   });
 
 /** `not null` on the table, and a blank one would write blank scripts. */
@@ -75,7 +77,9 @@ export const ScriptTemplateSchema = z
     `Keep the script template under ${MAX_SCRIPT_TEMPLATE_LENGTH} characters — it is the shape of a script, not one.`,
   )
   .transform(normaliseText)
-  .refine((value) => value !== "", {
+  // `isBlank`, not `=== ""`: a template of zero-width characters would write
+  // scripts that look empty; the database's `has_visible_text()` agrees.
+  .refine((value) => !isBlank(value), {
     message:
       "A script template cannot be empty — every video entering Scripting would start from a blank page. Write at least the heading you always begin with.",
   });
@@ -153,18 +157,51 @@ export function numberText(value: number | null): string {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The line of prose under each field. Written here so the numbers it quotes
- * come from the same constants `/now` and the swap prompt use — a sentence
- * that said "your last ten" while the code sampled twelve would be the kind
- * of drift a settings screen exists to prevent.
+ * What the stages are called on this channel, for the sentences below.
+ *
+ * A stage's name is a label the person may have changed (M7's rename), and a
+ * settings note that says "Scripting" to someone whose column is called
+ * "Draft" is describing a board that does not exist. The page reads the
+ * channel's stages and hands the names in by kind; a missing kind (a
+ * hand-edited channel) falls back to the seed's word.
  */
-export const SETTING_NOTES = {
-  voiceGuide:
-    "Read verbatim by the brainstorm, as the voice it must write in — never generic-YouTuber. Nothing calls it yet; the brainstorm arrives in M8, and this is where the text it will be handed lives.",
-  scriptTemplate: `Copied into a video's script the first time it enters Scripting, with ${HOOK_PLACEHOLDER} replaced by the chosen hook. It is your own shape: headings, bullets, prose, a single line — whatever you begin from. Videos already past Scripting keep the script they have.`,
-  wipThreshold:
-    "The board's column count turns red above this number, on the in-flight stages only — Packaging through Scheduled. Idea, Published and Repurposed never warn.",
-  staleDays:
-    "A card sitting longer than this in one stage is flagged on the board, and the weekly strip flags a column whose median is past it.",
-  expectedCtr: `What the swap prompt compares a video's first-24-hour click-through against: below it, /now and the video's page ask "Swap thumbnail?". Leave it empty to use the median of the channel's last ${EXPECTATION_SAMPLE} published videos instead — which needs at least ${MIN_MEDIAN_SAMPLE} of them before it says anything.`,
-} as const;
+export type StageNames = Readonly<Partial<Record<StageKind, string>>>;
+
+const SEED_NAMES: Readonly<Record<StageKind, string>> = {
+  idea: "Idea",
+  packaging: "Packaging",
+  scripting: "Scripting",
+  filming: "Filming",
+  editing: "Editing",
+  publish_prep: "Publish Prep",
+  scheduled: "Scheduled",
+  published: "Published",
+  repurposed: "Repurposed",
+};
+
+export function stageName(names: StageNames, kind: StageKind): string {
+  return names[kind] ?? SEED_NAMES[kind];
+}
+
+/**
+ * The line of prose under each field, given the channel's stage names.
+ * Written here so the numbers it quotes come from the same constants `/now`
+ * and the swap prompt use — a sentence that said "your last ten" while the
+ * code sampled twelve would be the kind of drift a settings screen exists to
+ * prevent — and so the stages it names are the channel's own.
+ */
+export function settingNotes(names: StageNames) {
+  const n = (kind: StageKind) => stageName(names, kind);
+  return {
+    voiceGuide:
+      "Read verbatim by the brainstorm, as the voice it must write in — never generic-YouTuber. Nothing calls it yet; the brainstorm arrives in M8, and this is where the text it will be handed lives.",
+    scriptTemplate: `Copied into a video's script the first time it enters ${n("scripting")}, with ${HOOK_PLACEHOLDER} replaced by the chosen hook. It is your own shape: headings, bullets, prose, a single line — whatever you begin from. Videos already past ${n("scripting")} keep the script they have.`,
+    wipThreshold: `The board's column count turns red above this number, on the in-flight stages only — ${n("packaging")} through ${n("scheduled")}. ${n("idea")}, ${n("published")} and ${n("repurposed")} never warn.`,
+    staleDays:
+      "A card sitting longer than this in one stage is flagged on the board, and the weekly strip flags a column whose median is past it.",
+    expectedCtr: `What the swap prompt compares a video's first-24-hour click-through against: below it, /now and the video's page ask "Swap thumbnail?". Leave it empty to use the median of the channel's last ${EXPECTATION_SAMPLE} published videos instead — which needs at least ${MIN_MEDIAN_SAMPLE} of them before it says anything.`,
+  } as const;
+}
+
+/** The notes with the seed's stage names — for a channel that has renamed nothing. */
+export const SETTING_NOTES = settingNotes({});

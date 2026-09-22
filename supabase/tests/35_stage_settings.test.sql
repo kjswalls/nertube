@@ -193,45 +193,72 @@ begin
   if not s.is_enabled then raise exception 'FAILED: Repurposed did not switch back on'; end if;
 end $$;
 
--- An occupied one is refused, with the count; archiving the video clears it.
+-- The Idea stage stays on, empty or not (0008): capture_video always lands
+-- there, and a switched-off column that keeps receiving rows is a hidden
+-- inbox. Checked before occupancy, so the sentence is about the rule.
 do $$
 declare ok boolean := false; msg text; s public.stages;
 begin
-  -- video_a is in a-main's Idea stage.
   begin
-    perform public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'idea'), false);
+    perform public.set_stage_enabled(fx.stage(fx.channel('a-side'), 'idea'), false);
+  exception when others then
+    get stacked diagnostics msg = message_text; ok := true;
+  end;
+  if not ok then raise exception 'FAILED: an (empty) Idea stage was switched off'; end if;
+  if msg not like 'idea stage:%' then raise exception 'FAILED: expected an idea stage refusal, got %', msg; end if;
+  select * into s from public.stages where id = fx.stage(fx.channel('a-side'), 'idea');
+  if not s.is_enabled then raise exception 'FAILED: a refused switch-off still wrote'; end if;
+end $$;
+
+-- An occupied one is refused, with the count; archiving the video clears it.
+do $$
+declare ok boolean := false; msg text; s public.stages; p uuid := fx.stage(fx.channel('a-main'), 'packaging');
+begin
+  -- video_a is a titleless idea; Packaging is never gated on the way in.
+  perform public.move_video(fx.video_a(), p);
+
+  begin
+    perform public.set_stage_enabled(p, false);
   exception when others then
     get stacked diagnostics msg = message_text; ok := true;
   end;
   if not ok then raise exception 'FAILED: an occupied stage was switched off'; end if;
   if msg <> 'occupied:1' then raise exception 'FAILED: expected occupied:1, got %', msg; end if;
 
-  select * into s from public.stages where id = fx.stage(fx.channel('a-main'), 'idea');
+  select * into s from public.stages where id = p;
   if not s.is_enabled then raise exception 'FAILED: a refused switch-off still wrote'; end if;
 
-  -- Archived videos do not count (PLAN.md review item 10).
-  update public.videos set archived_at = now() where id = fx.video_a();
-  select * into s from public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'idea'), false);
+  -- Archived videos do not count (PLAN.md review item 10). Archiving goes
+  -- through set_video_archived() since 0008; 36_settings_boundary.test.sql
+  -- is where that function's own rules are exercised.
+  perform public.set_video_archived(fx.video_a(), true);
+  select * into s from public.set_stage_enabled(p, false);
   if s.is_enabled then raise exception 'FAILED: an archived video blocked the switch'; end if;
-  select * into s from public.set_stage_enabled(fx.stage(fx.channel('a-main'), 'idea'), true);
-  update public.videos set archived_at = null where id = fx.video_a();
+  select * into s from public.set_stage_enabled(p, true);
+  perform public.set_video_archived(fx.video_a(), false);
 end $$;
 
--- The last enabled stage stays on.
+-- The last enabled stage stays on. With Idea refusing to go off this is a
+-- backstop for a hand-edited row, so the row is hand-edited: the owner
+-- switches a-side's Idea off directly, leaving Packaging as the last one.
+reset role;
+update public.stages set is_enabled = false
+ where id = fx.stage(fx.channel('a-side'), 'idea');
+set local role authenticated;
 do $$
 declare
   c uuid := fx.channel('a-side');
   r record; ok boolean := false; msg text; n int;
 begin
-  -- a-side holds no videos, so everything but Idea can go.
-  for r in select id from public.stages where channel_id = c and kind <> 'idea' loop
+  -- a-side holds no videos, so everything but Packaging can go.
+  for r in select id from public.stages where channel_id = c and kind not in ('idea', 'packaging') loop
     perform public.set_stage_enabled(r.id, false);
   end loop;
   select count(*) into n from public.stages where channel_id = c and is_enabled;
   if n <> 1 then raise exception 'FAILED: expected 1 enabled stage left, got %', n; end if;
 
   begin
-    perform public.set_stage_enabled(fx.stage(c, 'idea'), false);
+    perform public.set_stage_enabled(fx.stage(c, 'packaging'), false);
   exception when others then
     get stacked diagnostics msg = message_text; ok := true;
   end;

@@ -125,6 +125,30 @@ export type MoveVideoInput = z.input<typeof MoveInput>;
  * it is exactly how "the sketch is the concept" got believed the first time.
  */
 
+/**
+ * What this channel calls its packaging-kind stage: the label a rename may
+ * have changed. Read from the target stage's channel — the refusal path only,
+ * so two small reads are fine. Falls back to the seed's word.
+ */
+async function packagingName(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  targetStageId: string,
+): Promise<string> {
+  const { data: target } = await supabase
+    .from("stages")
+    .select("channel_id")
+    .eq("id", targetStageId)
+    .maybeSingle();
+  if (!target) return "Packaging";
+  const { data: packaging } = await supabase
+    .from("stages")
+    .select("name")
+    .eq("channel_id", target.channel_id)
+    .eq("kind", "packaging")
+    .maybeSingle();
+  return packaging?.name ?? "Packaging";
+}
+
 export async function moveVideo(
   input: MoveVideoInput,
 ): Promise<MoveVideoResult> {
@@ -153,8 +177,12 @@ export async function moveVideo(
       return {
         ok: false,
         missing,
-        // The field is named, which is the whole point of the gate refusal.
-        message: `Packaging still needs ${GATE_WORDING[missing]}.`,
+        // The field is named, which is the whole point of the gate refusal —
+        // and the stage is named by the channel's own label for it, because
+        // the toast goes on to say which column the video is still in, and
+        // "Packaging still needs … It is still in Grue" is two names for one
+        // column (M7's review).
+        message: `${await packagingName(supabase, parsed.data.stageId)} still needs ${GATE_WORDING[missing]}.`,
       };
     }
 

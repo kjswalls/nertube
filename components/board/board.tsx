@@ -782,11 +782,14 @@ export function Board({
             has to say why, or it reads as the board miscounting rather than as
             the signal BRIEF.md principle 4 asks for.
           */
+          // Named by this channel's label for the column it sits under, so a
+          // renamed Filming is not "3 in Filming" beside a heading that says
+          // something else. Across channels the count is by kind regardless.
           const badgeText =
             stage.kind === "filming" && filmingTotal >= FILMING_BATCH_THRESHOLD
               ? filmingTotal > total
-                ? `${filmingTotal} in Filming across all channels — schedule batch day?`
-                : `${filmingTotal} in Filming — schedule batch day?`
+                ? `${filmingTotal} in ${stage.name} across all channels — schedule batch day?`
+                : `${filmingTotal} in ${stage.name} — schedule batch day?`
               : null;
 
           /*

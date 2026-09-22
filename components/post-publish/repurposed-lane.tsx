@@ -3,7 +3,8 @@
 import { useId, useState } from "react";
 
 import { setStageEnabled } from "@/app/actions/stages";
-import { occupiedSentence } from "@/lib/stage-settings";
+import { Refusal } from "@/components/settings/refusal";
+import { occupiedHref, occupiedSentence } from "@/lib/stage-settings";
 
 /**
  * The Repurposed lane switch.
@@ -32,17 +33,22 @@ import { occupiedSentence } from "@/lib/stage-settings";
  * that scrolls away. The count is also read on the server, so the switch is
  * already disabled with the reason underneath it before anyone clicks — and
  * the reason is `occupiedSentence`, the same sentence `/settings/stages`
- * prints when the same function refuses the same switch there. One rule, one
- * sentence; M7's settings screen is where the switch lives for every stage,
- * and this is the lane's own copy of it at the end of the loop it belongs to.
+ * prints when the same function refuses the same switch there, drawn by the
+ * same `Refusal` line with the same link to the board column. One rule, one
+ * sentence, one line; M7's settings screen is where the switch lives for
+ * every stage, and this is the lane's own copy of it at the end of the loop
+ * it belongs to.
  */
 export function RepurposedLane({
   stage,
+  channelSlug,
   occupied,
   onChanged,
 }: {
   /** The channel's Repurposed stage, or null if it somehow has none. */
   stage: { id: string; name: string; isEnabled: boolean } | null;
+  /** For the refusal's link to the column that is still occupied. */
+  channelSlug: string;
   /** Non-archived videos currently sitting in it, counted on the server. */
   occupied: number;
   onChanged: () => void;
@@ -128,21 +134,22 @@ export function RepurposedLane({
         </label>
       </div>
 
-      <p
-        data-testid="repurposed-note"
-        role={error ? "alert" : undefined}
-        className={[
-          "text-xs leading-5",
-          error ? "text-attention" : "text-muted",
-        ].join(" ")}
-      >
-        {error ??
-          (blocked
-            ? occupiedSentence(stage.name, occupied)
-            : enabled
-              ? "Clips, shorts and the newsletter get their own column at the end of the board. Switch it off if you do not repurpose."
-              : "Switched off: the board ends at Published for this channel, and Published is a terminal stage.")}
-      </p>
+      {error ? (
+        <Refusal testId="repurposed-note" message={error} />
+      ) : blocked ? (
+        <Refusal
+          testId="repurposed-note"
+          message={occupiedSentence(stage.name, occupied)}
+          href={occupiedHref("repurposed", channelSlug)}
+          label={`See ${occupied === 1 ? "it" : "them"} on the board`}
+        />
+      ) : (
+        <p data-testid="repurposed-note" className="text-xs leading-5 text-muted">
+          {enabled
+            ? "Clips, shorts and the newsletter get their own column at the end of the board. Switch it off if you do not repurpose."
+            : "Switched off: the board ends at Published for this channel, and Published is a terminal stage."}
+        </p>
+      )}
     </div>
   );
 }

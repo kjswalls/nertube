@@ -565,6 +565,10 @@ export type Database = {
         Args: { p_stage: string; p_enabled: boolean };
         Returns: Database["public"]["Tables"]["stages"]["Row"];
       };
+      set_video_archived: {
+        Args: { p_video: string; p_archived: boolean };
+        Returns: VideosRow;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

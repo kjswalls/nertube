@@ -11,6 +11,7 @@ import {
 import { SaveStatus, useAutosave, type SaveState } from "@/components/autosave";
 import { IN_FLIGHT, MoveButton, edgeVerdict } from "@/components/settings/move-button";
 import { Refusal } from "@/components/settings/refusal";
+import { RemoveConfirm } from "@/components/settings/remove-confirm";
 import {
   BUCKET_NAME_MAX,
   MAX_QUOTA,
@@ -40,9 +41,10 @@ import type { EditableBucket } from "./types";
  *   number or nothing: nothing means no quota (a count and no bar), and zero
  *   is refused here before the request is made — `check (monthly_quota > 0)`
  *   would refuse it too, in words nobody can read.
- * - **Remove** is behind a second click that says, with the count, what it
- *   does to the videos filed under the bucket: they are unfiled on this axis,
- *   and nothing else about them changes.
+ * - **Remove** is behind a second click (`RemoveConfirm`, the area's one
+ *   such control, which also owns where focus goes between the two) that
+ *   says, with the count, what it does to the videos filed under the bucket:
+ *   they are unfiled on this axis, and nothing else about them changes.
  */
 export function BucketRow({
   bucket,
@@ -64,11 +66,15 @@ export function BucketRow({
   onMove: (direction: "up" | "down") => void;
   /** The axis as the server now holds it, after a name or quota write. */
   onChanged: (buckets: readonly SettingsBucket[]) => void;
-  onRemoved: (buckets: readonly SettingsBucket[], removed: { name: string; unfiled: number }) => void;
+  onRemoved: (
+    buckets: readonly SettingsBucket[],
+    removed: { name: string; unfiled: number; archived: number },
+  ) => void;
   moveButtonRef: (direction: "up" | "down") => RefObject<HTMLButtonElement | null>;
 }) {
   const nameId = useId();
   const quotaId = useId();
+  const statusId = useId();
 
   /* ---------------------------------------------------------------- name -- */
 
@@ -192,8 +198,11 @@ export function BucketRow({
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* The row's name is in the control's name — eight "a month"
+                spinbuttons are eight of nothing to a screen reader — and the
+                visible word stays the unit. */}
             <label htmlFor={quotaId} className="text-[12px] text-muted">
-              a month
+              <span className="sr-only">Monthly quota for {bucket.name}, </span>a month
             </label>
             <input
               id={quotaId}
@@ -206,6 +215,7 @@ export function BucketRow({
               value={quota.value}
               placeholder="—"
               aria-invalid={quota.state.kind === "error" ? true : undefined}
+              aria-describedby={quota.state.kind === "error" ? statusId : undefined}
               onChange={(event) => quota.setValue(event.target.value)}
               onBlur={quota.commit}
               onKeyDown={onQuotaKey}
@@ -215,31 +225,9 @@ export function BucketRow({
           </div>
         </div>
 
-        <SaveStatus state={status} testId="bucket-status" />
+        <SaveStatus id={statusId} state={status} testId="bucket-status" />
 
         {removeError ? <Refusal testId="bucket-remove-error" message={removeError} /> : null}
-
-        {removing === "confirm" ? (
-          <p data-testid="bucket-remove-confirm" className="flex flex-wrap items-center gap-2 text-[12px] leading-5">
-            <span className="text-muted">{unfiledSentence(axis, bucket.name, filed)}</span>
-            <button
-              type="button"
-              data-testid="bucket-remove-yes"
-              onClick={() => void remove()}
-              className="rounded-button border border-attention/50 px-2 py-0.5 text-attention outline-none hover:bg-attention/10 focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              {filed === 0 ? "Yes, remove" : `Remove and unfile ${filed === 1 ? "it" : "them"}`}
-            </button>
-            <button
-              type="button"
-              data-testid="bucket-remove-keep"
-              onClick={() => setRemoving("idle")}
-              className="rounded-button border border-border px-2 py-0.5 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              Keep
-            </button>
-          </p>
-        ) : null}
       </div>
 
       <div className="flex flex-col items-end gap-2">
@@ -256,17 +244,16 @@ export function BucketRow({
           {filed === 0 ? "nothing filed" : `${filed} ${filed === 1 ? "video" : "videos"}`}
         </span>
 
-        {removing === "confirm" ? null : (
-          <button
-            type="button"
-            data-testid="bucket-remove"
-            disabled={removing === "busy"}
-            onClick={() => setRemoving("confirm")}
-            className="text-[12px] text-muted underline decoration-border underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
-          >
-            {removing === "busy" ? "Removing…" : "Remove"}
-          </button>
-        )}
+        <RemoveConfirm
+          state={removing}
+          onAsk={() => setRemoving("confirm")}
+          onConfirm={() => void remove()}
+          onKeep={() => setRemoving("idle")}
+          confirmLabel={filed === 0 ? "Yes, remove" : `Remove and unfile ${filed === 1 ? "it" : "them"}`}
+          question={unfiledSentence(axis, bucket.name, filed)}
+          subject={bucket.name}
+          testIdPrefix="bucket"
+        />
       </div>
     </li>
   );

@@ -15,12 +15,14 @@ import {
   MAX_STALE_DAYS,
   MAX_VOICE_GUIDE_LENGTH,
   MAX_WIP_THRESHOLD,
-  SETTING_NOTES,
   hasHookPlaceholder,
   numberText,
   parseExpectedCtr,
   parseStaleDays,
   parseWipThreshold,
+  settingNotes,
+  stageName,
+  type StageNames,
 } from "@/lib/channel-settings";
 
 /**
@@ -49,17 +51,29 @@ import {
 export function ChannelForm({
   channelId,
   channelSlug,
+  stageNames,
   initial,
 }: {
   channelId: string;
   channelSlug: string;
+  /**
+   * What this channel calls its stages, by kind, so a note that names one
+   * ("copied on the way into Scripting") uses the channel's own label.
+   */
+  stageNames: StageNames;
   initial: ChannelSettings;
 }) {
+  const notes = settingNotes(stageNames);
   return (
     <div className="flex flex-col gap-8">
-      <VoiceGuideField channelId={channelId} initial={initial.voiceGuide ?? ""} />
-      <ScriptTemplateField channelId={channelId} initial={initial.scriptTemplate} />
-      <Thresholds channelId={channelId} channelSlug={channelSlug} initial={initial} />
+      <VoiceGuideField channelId={channelId} note={notes.voiceGuide} initial={initial.voiceGuide ?? ""} />
+      <ScriptTemplateField
+        channelId={channelId}
+        note={notes.scriptTemplate}
+        scriptingName={stageName(stageNames, "scripting")}
+        initial={initial.scriptTemplate}
+      />
+      <Thresholds channelId={channelId} channelSlug={channelSlug} notes={notes} initial={initial} />
     </div>
   );
 }
@@ -127,7 +141,15 @@ function FieldHeading({
 /* Voice guide                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function VoiceGuideField({ channelId, initial }: { channelId: string; initial: string }) {
+function VoiceGuideField({
+  channelId,
+  note,
+  initial,
+}: {
+  channelId: string;
+  note: string;
+  initial: string;
+}) {
   const id = useId();
   const noteId = useId();
   const field = useAutosave({
@@ -142,7 +164,7 @@ function VoiceGuideField({ channelId, initial }: { channelId: string; initial: s
 
   return (
     <section data-testid="voice-guide-section" className="flex flex-col gap-2">
-      <FieldHeading htmlFor={id} title="Voice guide" note={SETTING_NOTES.voiceGuide} noteId={noteId} />
+      <FieldHeading htmlFor={id} title="Voice guide" note={note} noteId={noteId} />
       <textarea
         id={id}
         data-testid="voice-guide"
@@ -171,9 +193,21 @@ function VoiceGuideField({ channelId, initial }: { channelId: string; initial: s
 /* Script template                                                             */
 /* -------------------------------------------------------------------------- */
 
-function ScriptTemplateField({ channelId, initial }: { channelId: string; initial: string }) {
+function ScriptTemplateField({
+  channelId,
+  note,
+  scriptingName,
+  initial,
+}: {
+  channelId: string;
+  note: string;
+  /** The channel's label for its scripting-kind stage. */
+  scriptingName: string;
+  initial: string;
+}) {
   const id = useId();
   const noteId = useId();
+  const statusId = useId();
   const field = useAutosave({
     initial,
     save: saver(
@@ -191,7 +225,7 @@ function ScriptTemplateField({ channelId, initial }: { channelId: string; initia
       <FieldHeading
         htmlFor={id}
         title="Script template"
-        note={SETTING_NOTES.scriptTemplate}
+        note={note}
         noteId={noteId}
       />
       <textarea
@@ -200,7 +234,8 @@ function ScriptTemplateField({ channelId, initial }: { channelId: string; initia
         rows={16}
         value={field.value}
         maxLength={MAX_SCRIPT_TEMPLATE_LENGTH}
-        aria-describedby={noteId}
+        aria-invalid={field.state.kind === "error" ? true : undefined}
+        aria-describedby={field.state.kind === "error" ? `${noteId} ${statusId}` : noteId}
         spellCheck={false}
         onChange={(event) => field.setValue(event.target.value)}
         onBlur={field.commit}
@@ -214,11 +249,12 @@ function ScriptTemplateField({ channelId, initial }: { channelId: string; initia
           className="text-[12px] leading-5 text-attention"
         >
           There is no <code className="font-mono">{HOOK_PLACEHOLDER}</code> in this template, so a
-          video&rsquo;s chosen hook will not be written into its script on the way into Scripting.
+          video&rsquo;s chosen hook will not be written into its script on the way into {scriptingName}.
           That is allowed &mdash; it is your shape &mdash; but it is probably not what you meant.
         </p>
       ) : null}
       <SaveStatus
+        id={statusId}
         state={field.state}
         testId="script-template-status"
         idle="Saved on blur. Plain text; markdown is kept as written, never rendered."
@@ -234,10 +270,12 @@ function ScriptTemplateField({ channelId, initial }: { channelId: string; initia
 function Thresholds({
   channelId,
   channelSlug,
+  notes,
   initial,
 }: {
   channelId: string;
   channelSlug: string;
+  notes: ReturnType<typeof settingNotes>;
   initial: ChannelSettings;
 }) {
   const wip = useAutosave({
@@ -287,7 +325,7 @@ function Thresholds({
         testId="wip-threshold"
         label="WIP threshold"
         unit="videos in a column"
-        note={SETTING_NOTES.wipThreshold}
+        note={notes.wipThreshold}
         min={1}
         max={MAX_WIP_THRESHOLD}
         step={1}
@@ -300,7 +338,7 @@ function Thresholds({
         testId="stale-days"
         label="Stale after"
         unit="days in one stage"
-        note={SETTING_NOTES.staleDays}
+        note={notes.staleDays}
         min={1}
         max={MAX_STALE_DAYS}
         step={1}
@@ -313,7 +351,7 @@ function Thresholds({
         testId="expected-ctr"
         label="Expected CTR"
         unit="% in the first 24 hours"
-        note={SETTING_NOTES.expectedCtr}
+        note={notes.expectedCtr}
         min={0.01}
         max={100}
         step={0.01}
@@ -349,6 +387,8 @@ function NumberField({
   placeholder?: string;
   field: ReturnType<typeof useAutosave>;
 }) {
+  const statusId = useId();
+  const failed = field.state.kind === "error";
   return (
     <div data-testid={`${testId}-field`} className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-[13px] font-medium">
@@ -365,8 +405,11 @@ function NumberField({
           step={step}
           value={field.value}
           placeholder={placeholder}
-          aria-describedby={noteId}
-          aria-invalid={field.state.kind === "error" ? true : undefined}
+          // The permanent note, and — while the box is refused — the status
+          // line that says why, so a screen reader returning to the box can
+          // re-read the reason rather than only the one-time alert.
+          aria-describedby={failed ? `${noteId} ${statusId}` : noteId}
+          aria-invalid={failed ? true : undefined}
           onChange={(event) => field.setValue(event.target.value)}
           onBlur={field.commit}
           onKeyDown={commitOnEnter(field.commit)}
@@ -377,7 +420,7 @@ function NumberField({
       <p id={noteId} className="max-w-2xl text-[12px] leading-5 text-muted">
         {note}
       </p>
-      <SaveStatus state={field.state} testId={`${testId}-status`} />
+      <SaveStatus id={statusId} state={field.state} testId={`${testId}-status`} />
     </div>
   );
 }

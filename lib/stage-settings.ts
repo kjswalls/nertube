@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 import { kindOrder, type StageKind } from "./defaults";
+import { moved, nameTaken, type MoveDirection } from "./ordering";
+import { cleanLabel } from "./text";
+
+// The order arithmetic and the name check are `lib/ordering.ts`'s, shared
+// with the bucket and template editors; re-exported so this module stays the
+// one import a stages screen needs.
+export { moved, nameTaken, type MoveDirection };
 
 /**
  * Everything about editing a channel's stages that is a rule rather than a
@@ -36,24 +43,16 @@ export const STAGE_NAME_MAX = 40;
 
 export const StageNameSchema = z
   .string({ error: "A stage needs a name." })
-  .trim()
-  .min(1, "A stage needs a name — a column with no heading is one nobody can find.")
-  .max(STAGE_NAME_MAX, `Keep a stage name under ${STAGE_NAME_MAX} characters; it is a column heading.`);
-
-/**
- * Two stages of one channel may not share a name, whatever the case.
- *
- * Not a database rule — nothing behaves differently — but the board's columns
- * are `<section aria-label={name}>` and a screen reader announcing two regions
- * called "Editing" is a board that cannot be navigated by name.
- */
-export function nameTaken(
-  name: string,
-  others: readonly { readonly name: string }[],
-): boolean {
-  const wanted = name.trim().toLocaleLowerCase();
-  return others.some((other) => other.name.trim().toLocaleLowerCase() === wanted);
-}
+  // Format characters (zero-width space, BOM, …) draw nothing, so a name made
+  // of them is no name; `cleanLabel` removes them before the length rule
+  // runs, and `has_visible_text()` refuses them again in the database.
+  .transform(cleanLabel)
+  .pipe(
+    z
+      .string()
+      .min(1, "A stage needs a name — a column with no heading is one nobody can find.")
+      .max(STAGE_NAME_MAX, `Keep a stage name under ${STAGE_NAME_MAX} characters; it is a column heading.`),
+  );
 
 /* -------------------------------------------------------------------------- */
 /* The order                                                                   */
@@ -66,8 +65,6 @@ export interface OrderedStage {
   /** Null for a user-added, inert stage. */
   readonly kind: StageKind | null;
 }
-
-export type MoveDirection = "up" | "down";
 
 /**
  * True when the core stages in `stages`, read in display order, are in
@@ -82,26 +79,6 @@ export function coreOrderHolds(stages: readonly OrderedStage[]): boolean {
     previous = order;
   }
   return true;
-}
-
-/**
- * The list with the stage at `index` swapped one step in `direction`, or null
- * when there is nothing on that side to swap with. Pure; the caller decides
- * whether the result is allowed.
- */
-export function moved<T>(
-  stages: readonly T[],
-  index: number,
-  direction: MoveDirection,
-): T[] | null {
-  const target = direction === "up" ? index - 1 : index + 1;
-  if (index < 0 || index >= stages.length) return null;
-  if (target < 0 || target >= stages.length) return null;
-  const next = [...stages];
-  const held = next[index];
-  next[index] = next[target];
-  next[target] = held;
-  return next;
 }
 
 export type MoveVerdict =
@@ -168,7 +145,7 @@ export function canMove(
 export const KIND_NOTES: Readonly<Record<StageKind, string>> = {
   // capture_video (0005) always lands a new video here; the board caps the
   // column at ten (components/board/board.tsx); /now skips ideas entirely.
-  idea: "Where capture lands. The board shows the ten most recent; the rest are in Ideas. Never on /now.",
+  idea: "Where capture lands, so it stays on the board. The board shows the ten most recent; the rest are in Ideas. Never on /now.",
   // move_video's gate compares kind order against 'packaging'.
   packaging:
     "The TTH gate. Leaving here for any later stage needs a title, a thumbnail concept and one chosen hook — or a typed reason to skip.",
@@ -187,7 +164,7 @@ export const KIND_NOTES: Readonly<Record<StageKind, string>> = {
 
 /** What an inert stage is, said once so every row says the same thing. */
 export const INERT_NOTE =
-  "Added by you. It has a column and can hold videos, but no behaviour: no gate, no badge, no template fill, and /now's “move to next stage” never points at it.";
+  "Added by you. It has a column, can hold videos, and its checklist template is copied like any other stage's — but no behaviour: no gate, no badge, and /now's “move to next stage” never points at it.";
 
 /* -------------------------------------------------------------------------- */
 /* The refusals                                                                */
@@ -212,6 +189,27 @@ export function occupiedSentence(name: string, count: number): string {
 export function readOccupied(message: string): number | null {
   const match = /occupied:(\d+)/.exec(message);
   return match ? Number(match[1]) : null;
+}
+
+/** `set_stage_enabled` raises `idea stage: …` when asked to switch the Idea stage off. */
+export function isIdeaStageRefusal(message: string): boolean {
+  return /^idea stage:/.test(message);
+}
+
+/** The sentence for it. Capture must always have a column to land in. */
+export function ideaStaysOnSentence(name: string): string {
+  return `${name} is where capture lands, so it stays on the board — every new idea needs a column to arrive in.`;
+}
+
+/**
+ * A switched-off stage that still holds live videos — a state no screen can
+ * reach since 0008, and the one a hand-edited row can. Said on the row, with
+ * the link, so it is never only a number beside "Off".
+ */
+export function hiddenVideosSentence(name: string, count: number): string {
+  const what = count === 1 ? "a video" : `${count} videos`;
+  const them = count === 1 ? "it" : "them";
+  return `${name} is switched off but still holds ${what}, hidden from the board and from /now. Switch it on to see ${them}, or move ${them} from the video page.`;
 }
 
 /** `reorder_stages` raises `core order: …`; the sentence is already for people. */

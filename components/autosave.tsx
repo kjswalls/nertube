@@ -82,9 +82,25 @@ export type SaveState<Payload = unknown> =
  * of it that no longer exists. The status line offers a reload rather than a
  * retry for those.
  */
-export type SaveResult =
+export type SaveResult<Patch = never> =
   | { ok: true }
-  | { ok: false; error: string; conflict?: boolean };
+  | {
+      ok: false;
+      error: string;
+      conflict?: boolean;
+      /**
+       * The part of the patch that did not land, when a save is a *sequence*
+       * and the first part of it did.
+       *
+       * The template editor sends a batch of operations and applies them one
+       * at a time; when the third fails, the first two are already in the
+       * table. A Retry that re-sent the whole batch inserted the landed add a
+       * second time and swapped the landed move back (M7's review). When a
+       * `save` reports `unsent`, the queue's Retry payload is that — plus
+       * whatever was parked behind it — and never the whole patch.
+       */
+      unsent?: Patch;
+    };
 
 /**
  * What a *field's* save answers with.
@@ -146,7 +162,7 @@ export function useSaveQueue<Patch>({
   merge = mergePatches,
   onFailure,
 }: {
-  save: (patch: Patch) => Promise<SaveResult>;
+  save: (patch: Patch) => Promise<SaveResult<Patch>>;
   /**
    * How a patch that arrives while one is in flight folds into whatever is
    * already queued. The default is an object merge; a field whose patch *is*
@@ -155,14 +171,17 @@ export function useSaveQueue<Patch>({
   merge?: (queued: Patch, next: Patch) => Patch;
   /**
    * A write failed, and this is whatever was queued behind it — `null` when
-   * nothing was.
+   * nothing was — and, second, the whole payload the Retry will carry (the
+   * unsent part of the failed patch merged with the parked one).
    *
    * The queue **parks** that work rather than sending it (see the note in
    * `send`), so a caller that already applied it optimistically has to be told,
-   * and this is where it puts the screen back. Called once per failure, before
-   * the error state lands, so the rollback and the message are one batch.
+   * and this is where it puts the screen back — or, for a caller that keeps
+   * the failed work on screen, where it learns exactly what is still unsent.
+   * Called once per failure, before the error state lands, so the rollback and
+   * the message are one batch.
    */
-  onFailure?: (parked: Patch | null) => void;
+  onFailure?: (parked: Patch | null, payload: Patch) => void;
 }): SaveQueue<Patch> {
   const [state, setState] = useState<SaveState<Patch>>({ kind: "idle" });
   const [, startTransition] = useTransition();
@@ -206,7 +225,7 @@ export function useSaveQueue<Patch>({
     setState({ kind: "saving" });
 
     startTransition(async () => {
-      let result: SaveResult;
+      let result: SaveResult<Patch>;
       try {
         result = await saveRef.current(patch);
       } catch {
@@ -242,9 +261,11 @@ export function useSaveQueue<Patch>({
       */
       const parked = queued.current;
       queued.current = null;
-      const payload = parked ? mergeRef.current(patch, parked.patch) : patch;
+      // What did not land: the whole patch unless the save says otherwise.
+      const failed = result.unsent === undefined ? patch : result.unsent;
+      const payload = parked ? mergeRef.current(failed, parked.patch) : failed;
 
-      onFailureRef.current?.(parked ? parked.patch : null);
+      onFailureRef.current?.(parked ? parked.patch : null, payload);
       setState({
         kind: "error",
         message: result.error,
@@ -359,6 +380,20 @@ export function useAutosave({
     [touch],
   );
 
+  /**
+   * Has something been typed that the row does not hold?
+   *
+   * The *raw* value against what the server confirmed (or what is on the
+   * wire), not the trimmed one `commit` sends: a box showing a stored value
+   * with a trailing newline is not dirty because trimming it would change
+   * it, and a guard that thought so would re-save every untouched text on
+   * every navigation away.
+   */
+  const isDirty = useCallback((): boolean => {
+    const pendingValue = peekPending();
+    return valueRef.current !== (pendingValue === null ? savedRef.current : pendingValue);
+  }, [peekPending]);
+
   const commit = useCallback(() => {
     const next = valueRef.current.trim();
     if (next !== valueRef.current) {
@@ -381,6 +416,50 @@ export function useAutosave({
     if (next === baseline) return;
     send(next);
   }, [peekPending, send]);
+
+  /*
+    Save on blur is the rule (PLAN.md), and a blur is what an in-app link
+    click, a Tab-and-Enter and a section switch all cause. Two ways of leaving
+    do not blur anything: the browser's Back button, which is a client-side
+    popstate that unmounts this component with the text still in the box, and
+    a reload or a closed tab, which unmount nothing. M7's review typed a page
+    of voice guide and pressed Back, and it was gone with no warning.
+
+    So, two guards on the one save queue, and therefore on every field:
+
+    1. **Unmount commits.** The cleanup below runs on a client-side navigation
+       away from the page; the action is sent before the component is gone,
+       and the screen it lands on is not this one, so no state is set.
+    2. **Unload asks.** While the box is dirty or a save is on the wire, a
+       `beforeunload` handler makes the browser confirm a reload or a close —
+       the standard "changes may not be saved" dialog — and sends the save
+       first, so a person who then chooses to stay has already been saved.
+       The dialog is the browser's, not the app's: it is the one dialog the
+       app cannot draw, and its timing is the one moment `components/modal.tsx`
+       could not be shown.
+  */
+  const commitRef = useRef(commit);
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => {
+    commitRef.current = commit;
+    isDirtyRef.current = isDirty;
+  });
+
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (!isDirtyRef.current() && peekPending() === null) return;
+      commitRef.current();
+      event.preventDefault();
+      // Chromium ignores preventDefault alone; the legacy property is what
+      // makes it ask.
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      if (isDirtyRef.current()) commitRef.current();
+    };
+  }, [peekPending]);
 
   return { value, setValue, commit, state, pending: state.kind === "saving" };
 }
@@ -406,12 +485,20 @@ export function SaveStatus<Payload>({
   testId,
   idle = "",
   onRetry,
+  id,
 }: {
   state: SaveState<Payload>;
   testId: string;
   /** Shown when there is nothing to report; usually a hint about the field. */
   idle?: string;
   onRetry?: (payload: Payload) => void;
+  /**
+   * So a field can point at this line with `aria-describedby` when it is the
+   * reason the field is `aria-invalid`: the alert is announced once when it
+   * appears, and the association is how a screen reader re-reads it on
+   * returning to the box.
+   */
+  id?: string;
 }) {
   const failed = state.kind === "error";
   const conflict = state.kind === "error" && state.conflict === true;
@@ -430,6 +517,7 @@ export function SaveStatus<Payload>({
   */
   return (
     <p
+      id={id}
       data-testid={testId}
       data-state={state.kind}
       className={[

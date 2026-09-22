@@ -75,10 +75,12 @@ export function AxisEditor({
   const [moveError, setMoveError] = useState<string | null>(null);
   const [removedNote, setRemovedNote] = useState<string | null>(null);
 
-  const focus = useMoveFocus(
-    [list, moving],
-    (bucketId) => `[data-bucket-id="${bucketId}"] [data-testid="bucket-name"]`,
-  );
+  const focus = useMoveFocus({
+    deps: [list],
+    inFlight: moving !== null,
+    nameField: (bucketId) => `[data-bucket-id="${bucketId}"] [data-testid="bucket-name"]`,
+  });
+  const addInputId = useId();
 
   /* ------------------------------------------------------------- adopting -- */
 
@@ -97,13 +99,15 @@ export function AxisEditor({
     setMoving(bucketId);
     setMoveError(null);
     setRemovedNote(null);
+    // Asked for before the write, consumed after it settles: a failed move
+    // leaves the axis as it was and focus goes back to the arrow pressed.
+    focus.requestFocus(bucketId, direction);
     try {
       const result = await moveBucketAction({ bucketId, direction });
       if (!result.ok) {
         setMoveError(result.error);
         return;
       }
-      focus.requestFocus(bucketId, direction);
       adopt(result.buckets);
       router.refresh();
     } catch {
@@ -187,12 +191,16 @@ export function AxisEditor({
                 router.refresh();
               }}
               onRemoved={(next, removed) => {
-                adopt(next);
-                setRemovedNote(
-                  removed.unfiled === 0
-                    ? `Removed “${removed.name}”. No video was filed under it.`
-                    : `Removed “${removed.name}” and unfiled ${removed.unfiled === 1 ? "one video" : `${removed.unfiled} videos`} — they keep everything else and can be filed again by hand.`,
+                // The row is gone with the button that removed it; focus goes
+                // to the next row's name, or to the add form when it was last.
+                const neighbour = list[index + 1] ?? list[index - 1];
+                focus.requestField(
+                  neighbour
+                    ? `[data-bucket-id="${neighbour.id}"] [data-testid="bucket-name"]`
+                    : `[id="${addInputId}"]`,
                 );
+                adopt(next);
+                setRemovedNote(removedSentence(removed));
                 router.refresh();
               }}
               moveButtonRef={(direction) => focus.buttonRef(bucket.id, direction)}
@@ -208,6 +216,7 @@ export function AxisEditor({
       ) : null}
 
       <AddBucketForm
+        inputId={addInputId}
         channel={channel}
         axis={axis}
         taken={list}
@@ -219,6 +228,28 @@ export function AxisEditor({
       />
     </section>
   );
+}
+
+/**
+ * What a removal did, in the same terms the sentence before it used: the
+ * row's count is non-archived videos (the matrix's number), and archived
+ * videos carried the bucket too, so they are named apart rather than folded
+ * into one number that disagrees with the one just shown.
+ */
+function removedSentence(removed: { name: string; unfiled: number; archived: number }): string {
+  const live =
+    removed.unfiled === 0 ? null : removed.unfiled === 1 ? "one video" : `${removed.unfiled} videos`;
+  const archived =
+    removed.archived === 0
+      ? null
+      : removed.archived === 1
+        ? "one archived video"
+        : `${removed.archived} archived videos`;
+  if (live === null && archived === null) {
+    return `Removed “${removed.name}”. No video was filed under it.`;
+  }
+  const what = [live, archived].filter((part) => part !== null).join(" and ");
+  return `Removed “${removed.name}” and unfiled ${what} — they keep everything else and can be filed again by hand.`;
 }
 
 /** A key that changes when the server's set does, in any way the list shows. */
@@ -238,18 +269,22 @@ function keyOf(buckets: readonly EditableBucket[]): string {
  * exists.
  */
 function AddBucketForm({
+  inputId,
   channel,
   axis,
   taken,
   onAdded,
 }: {
+  /** The name box's id, so the axis can send focus here after a removal. */
+  inputId: string;
   channel: BucketsChannel;
   axis: BucketAxis;
   taken: readonly { name: string }[];
   onAdded: (buckets: readonly SettingsBucket[]) => void;
 }) {
-  const nameId = useId();
+  const nameId = inputId;
   const quotaId = useId();
+  const statusId = useId();
   const [name, setName] = useState("");
   const [quota, setQuota] = useState("");
   const [busy, setBusy] = useState(false);
@@ -285,11 +320,13 @@ function AddBucketForm({
       onAdded(result.buckets);
       setName("");
       setQuota("");
-      input.current?.focus();
     } catch {
       setError("Could not reach the server, so nothing was added. Try again.");
     } finally {
       setBusy(false);
+      // Back to the box on every outcome: the next bucket, or the same name
+      // to fix.
+      input.current?.focus();
     }
   }
 
@@ -334,6 +371,8 @@ function AddBucketForm({
             step={1}
             value={quota}
             placeholder="—"
+            aria-invalid={error !== null && !duplicate ? true : undefined}
+            aria-describedby={error !== null ? statusId : undefined}
             onChange={(event) => {
               setQuota(event.target.value);
               setError(null);
@@ -345,14 +384,17 @@ function AddBucketForm({
         <button
           type="submit"
           data-testid="add-bucket-submit"
-          disabled={busy || trimmed === "" || duplicate}
+          // Not disabled while busy: `submit` ignores re-entry, and a button
+          // that disables itself under the cursor drops focus on <body>.
+          aria-busy={busy ? true : undefined}
+          disabled={trimmed === "" || duplicate}
           className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
         >
           {busy ? "Adding…" : `Add ${label}`}
         </button>
       </div>
       {refused ? (
-        <Refusal testId="add-bucket-status" message={refused} />
+        <Refusal id={statusId} testId="add-bucket-status" message={refused} />
       ) : (
         <p data-testid="add-bucket-status" className="text-[12px] leading-5 text-muted">
           It goes at the end of the {axis === "vertical" ? "rows" : "columns"} and is on

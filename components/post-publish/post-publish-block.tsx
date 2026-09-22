@@ -82,6 +82,8 @@ export interface PostPublishProps {
   /** The channel's Repurposed stage and what is sitting in it. */
   repurposed: { id: string; name: string; isEnabled: boolean } | null;
   repurposedOccupied: number;
+  /** The channel's slug, for the lane refusal's link to the board. */
+  channelSlug: string;
 }
 
 /**
@@ -398,6 +400,7 @@ export function PostPublishBlock(props: PostPublishProps) {
       {reached(props.stageKind, "scheduled") ? (
         <RepurposedLane
           stage={props.repurposed}
+          channelSlug={props.channelSlug}
           occupied={props.repurposedOccupied}
           onChanged={() => router.refresh()}
         />

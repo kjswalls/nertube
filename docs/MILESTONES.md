@@ -5756,7 +5756,7 @@ review's scope; it is left where M4 filed it, with one more data point on it.
 
 - **`/settings/stages/[slug]`** — one channel's stages, all of them, disabled
   included, in board order. `/settings/stages` with no slug redirects to the
-  first channel's, the way `/` picks a board. The Settings row in the sidebar
+  first channel's, the way `/` opens on `/now`. The Settings row in the sidebar
   is now a link (to the Board row's channel, the way Ideas is), and it is the
   last of the sidebar's placeholders to become a page.
 - **Rename.** The name is an input on the row; it saves on blur or Enter
@@ -5849,7 +5849,14 @@ to it. The other channel's Packaging is asserted unchanged in the same test.
 | Inert stages can be removed, but only when nothing refers to them. | No delete at all. The delete policy for `kind is null` has existed since M0 for exactly this, and a stage added by mistake should not be a permanent disabled row. A stage videos have passed through still has `checklist_items` naming it (`no action`), so the delete fails at the database and the message says to switch it off instead. |
 | An added stage lands at the end and is moved with the arrows. | Asking for a position at add time. One step at a time is the only move the order rule needs to judge, and the arrows already exist. |
 | Names are unique within a channel, case-insensitively, in the action. | A database unique. Nothing behaves differently with two "Editing" columns; what breaks is a screen reader announcing two regions with one name. A rule about legibility belongs where the sentence is. |
-| Focus after a move follows the stage: the same arrow if it is still offered, otherwise the other one, otherwise the name. | Letting focus fall to `<body>` when the pressed arrow disables itself — the pattern M6's review filed against the filming-day panel. |
+
+Build notes (engineering choices, not product decisions — moved out of the
+table above by the M7 review):
+
+- Focus after a move follows the stage: the same arrow if it is still
+  offered, otherwise the other one, otherwise the name — rather than letting
+  focus fall to `<body>` when the pressed arrow disables itself, the pattern
+  M6's review filed against the filming-day panel.
 
 ### Deviations from PLAN.md, stated plainly
 
@@ -5872,10 +5879,13 @@ to it. The other channel's Packaging is asserted unchanged in the same test.
   still carries its own copy of the occupancy sentence and still pre-disables
   the box. It now calls the function through the same `setStageEnabled`, so
   the rule is one rule; the sentence is two sentences. Left for the integration
-  pass, which owns that file.
+  pass, which owns that file. *Superseded by the integration pass, below: the
+  lane calls `occupiedSentence`; and by the M7 review's fix pass: it draws the
+  sentence with `Refusal`, link included. The pre-disabled box stays.*
 - **`ChannelSwitch` is imported from `components/settings/checklists/`**, the
   other slice's directory, rather than copied. If the integration pass moves it
-  somewhere shared, this page's import moves with it.
+  somewhere shared, this page's import moves with it. *Superseded by the
+  integration pass, below: it lives at `components/settings/channel-switch.tsx`.*
 - **The timezone question** deferred to M7 by M6's review is not answered by
   this slice; it is a channel-or-profile setting, not a stage one.
 
@@ -5995,13 +6005,15 @@ and an add.
    the arrows are disabled; typing into a row never is.
 6. **Disabled stages are shown, marked, and editable.** Hiding them would make
    a lane's template unreachable for exactly as long as the lane is off.
-7. **The sidebar's Settings entry is the stages editor's, not this slice's.**
-   `app-sidebar.tsx` is outside this slice's files; the stages editor added the
-   row (it opens `/settings/stages/[slug]`) and the `"settings"` section, and
-   this page reports itself as that section so the row is marked current on
-   it. How a person gets from the stages editor to this page — a tab strip
-   across the settings screens — is the integration pass's, because it needs
-   both routes to exist.
+
+Build note (a scoping note, not a product decision — moved out of the list
+above by the M7 review): the sidebar's Settings entry is the stages editor's,
+not this slice's. `app-sidebar.tsx` is outside this slice's files; the stages
+editor added the row (it opens `/settings/stages/[slug]`) and the `"settings"`
+section, and this page reports itself as that section so the row is marked
+current on it. How a person gets from the stages editor to this page — a tab
+strip across the settings screens — was the integration pass's, and is
+`SettingsHeader`.
 
 ### What a screenshot walk changed
 
@@ -6232,8 +6244,15 @@ M0). Three options were open:
 | Expected CTR of zero is refused. | Allowing 0. A video cannot be below an expectation of nothing, so the prompt would never fire and the person would believe they had set one. Empty is the way to the median. |
 | Text fields normalise only line endings and trailing whitespace; leading indentation and internal blank lines are kept. | Trimming each line. A voice guide's indented bullets and a template's blank lines are the content. |
 | Positions keep gaps after a removal; a reorder renumbers. | Closing gaps on delete. Same rule as the template editor: positions are order, not a count. |
-| The four-link `SettingsNav` is rendered by this slice's two pages only. | Editing `app/settings/stages/[slug]/page.tsx` and `…/checklists/[slug]/page.tsx` to render it too. Those files belong to slices still being written in the same tree; the component is one import away and the integration pass owns the join. |
-| The matrix's `NoVerticals` panel still says the editor "arrives in M7" with a disabled button. | Turning it into a link to `/settings/buckets/[slug]`. It is `components/ideas/matrix/no-verticals.tsx`, outside this slice, and `e2e/matrix.spec.ts:569–577` asserts the disabled state. The fix is one `<Link>` and two assertions, filed for the integration pass. |
+
+Two rows that used to sit in the table above were limits of the slice, not
+product decisions, and both were undone by the integration pass (moved here
+by the M7 review): the four-link `SettingsNav` was rendered by this slice's
+two pages only, because the other two pages belonged to slices still being
+written — `SettingsHeader` now renders it on all four; and the matrix's
+`NoVerticals` panel still said the editor "arrives in M7" with a disabled
+button, because the file and `e2e/matrix.spec.ts` were outside the slice —
+it is now a `<Link>` to `/settings/buckets/[slug]`.
 
 ### Deviations from PLAN.md, stated plainly
 
@@ -6449,9 +6468,22 @@ page is untouched; `e2e/flow-fields.spec.ts` was already proving the field.
 | Refusals are set in `attention`, not `over-limit`. | Keeping `over-limit`, which the stages and buckets slices used. `globals.css` defines `over-limit` as "a rule is being broken right now" — the title over 55 characters, the column over its WIP threshold — and `attention` as "something wants a look". A refused request is the second: nothing is broken, the person asked for something the tool will not do, and the failed-save line beside it was already `attention`. |
 | The sidebar's Settings row opens `/settings/stages/[slug]`, not `/settings`. | The bare address. The row is the Board row's channel, like Ideas; a redirect in between would be a hop for nothing and would lose the channel the sidebar is showing. `/settings` exists for a typed address and lands in the same place. |
 | The channel switch keeps the section. | Keeping the stages slice's `basePath` prop, which each page filled in by hand. Keyed by section, the switch cannot be pointed at the wrong screen by a copied import. |
-| `useMoveFocus` reaches the template editor too. | Leaving template rows without it, as the slice shipped them. The arrows there are disabled while the write is in flight, which is precisely the case that drops focus. |
-| Two testid renames in two slice specs (`settings-stages-channel` → `settings-channel-name`; `template-up|down` → `template-move-up|down`). | Keeping per-slice ids and mapping them in the shared components. One id per meaning is the point of one component. |
-| `e2e/m2-review.spec.ts` gets the hydration wait rather than a different date on retry. | The other fix the checklists slice named. A different date on retry proves "some date saved", which is weaker than the test's title; waiting for the marker proves the date it picked. |
+
+Build notes (engineering choices, not product decisions — moved out of the
+table above by the M7 review):
+
+- `useMoveFocus` reaches the template editor too, rather than leaving
+  template rows without it as the slice shipped them: the arrows there are
+  disabled while the write is in flight, which is precisely the case that
+  drops focus.
+- Two testid renames in two slice specs (`settings-stages-channel` →
+  `settings-channel-name`; `template-up|down` → `template-move-up|down`),
+  rather than per-slice ids mapped in the shared components: one id per
+  meaning is the point of one component.
+- `e2e/m2-review.spec.ts` gets the hydration wait rather than a different
+  date on retry: a different date on retry proves "some date saved", which
+  is weaker than the test's title; waiting for the marker proves the date it
+  picked.
 
 ### Deviations from PLAN.md, stated plainly
 
@@ -6496,3 +6528,270 @@ page is untouched; `e2e/flow-fields.spec.ts` was already proving the field.
 | `npm test` | 22 files, 376 tests passed (none added: this pass wrote no new rule) |
 | `npx playwright test m7-acceptance settings-stages settings-checklists settings-channel matrix post-publish m2-review shell` (every spec this pass touched, own ports and database) | **58 passed, 1 failed** (5.1m): the failure was the new acceptance spec opening the video page without `?section=schedule`, where the stage select is not visible; fixed, then `m7-acceptance` alone **3 passed** (33s). `m2-review.spec.ts:476` passed on the first attempt with the hydration wait. |
 | `npm run e2e` (full suite, own ports and database) | **218 passed, 0 failed, 1 skipped** (16.9m), exit 0. The skip is `session-refresh`, which only runs under `npm run e2e:refresh`, by design. This is the first M7 full run with no failure: `m2-review.spec.ts:476` passed with the hydration wait, and the `m6-acceptance` and `packaging` fixes the stages slice made held. The run was made with no other Playwright run sharing the checkout (`DEV_STACK_PORT=54371`, `NERTUBE_DEV_DB=nertube_e2e_m7i`, `E2E_PORT=3151`, `--output` into a private directory), which is the other reason it is clean where the slices' runs were not. |
+
+---
+
+## M7 — Review: what the adversarial pass found, and what was done about it
+
+> Scope: every file M7 touched, plus the ones the findings reached into —
+> `app/actions/{videos,moves,metrics,buckets,stages,channels}.ts`,
+> `components/autosave.tsx`, `components/settings/**`, the video page's
+> sentences that name a stage, `components/post-publish/repurposed-lane.tsx`,
+> `components/ideas/matrix/no-verticals.tsx`, `lib/text.ts` and
+> `lib/ordering.ts` (new), the four settings libs, and **one migration,
+> `0008_settings_boundary.sql`**, with `36_settings_boundary.test.sql` and
+> changes to `20`, `30`, `35` and `90`. No new runtime dependency.
+
+### How this review ran, and why it is in two halves
+
+The review was cut short. Two adversarial lenses (the rename/behaviour walk
+and the database-boundary walk) reported twelve findings, and then the
+account hit its spend limit mid-review: two further reviewers and — the part
+that matters — **the fix pass** were killed before a line was changed, so
+none of the twelve findings had been applied when this pass started. Two
+lenses ran late, once the limit reset: a **browser accessibility** lens (nine
+findings, driven with Playwright against a private stack) and a
+**scope-and-quality** lens (seven findings, including the one blocker). This
+section covers all twenty-eight, verified against the tree before anything
+was changed; three of the twelve early findings and one of the late ones
+overlap and are treated as one.
+
+### The three that were about the database being wider than the screens
+
+**Invisible names.** Every "needs a name" rule — stage, bucket, template row,
+script template — was `.trim().min(1)` in zod and, for stages, `btrim(name)
+<> ''` in SQL. Neither strips Unicode format characters, so `"​"` was
+accepted everywhere, and `"Money​"` sat beside `"Money"` as a second
+matrix heading nobody could tell apart. The rule now lives in one place on
+each side of the wire: `lib/text.ts` (`cleanLabel` strips `\p{Cf}` and the
+NUL byte before the length rule; `isBlank` asks the same question of prose
+without altering it; `sameLabel` is what the duplicate checks compare) and
+`has_visible_text()` in 0008, an immutable SQL function inside a CHECK on
+`stages.name`, `buckets.name`, `checklist_templates.text`, `channels.slug`,
+`channels.name` and `channels.script_template`. `lib/text.test.ts` fires the
+same probes at the four schemas that `36_settings_boundary.test.sql` fires at
+the six CHECKs. Prose keeps its characters (a ZWJ inside an emoji is content)
+and loses only NUL, which Postgres refuses with a message nobody should read
+— the raw-error finding is closed by the same helper.
+
+**The occupancy rule, only at the click.** `set_stage_enabled` refuses while
+non-archived videos are in the stage, correctly; two app-owned writes then put
+a live video into the switched-off column afterwards. Both doors are closed in
+the database:
+
+- Archive and restore go through **`set_video_archived(p_video, p_archived)`**,
+  the seventh security-definer function, and `archived_at` leaves the client's
+  UPDATE grant. A restore into a switched-off stage raises `stage disabled:<name>`;
+  `updateVideo` turns that into *"Scripting is switched off, so restoring this
+  video would hide it from the board and from /now. Switch Scripting on in
+  Settings first, or move the video to another stage."* `e2e/flow-fields.spec.ts`
+  archives a video, switches its stage off, presses Restore and reads the
+  sentence, then PATCHes `archived_at` straight at PostgREST and gets 42501.
+- **The Idea stage stays on.** `set_stage_enabled(idea, false)` raises `idea
+  stage: …` before it counts anything, because `capture_video` always lands
+  there and a switched-off column that keeps receiving rows is a hidden
+  inbox. The settings row offers the switch greyed out with *"Stays on:
+  capture lands here."* beside it (the one control in the area that is
+  disabled by rule rather than by state — a switch that can never do anything
+  is more honest greyed out than live and refusing). `capture_video` refuses
+  a disabled Idea stage too, as a backstop for a hand-edited row, and
+  `captureVideo` says so in a sentence.
+- A switched-off stage that still holds live videos — reachable now only by
+  hand — is said on its row with `Refusal` and the link, not merely counted.
+
+**A forged PATCH on `channels`.** The table carried the default table-wide
+UPDATE grant, so `slug` and `name` — editable nowhere in the app — could be
+blanked, leaving the channel at `/c//board`. 0008 revokes it and grants
+exactly the five columns `/settings/channel` edits; `20_column_privileges.test.sql`
+pins the count at five, and `e2e/settings-channel.spec.ts` PATCHes `slug`,
+`name`, `wip_threshold: 0`, `stale_days: -1`, `expected_ctr: 0`,
+`script_template: ""` and `script_template: "​"` with a real session and
+reads 403 for the first two and 23514 for the rest. The same migration adds
+the floors the screens had and the tables did not (`wip_threshold` 1–99,
+`stale_days` 1–365, `expected_ctr` 0.01–100, `est_minutes` 1–480, `position
+> 0` on stages, buckets and templates), narrows the `stages` UPDATE grant to
+`name` alone (0007 had kept `user_id` and `channel_id`; a writable
+`channel_id` re-parented an inert stage, templates and all, into another
+channel), and takes `kind` and `is_enabled` out of the `stages` INSERT grant
+so an added stage is `kind null` and on by construction — `addStage` no
+longer names `kind` in its insert.
+
+### The blocker: Retry re-sent what had already landed
+
+`useTemplateEditor` sends a batch of operations and applies them one at a
+time; `useSaveQueue` stored the *whole* batch as the Retry payload. When the
+third of three adds failed, Retry inserted the second add again and the
+screen read `R1, R2, R2, R3` under "Saved". The one save queue now takes an
+`unsent` part on a failed `SaveResult` — *the part of a sequence that did not
+land* — and builds the Retry payload from that plus whatever was parked
+behind it. The template editor reports it; the video page's checklist
+(`use-checklist.ts`) already kept its own `failed` ref for exactly this, so
+the queue is now the one place the rule lives rather than one editor's
+private care. `e2e/settings-checklists.spec.ts` holds the first add on the
+wire, queues two more as one batch, drops the third request, and asserts the
+table and the screen before and after Retry: `[R1, R2]` then `[R1, R2, R3]`,
+positions `1..3`.
+
+The same hook rolled a failed edit off the screen under a line reading
+"Nothing on screen has been lost", then dropped it for good on the next
+successful save. The editor now tells two failures apart: a **refusal** (the
+server said no) is final, so that one operation is put back and the sentence
+says why, while everything parked behind it stays on screen and unsent; a
+**transport failure** (no answer) reverts nothing — the operations stay drawn
+exactly as they were, and are re-sent by Retry *or by whatever the person
+does next*, prepended to the next batch. The spec drops an edit's request,
+asserts the box still holds the typed text and the table does not, then
+changes another row's minutes with the wire back and asserts both landed.
+Retry is offered only when there is something to re-send.
+
+### Focus, names and the other accessibility findings
+
+- **Every hand-off keeps focus on the page.** `RemoveConfirm`
+  (`components/settings/remove-confirm.tsx`) is the area's one "Remove? /
+  Keep" control, and it owns the two places the browser used to drop focus
+  on `<body>`: the question's first button takes focus as it appears, Remove
+  takes it back on Keep. After a removal the editor sends focus to the next
+  row's name (or the add form when it was last) through `useMoveFocus`'s new
+  `requestField`. The stage switch is no longer `disabled` for its round trip
+  — re-entry is guarded in the handler, the row is `aria-busy`, and its own
+  `SaveStatus` says "Saving…" — so a refusal leaves focus on the box. Add
+  buttons stay enabled while an add is out (the form ignores re-entry) and the
+  box is refocused on every outcome. After a Retry lands, focus goes to the
+  retried row's text or the add box.
+- **Focus after a move lands on the arrow, in all three editors.**
+  `useMoveFocus` now takes an `inFlight` flag and keeps the request rather
+  than consuming it while every arrow is disabled by the wait — which is why
+  the template editor landed on the text box (findings 7 and 12), and why a
+  *failed* move now restores focus too: the request is made before the write
+  and consumed after it settles, whatever it settled to.
+- **Repeated controls carry the row's name.** "Scripting: On the board",
+  "Monthly quota for money, a month", "Remove money", "New item for
+  Packaging (TTH)", "Add to Packaging (TTH)". The visible words are
+  unchanged; the sr-only prefix is the difference between nine identical
+  checkboxes and nine stages in a forms-mode list. The slice specs assert them
+  with `getByRole`.
+- **The template add form has `noValidate`**, as the bucket add forms did
+  since the channel slice found the same bug: a `0` in the minutes box now
+  reaches `submit` and the form's own sentence, rather than the browser's
+  tooltip. The spec submits `0` by Enter and by the button.
+- **Field-level errors are associated.** `Refusal` and `SaveStatus` take an
+  `id`; the template minutes boxes, the bucket quota box, the bucket add
+  form's quota box, the script template and the three number fields point
+  `aria-describedby` at the line that says why they are `aria-invalid`.
+- **Typed text survives leaving the page.** `useAutosave` — the one save
+  queue, so every field gets it — commits on unmount when the raw value
+  differs from what the row holds (Back is a client-side popstate that
+  unmounts the field with the text still in it), and registers a
+  `beforeunload` handler while a box is dirty or a save is on the wire, which
+  sends the save and lets the browser ask before a reload or a close. The
+  spec arrives at the channel page by the settings strip, types into the
+  voice guide, presses Back, and reads the text from Postgres; then reloads
+  with typed text and sees the browser's `beforeunload` dialog, and reloads
+  without and sees none. *Dirty* had to be the raw comparison: the first
+  version compared the trimmed value and re-saved the seed's script template
+  (trailing newline included) on every navigation away, which the
+  round-trip spec caught.
+- The matrix's empty-state link says what is missing — "Name your pillars",
+  "Add formats", "Set up buckets" — as the heading beside it does.
+
+### Renamed stages, and the prose that still said the seed's names
+
+The behaviour half of the rename invariant held (the gate, the badges and
+the ordering key on `kind`), and the review proved it; the label half did
+not: with every core stage renamed, the gate refusal read *"Could not move X
+to Frotz. Packaging still needs a thumbnail concept. It is still in Grue."* —
+one column under two names in one toast. Now the stage is named by the
+channel's own label wherever a sentence is about a **column**: the board's
+gate refusal (`moves.ts` reads the packaging stage's name on the refusal
+path), `confirmLive`'s, the board's Filming badge, the script section ("moves
+from Grue into Frotz"), the packaging block's "nothing leaves …", the hooks
+editor's "spliced in at …", the concept sketch's "refused at …", the
+filming-day panel's "… needs a real block of time", and the channel settings
+notes (`settingNotes(names)`, with the page reading the channel's stage names;
+`SETTING_NOTES` remains as the seed-named form). Sentences that are about the
+**concept** rather than the column — the packaging block's heading "Packaging
+— the gate", the Packaging tab, `/now`'s "Complete packaging: …", the gate
+indicator's "Packaging: needs …" — keep the word BRIEF.md uses for TTH, in one
+vocabulary, which is the consistency the finding asked for. The stages spec
+and the acceptance spec now assert *"Packaging & hook still needs …"* after
+the rename, and that the old wording is absent.
+
+### Smaller things
+
+- The template editor's copy said "the next video to enter gets this list";
+  `move_video` copies only on a **first** entry (0005's marker), so a video
+  that leaves and comes back keeps the list it was first given. The sentences
+  now say so, and PLAN.md's open question 2 is read as *first entry* here.
+- The add-stage hint and `INERT_NOTE` said an inert stage has "no template";
+  it has one, edited under Checklists and copied like any other. Both now
+  say that.
+- `removeBucket` counted every video carrying the bucket, archived included,
+  while the row and the sentence before the click count non-archived only.
+  It now counts the two apart and the note names them apart: *"unfiled 2
+  videos and one archived video"*.
+- The Repurposed lane draws its refusal with `Refusal`, link to the board
+  column included, rather than a private `<p role="alert">`.
+- `lib/ordering.ts` is the one copy of the reorder arithmetic (sort by
+  position, next position, swap one step, renumber, `isPermutationOf`) and of
+  the case-insensitive `nameTaken`; the three settings libs re-export the
+  names their callers use, and `lib/ordering.test.ts` pins that they are the
+  same functions. `RemoveConfirm` is the shared remove control. The two add
+  forms stay two: they differ by a quota box, and the shared part is a
+  dozen lines against a component with five slots.
+- The MILESTONES record itself: three stale statements in the stages section
+  are corrected or marked superseded; six rows that were engineering or
+  scoping notes have moved out of the "Decisions taken without the user"
+  tables into build notes, so the tables hold product-facing choices only.
+
+### Decisions taken without the user
+
+| Decision | Alternative not taken |
+|---|---|
+| The Idea stage cannot be switched off. | Refusing in `capture_video` only and telling the person their idea was filed into a hidden column. Capture is BRIEF.md's "one input, save, done"; a capture that fails because a settings row was flipped is friction with no upside, and a column that is off but still filling is worse. Both refusals exist; the switch is the one the person meets. |
+| Archive and restore are a SQL function, and `archived_at` is no longer a client column. | Checking the stage's flag in the server action, as the finding suggested. A rule in the action is a rule a forged PATCH walks past — the same argument 0007 made for `is_enabled` — and this milestone was the one that argued it. |
+| Invisible characters are stripped from labels and only detected in prose. | Stripping `\p{Cf}` from everything. A zero-width joiner inside an emoji sequence, or a ZWNJ in Persian, is content in a voice guide; the voice guide's promise is "kept exactly as written". Labels are one line read at a glance, and there the ghost is removed so `"Money​"` cannot be a second "Money". |
+| A refused template operation is rolled back; a dropped one stays on screen. | Keeping refused operations on screen too. A refusal is final — re-sending it with the next edit would refuse the next edit forever — and its sentence says what was wrong; a dropped request is not final, and the text is the person's. |
+| The browser asks before a reload or a close with unsaved text, and the app sends the save first. | Flushing silently with `sendBeacon`, which cannot reach a server action. The dialog is the browser's own and the one modal the app cannot draw at that moment; a person who chooses to stay finds the text already saved. |
+| Bucket removal reports non-archived and archived counts apart. | Counting non-archived only, which would have made the note silently wrong about the archived rows the key unfiles. |
+| The matrix's empty-state link is worded from what is missing. | One constant label. |
+| Concept sentences keep the word "Packaging"; column sentences use the channel's label. | Renaming every "Packaging" on the video page. The packaging block is about TTH, the thing BRIEF.md calls packaging; the column it happens in is what the person renamed. |
+
+### Rejected
+
+- **"Move the restore behind `move_video`"** (one of the two options
+  offered). A restore is not a move: `move_video` restamps `stage_entered_at`
+  and re-runs the gate, and a restored video should have neither happen to
+  it. `set_video_archived` is the narrower function.
+- **"Report the retry payload with `data-unsaved` rows and disabled arrows"**
+  as the way to keep failed operations on screen. Rows that are unsent after
+  a dropped request are already drawn from `pendingOps`; an unsaved *add* is
+  `temp:` and marked, and a dropped edit or move stays as the person left it
+  and goes with the next send. Disabling the arrows on those rows would have
+  refused a move the next send could carry.
+- **NFKC normalisation** of names, suggested beside the `\p{Cf}` strip. It
+  would rewrite ligatures and full-width characters a person typed on
+  purpose; the finding's evidence needed only the format characters.
+
+### Deferred, to a named milestone
+
+- **The two add forms as one component** (finding 13, part): M9's polish
+  pass, when the empty states are revisited; the shared part is small and
+  the forms differ by a field.
+- **The video page's own text fields and the NUL byte.** `lib/video-fields.ts`
+  (title, notes, hook text) does not go through `cleanLabel`/`cleanProse`; a
+  pasted NUL there still reaches the person as Postgres's sentence. Out of
+  M7's files; filed for M9 with the other empty-state and copy work.
+- **The timezone question**, still open from M6, still M9's.
+
+### Migration
+
+**`0008_settings_boundary.sql` is new and must be applied to the hosted
+project by hand.** Before applying it, check the hosted rows the new CHECKs
+cover: any `checklist_templates.est_minutes` outside 1–480, any
+`channels.wip_threshold` outside 1–99 or `stale_days` outside 1–365, any
+`expected_ctr` of 0, and any name or template that is blank or made of
+format characters — the migration fails on the first violating row, which is
+the point, but it means the row is fixed first. The seeds are within every
+bound.
+
+<!-- GATES -->

@@ -570,6 +570,8 @@ test('a channel with no pillars says so instead of drawing an empty grid', async
   const add = page.getByTestId('add-buckets');
   await expect(add).toBeVisible();
   await expect(add).toHaveAttribute('href', `/settings/buckets/${BARE.slug}`);
+  // The link says what is missing, as the heading does.
+  await expect(add).toHaveText('Name your pillars');
   await expect(add).not.toHaveAttribute('aria-disabled', /.*/);
   await add.focus();
   await expect(add).toBeFocused();
