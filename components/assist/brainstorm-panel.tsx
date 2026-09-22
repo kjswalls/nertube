@@ -1,0 +1,474 @@
+"use client";
+
+import { useCallback } from "react";
+
+import { formatAge } from "@/components/video-detail/age";
+import type { AssistMeta } from "@/lib/assist/types";
+import { TITLE_WARN_LENGTH } from "@/lib/packaging";
+import { sameLabel } from "@/lib/text";
+
+import { capacityLine, describeAcceptance } from "./acceptance";
+import {
+  AssistFailure,
+  AssistMetaLine,
+  AssistNoticeLine,
+  AssistPanel,
+  AssistPending,
+  useAssistFocus,
+} from "./chrome";
+import { useAssistTarget } from "./packaging-assist";
+import type { AssistFailureView, AssistNotice } from "./run";
+import type { StoredAssistEntryValue } from "./stored";
+
+/**
+ * The brainstorm panel.
+ *
+ * ## Why the rationale is as prominent as the title
+ *
+ * BRIEF.md's first principle is that packaging is a craft: the title is a fifth
+ * of the work and most of the result, and the packaging checklist asks for *ten
+ * to twenty* candidates rather than three. A flat list of twenty titles does not
+ * teach that — it is a slot machine. A title with a reason beside it does: after
+ * a dozen of them you can see what "sells the result" and "creates curiosity"
+ * actually look like, and that is the part that is still useful once the panel
+ * is closed. So the rationale is never behind a disclosure, one suggestion is
+ * marked as the model's own pick, and the pick's reason is spelled out.
+ *
+ * ## Why everything in here is a proposal
+ *
+ * Every suggestion is drawn as the *tool talking*: a dashed rule, a "Proposal"
+ * chip, a quieter surface than the fields above it. Nothing generated is ever
+ * put into a field without somebody pressing a button, and when it is, it lands
+ * in the candidate list as an ordinary row marked `source: "ai"` — a field like
+ * any other field they wrote. The line between what a model wrote and what the
+ * person wrote is one this app must never be the thing that blurs.
+ *
+ * ## Why it is not a modal
+ *
+ * A model call takes seconds; PLAN.md budgets up to forty. A dialog over the
+ * page for forty seconds is a page you cannot use, so this is inline, the rest
+ * of the block stays live while it works, and Cancel is always one click away.
+ *
+ * ## It renders; it does not fetch
+ *
+ * Asking, cancelling and remembering all live in
+ * `components/assist/brainstorm-assist.tsx`, which stays mounted when this is
+ * closed. That is what makes closing and reopening free, and it is why nothing
+ * here happens in an effect on mount.
+ */
+
+/** Everything known about one of the three questions. Owned by the parent. */
+export interface KindView {
+  readonly entry: StoredAssistEntryValue | null;
+  /** Asked for in this sitting, rather than read back out of the column. */
+  readonly fresh: boolean;
+  readonly meta: AssistMeta | null;
+  readonly persisted: boolean;
+  readonly pending: boolean;
+  /** When the in-flight ask started, for the elapsed counter. */
+  readonly startedAt: number | null;
+  readonly failure: AssistFailureView | null;
+  /**
+   * The last thing that happened: an acceptance, a replacement, a cancel.
+   *
+   * A bare string is the common case and stays allowed; the object form
+   * carries an undo, which is what an acceptance that *replaces* a field
+   * needs. `components/assist/chrome.tsx` renders both.
+   */
+  readonly notice: AssistNotice | string | null;
+}
+
+/**
+ * The two questions *this* panel answers.
+ *
+ * It sits beside the title candidates and the hooks, and both of those are
+ * lists on the packaging block, so one panel with two tabs is one answer and
+ * one place to accept it. The third text assist — thumbnail concepts — is a
+ * single field with a replace rather than an add, and it has its own control
+ * beside that field (`components/assist/concept-assist.tsx`), built from the
+ * same `run.ts` state and the same `chrome.tsx` elements so that it behaves
+ * identically. `StoredAssistKind` is the wider set, because
+ * `videos.brainstorm_last` keeps all three.
+ */
+export const PANEL_KINDS = ["titles", "hooks"] as const;
+export type PanelKind = (typeof PANEL_KINDS)[number];
+
+const LABEL: Record<PanelKind, string> = {
+  titles: "Title candidates",
+  hooks: "Spoken hooks",
+};
+
+/** What each question is waiting for, while it waits. */
+const WAITING: Record<PanelKind, string> = {
+  titles:
+    "Thinking. Twenty titles with reasons takes a few seconds — the rest of the page still works while it does.",
+  hooks:
+    "Thinking. The hooks it writes have to fit the title and the concept you already chose — the rest of the page still works while it does.",
+};
+
+export function BrainstormPanel({
+  kind,
+  nonce,
+  now,
+  view,
+  otherHasAnswer,
+  onAsk,
+  onCancel,
+  onKind,
+  onNotice,
+  onClose,
+}: {
+  kind: PanelKind;
+  /** Bumped every time a pill asks for the panel; moves focus here. */
+  nonce: number;
+  /** The clock, read in the handler that opened this. See the parent. */
+  now: number;
+  view: KindView;
+  /** Whether the other question already has an answer, for the tab's badge. */
+  otherHasAnswer: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onKind: (kind: PanelKind) => void;
+  onNotice: (notice: AssistNotice | string) => void;
+  onClose: () => void;
+}) {
+  const target = useAssistTarget();
+  const { entry } = view;
+
+  /*
+    Focus lands in the panel whenever a pill opens it, and again when it is
+    re-aimed at another question. The counter, the waiting row, the failure
+    block and the notice line are all `components/assist/chrome.tsx` — the same
+    ones the thumbnail critique renders, which is what makes "learn one, learn
+    all of them" true rather than a claim in a comment.
+  */
+  const headingRef = useAssistFocus<HTMLHeadingElement>(`${nonce}:${kind}`);
+
+  const candidates = target?.candidates;
+  const hooks = target?.hooks;
+  const candidateRoom = target?.candidateRoom ?? 0;
+  const hookRoom = target?.hookRoom ?? 0;
+
+  const inCandidates = useCallback(
+    (text: string) => (candidates ?? []).some((c) => sameLabel(c.text, text)),
+    [candidates],
+  );
+  const inHooks = useCallback(
+    (text: string) => (hooks ?? []).some((hook) => sameLabel(hook.text, text)),
+    [hooks],
+  );
+
+  const capacity = capacityLine(candidateRoom, hookRoom);
+
+  const addOne = (text: string, rationale: string) => {
+    if (!target) return;
+    onNotice(describeAcceptance(target.addCandidates([{ text, note: rationale }]), 1));
+  };
+
+  const addAll = () => {
+    if (!target || !entry) return;
+    const items = entry.suggestions.map((suggestion) => ({
+      text: suggestion.text,
+      note: suggestion.rationale,
+    }));
+    onNotice(describeAcceptance(target.addCandidates(items), items.length));
+  };
+
+  const asHook = (text: string) => {
+    if (!target) return;
+    const outcome = target.addHook(text);
+    onNotice(
+      outcome.ok
+        ? "Added to your hooks. Pick the strongest one there when you have three."
+        : (outcome.reason ?? "That could not be added as a hook."),
+    );
+  };
+
+  return (
+    <AssistPanel
+      testId="brainstorm-panel"
+      data-kind={kind}
+      labelledBy="brainstorm-heading"
+      onClose={onClose}
+    >
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3
+            id="brainstorm-heading"
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-sm font-semibold outline-none"
+          >
+            Brainstorm — {LABEL[kind].toLowerCase()}, proposed
+          </h3>
+          <p data-testid="brainstorm-provenance" className="text-xs text-muted">
+            {view.pending
+              ? "Asking now…"
+              : entry === null
+                ? "Nothing asked for yet."
+                : view.fresh
+                  ? `Fresh, just now. ${entry.voiceGuide ? "Written against this channel’s voice guide." : "This channel has no voice guide, so this is generic advice — write one in settings and ask again."}`
+                  : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${entry.voiceGuide ? "It used the voice guide as it was then." : "It was written without a voice guide."}`}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            data-testid="brainstorm-ask-again"
+            onClick={onAsk}
+            disabled={view.pending}
+            className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          >
+            {entry === null ? "Ask" : "Ask again"}
+          </button>
+          <button
+            type="button"
+            data-testid="brainstorm-close"
+            onClick={onClose}
+            className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Close
+          </button>
+        </div>
+      </header>
+
+      {/*
+        One panel, two questions. Switching keeps whatever the other one has
+        already answered — asking for hooks must not throw away twenty titles
+        nobody has accepted yet.
+
+        Plain buttons with `aria-pressed`, deliberately not `role="tablist"`: a
+        tablist promises arrow-key navigation and a tabpanel relationship, and
+        claiming a widget's role without its keyboard behaviour is worse for a
+        screen-reader user than not claiming it. These are two buttons that
+        change what is below them, which is what they are announced as.
+      */}
+      <div className="flex gap-1">
+        {PANEL_KINDS.map((which) => (
+          <button
+            key={which}
+            type="button"
+            aria-pressed={kind === which}
+            data-testid={`brainstorm-tab-${which}`}
+            onClick={() => onKind(which)}
+            className={[
+              "rounded-button border px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent",
+              kind === which
+                ? "border-accent bg-accent/10 font-medium"
+                : "border-border hover:bg-surface",
+            ].join(" ")}
+          >
+            {LABEL[which]}
+            {kind !== which && otherHasAnswer ? (
+              <span className="ml-1 font-mono text-[10px] text-muted">saved</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      {view.pending ? (
+        <AssistPending
+          prefix="brainstorm"
+          startedAt={view.startedAt}
+          what={WAITING[kind]}
+          onCancel={onCancel}
+        />
+      ) : null}
+
+      {view.failure ? (
+        <AssistFailure
+          prefix="brainstorm"
+          failure={view.failure}
+          onRetry={onAsk}
+          disabled={view.pending}
+        />
+      ) : null}
+
+      {view.notice ? (
+        <AssistNoticeLine
+          prefix="brainstorm"
+          notice={
+            typeof view.notice === "string" ? { text: view.notice } : view.notice
+          }
+        />
+      ) : null}
+
+      {!view.persisted ? (
+        <p data-testid="brainstorm-unsaved" className="text-xs text-attention">
+          These could not be saved for next time, so closing the panel will lose
+          them. Accept the ones you want first.
+        </p>
+      ) : null}
+
+      <AssistMetaLine prefix="brainstorm" meta={view.fresh ? view.meta : null} />
+
+      {capacity ? (
+        <p data-testid="brainstorm-capacity" className="text-xs text-attention">
+          {capacity}
+        </p>
+      ) : null}
+
+      {entry === null ? (
+        view.pending ? null : (
+          <p className="text-xs text-muted">
+            Nothing here yet. “Ask” reads this video’s notes, its tags and the
+            channel’s voice guide, and comes back with proposals and a reason for
+            each.
+          </p>
+        )
+      ) : (
+        <Suggestions
+          kind={kind}
+          entry={entry}
+          inCandidates={inCandidates}
+          inHooks={inHooks}
+          candidateRoom={candidateRoom}
+          hookRoom={hookRoom}
+          onAddOne={addOne}
+          onAddAll={addAll}
+          onUseAsHook={asHook}
+        />
+      )}
+    </AssistPanel>
+  );
+}
+
+/** The list itself. Split out so the component above stays about state. */
+function Suggestions({
+  kind,
+  entry,
+  inCandidates,
+  inHooks,
+  candidateRoom,
+  hookRoom,
+  onAddOne,
+  onAddAll,
+  onUseAsHook,
+}: {
+  kind: PanelKind;
+  entry: StoredAssistEntryValue;
+  inCandidates: (text: string) => boolean;
+  inHooks: (text: string) => boolean;
+  candidateRoom: number;
+  hookRoom: number;
+  onAddOne: (text: string, rationale: string) => void;
+  onAddAll: () => void;
+  onUseAsHook: (text: string) => void;
+}) {
+  const titles = kind === "titles";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted">
+          <span data-testid="brainstorm-count" className="font-mono">
+            {entry.suggestions.length}
+          </span>{" "}
+          proposals — the tool talking. They become your writing the moment you
+          accept one.
+        </p>
+        {titles ? (
+          <button
+            type="button"
+            data-testid="brainstorm-add-all"
+            onClick={onAddAll}
+            disabled={candidateRoom <= 0}
+            className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Add all as candidates
+          </button>
+        ) : null}
+      </div>
+
+      <ul data-testid="brainstorm-suggestions" className="flex flex-col gap-2">
+        {entry.suggestions.map((suggestion, index) => {
+          const recommended = entry.recommended === index;
+          const alreadyCandidate = inCandidates(suggestion.text);
+          const alreadyHook = inHooks(suggestion.text);
+          const overLong = suggestion.text.length > TITLE_WARN_LENGTH;
+
+          return (
+            <li
+              key={`${index}-${suggestion.text}`}
+              data-testid="brainstorm-suggestion"
+              data-recommended={recommended ? "true" : "false"}
+              data-duplicate={alreadyCandidate ? "true" : "false"}
+              className={[
+                "flex flex-col gap-1 rounded-input border border-dashed px-3 py-2",
+                recommended
+                  ? "border-accent bg-accent/[0.06]"
+                  : "border-border bg-background/40",
+              ].join(" ")}
+            >
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="rounded-button border border-border px-1 text-[10px] uppercase tracking-wide text-muted">
+                  Proposal
+                </span>
+                {recommended ? (
+                  <span
+                    data-testid="brainstorm-pick-badge"
+                    className="rounded-button border border-accent px-1 text-[10px] uppercase tracking-wide text-accent"
+                  >
+                    Its pick
+                  </span>
+                ) : null}
+                <span data-testid="suggestion-text" className="min-w-0 text-sm">
+                  {suggestion.text}
+                </span>
+                {titles ? (
+                  <span
+                    data-testid="suggestion-length"
+                    title={
+                      overLong
+                        ? `Over ${TITLE_WARN_LENGTH} characters — the feed may cut it. Not a refusal: a long title that works still works.`
+                        : undefined
+                    }
+                    className={[
+                      "font-mono text-[11px]",
+                      overLong ? "text-attention" : "text-muted",
+                    ].join(" ")}
+                  >
+                    {suggestion.text.length}
+                  </span>
+                ) : null}
+              </div>
+
+              <p data-testid="suggestion-rationale" className="text-xs text-muted">
+                {recommended ? (
+                  <strong className="text-foreground">Why it picked this one: </strong>
+                ) : null}
+                {suggestion.rationale}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {titles ? (
+                  <button
+                    type="button"
+                    data-testid="suggestion-add"
+                    aria-label={`Add “${suggestion.text}” as a title candidate`}
+                    onClick={() => onAddOne(suggestion.text, suggestion.rationale)}
+                    disabled={alreadyCandidate || candidateRoom <= 0}
+                    className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {alreadyCandidate ? "Already a candidate" : "Add as candidate"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  data-testid="suggestion-hook"
+                  aria-label={`Use “${suggestion.text}” as a hook`}
+                  onClick={() => onUseAsHook(suggestion.text)}
+                  disabled={alreadyHook || hookRoom <= 0}
+                  className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {alreadyHook ? "Already a hook" : "Use as hook"}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

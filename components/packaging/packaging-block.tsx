@@ -3,12 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { updateVideo } from "@/app/actions/videos";
+import {
+  PackagingAssistProvider,
+  type AcceptOutcome,
+  type AssistTarget,
+} from "@/components/assist/packaging-assist";
 import { SaveStatus, useSaveQueue } from "@/components/autosave";
 import { usePublishPackagingDraft } from "@/components/preview/live-packaging";
 import { useVideoVersion } from "@/components/video-version";
 import {
   GATE_ANCHOR,
   HookListSchema,
+  MAX_CANDIDATES,
+  MAX_CANDIDATE_NOTE_LENGTH,
+  MAX_HOOKS,
+  MAX_HOOK_LENGTH,
   newId,
   packagingGate,
   PACKAGING_ANCHOR,
@@ -19,6 +28,7 @@ import {
   type Hook,
   type TitleCandidate,
 } from "@/lib/packaging";
+import { sameLabel } from "@/lib/text";
 import { MAX_CONCEPT_LENGTH, type VideoPatchInput } from "@/lib/video-fields";
 
 import { GateIndicator } from "./gate-indicator";
@@ -642,9 +652,157 @@ export function PackagingBlock({
   const skip = (reason: string) => push(draft, { packagingSkip: { reason } });
   const unskip = () => push(draft, { packagingSkip: null });
 
+  /* -------------------------------------------------------------- assist -- */
+
+  /*
+    What the brainstorm panel is allowed to do to these fields.
+
+    M8's panel proposes titles and hooks; accepting one is an ordinary
+    packaging edit and goes through `push` like every other edit on this block
+    — one draft, one diff, one queue, one `updateVideo`. The panel never sees
+    `updateVideo` and never holds a copy of the list.
+
+    Read through `draftRef` rather than the `draft` in this closure: the panel
+    is mounted from a slot and its handler can fire a frame after a save
+    answered, and adding to a stale list would silently drop whatever landed in
+    between.
+  */
+  const assistTarget = useMemo<AssistTarget>(
+    () => ({
+      candidates: draft.candidates,
+      hooks: draft.hooks,
+      concept: draft.thumbnailConcept,
+      candidateRoom: Math.max(0, MAX_CANDIDATES - draft.candidates.length),
+      hookRoom: Math.max(0, MAX_HOOKS - draft.hooks.length),
+
+      addCandidates: (items): AcceptOutcome => {
+        const current = draftRef.current;
+        const taken = current.candidates.map((candidate) => candidate.text);
+        const additions: TitleCandidate[] = [];
+        let room = MAX_CANDIDATES - current.candidates.length;
+        let duplicates = 0;
+        let noRoom = 0;
+
+        for (const item of items) {
+          const text = item.text.trim();
+          if (text === "") continue;
+          // The same title twice is not a longer list, it is a confusing one —
+          // and the panel says so rather than adding a twin.
+          if (taken.some((existing) => sameLabel(existing, text))) {
+            duplicates += 1;
+            continue;
+          }
+          if (room <= 0) {
+            noRoom += 1;
+            continue;
+          }
+          room -= 1;
+          taken.push(text);
+
+          /*
+            The rationale becomes the candidate's note, which is the whole
+            reason the panel is worth having: three weeks later the list still
+            says *why* each one was a candidate. The note column is capped, so
+            a long rationale is cut with an ellipsis rather than making the
+            whole patch unsavable.
+          */
+          const note = item.note?.trim() ?? "";
+          const fitted =
+            note.length > MAX_CANDIDATE_NOTE_LENGTH
+              ? `${note.slice(0, MAX_CANDIDATE_NOTE_LENGTH - 1)}\u2026`
+              : note;
+
+          additions.push({
+            id: newId(),
+            text,
+            ...(fitted === "" ? {} : { note: fitted }),
+            chosen: false,
+            // PLAN.md line 166: a candidate the model wrote is marked as one.
+            source: "ai",
+          });
+        }
+
+        if (additions.length > 0) {
+          push({ ...current, candidates: [...current.candidates, ...additions] });
+        }
+        return { added: additions.length, duplicates, noRoom };
+      },
+
+      addHook: (raw) => {
+        const current = draftRef.current;
+        const text = raw.trim();
+        if (text === "") {
+          return { ok: false, reason: "That suggestion has no text in it." };
+        }
+        if (text.length > MAX_HOOK_LENGTH) {
+          return {
+            ok: false,
+            reason: `That is longer than a hook may be (${MAX_HOOK_LENGTH} characters). Shorten it in the hooks list instead.`,
+          };
+        }
+        if (current.hooks.length >= MAX_HOOKS) {
+          return {
+            ok: false,
+            reason: `Three hooks is the limit — remove one before taking another.`,
+          };
+        }
+        if (current.hooks.some((hook) => sameLabel(hook.text, text))) {
+          return { ok: false, reason: "That one is already in your hooks." };
+        }
+        push({
+          ...current,
+          hooks: [...current.hooks, { id: newId(), text, chosen: false }],
+        });
+        return { ok: true, reason: null };
+      },
+
+      /*
+        The concept is one field, so accepting a proposal *replaces* what is
+        there. Same queue, same diff, same `updateVideo` — an accepted concept
+        is an ordinary edit to the concept box and is indistinguishable from
+        one typed into it, which is the point: a proposal becomes the person's
+        own writing the moment they take it.
+
+        `previous` goes back to the caller so the panel can offer an undo. This
+        is the only acceptance in the block that can destroy something, and the
+        way back has to be one press rather than a memory of what was there.
+      */
+      acceptConcept: (raw) => {
+        const current = draftRef.current;
+        const previous = current.thumbnailConcept;
+        const text = raw.trim();
+        if (text === "") {
+          return { ok: false, previous, reason: "That suggestion has no text in it." };
+        }
+        if (text.length > MAX_CONCEPT_LENGTH) {
+          return {
+            ok: false,
+            previous,
+            reason: `That is longer than the concept field takes (${MAX_CONCEPT_LENGTH} characters). Shorten it in the box instead.`,
+          };
+        }
+        if (sameLabel(previous, text)) {
+          return {
+            ok: false,
+            previous,
+            reason: "That is already what the concept says.",
+          };
+        }
+        push({ ...current, thumbnailConcept: text });
+        return { ok: true, previous, reason: null };
+      },
+
+      restoreConcept: (text) => {
+        push({ ...draftRef.current, thumbnailConcept: text });
+      },
+    }),
+    [draft.candidates, draft.hooks, draft.thumbnailConcept, push],
+  );
+
   /* -------------------------------------------------------------- render -- */
 
   return (
+    <PackagingAssistProvider target={assistTarget}>
     <section
       id={PACKAGING_ANCHOR}
       data-testid="packaging-block"
@@ -772,5 +930,6 @@ export function PackagingBlock({
         onUnskip={unskip}
       />
     </section>
+    </PackagingAssistProvider>
   );
 }

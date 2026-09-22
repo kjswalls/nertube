@@ -115,6 +115,27 @@ export function CaptureHost({
               // went, because `1..9` can have retargeted it.
               toast.push({
                 message: `Captured “${result.title}” in ${result.channelName}.`,
+                /*
+                  M8: where the assist lives, one press away — and deliberately
+                  not in the box above.
+
+                  BRIEF.md principle 6 is that friction reduction *is* the
+                  product, and capture is the shortest path in the app: one
+                  field, Enter, gone. A model call takes ten to forty seconds,
+                  so an assist on that path would turn the fastest thing here
+                  into the slowest. It also could not be built honestly:
+                  `app/actions/assist.ts` takes a video id and nothing else,
+                  precisely so a browser can never hand the key a prompt of its
+                  own — and at capture time there is no row yet. So the idea is
+                  written first, and the confirmation carries the way to the
+                  four controls that can now do something with it.
+                */
+                links: [
+                  {
+                    label: "Open it",
+                    href: `/videos/${result.id}`,
+                  },
+                ],
               });
             }}
           />

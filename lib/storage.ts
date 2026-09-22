@@ -370,3 +370,71 @@ export function parseThumbnailVariantPath(
   if (!ALLOWED_EXTENSIONS.has(extension)) return null;
   return { userId, videoId, role: role as ThumbnailRole, extension };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Reading an object back, on the server                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The media types a model can actually look at, keyed by stored extension.
+ *
+ * This is deliberately *narrower* than what the bucket accepts. A person may
+ * upload an AVIF thumbnail and the app will store it, sign it and draw it
+ * happily — browsers have read AVIF for years — but the vision half of the
+ * model API does not take one (`ThumbnailVariantImage["mediaType"]` in
+ * `lib/assist/types.ts` is the exhaustive list, and it comes from the installed
+ * SDK's own types, not from memory). So an AVIF variant is skipped by the
+ * critique *and named*, rather than being quietly left out of a verdict that
+ * then looks like it judged everything.
+ */
+const VISION_MEDIA_TYPES: Readonly<
+  Record<string, "image/png" | "image/jpeg" | "image/webp" | "image/gif">
+> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+/** The media type a model may be handed for this stored extension, or null. */
+export function visionMediaTypeFor(
+  extension: string,
+): "image/png" | "image/jpeg" | "image/webp" | "image/gif" | null {
+  return VISION_MEDIA_TYPES[extension] ?? null;
+}
+
+/**
+ * Pull an object's bytes down, server-side.
+ *
+ * ## Why this exists in a file whose header says the server never holds bytes
+ *
+ * That header is about the *upload* path and it is still true: the browser
+ * PUTs the file straight into Storage with its own session, because a server
+ * action is a request body and Vercel caps those at 4.5 MB (PLAN.md warning 1).
+ * Nothing about that changes here.
+ *
+ * The thumbnail critique goes the other way, and it has no choice about where
+ * it runs. The API key may only ever exist on the server, so the request that
+ * carries the images has to be built there, which means the bytes have to be
+ * read there. They are read from the user's own session — the `thumbnails owner
+ * rw` policy applies exactly as it does to a signed URL — held for the length
+ * of one call, and never written anywhere.
+ *
+ * Failures come back as a sentence rather than an exception: a path whose
+ * object has gone is a variant the critique leaves out and names, not a crash
+ * on a page whose other two thumbnails are fine.
+ */
+export async function downloadObject(
+  supabase: SupabaseClient<Database>,
+  path: string,
+): Promise<{ bytes: Uint8Array | null; error: string | null }> {
+  const { data, error } = await supabase.storage
+    .from(THUMBNAILS_BUCKET)
+    .download(path);
+
+  if (error || !data) {
+    return { bytes: null, error: error ? error.message : "The file is not there." };
+  }
+
+  return { bytes: new Uint8Array(await data.arrayBuffer()), error: null };
+}

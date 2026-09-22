@@ -21,6 +21,7 @@ import {
 import { UNTITLED } from "@/components/preview/parts";
 import { createClient } from "@/lib/supabase/client";
 
+import { ThumbnailAssistProvider } from "./assist-target";
 import { ConceptBrief } from "./concept-brief";
 import { FeedStrip } from "./feed-strip";
 import { LAUNCH_REASON, ROLE_LABEL } from "./roles";
@@ -110,9 +111,19 @@ export function ThumbnailsSection({
   const [messages, setMessages] = useState<
     Partial<Record<ThumbnailRole, SlotMessage>>
   >({});
-  const [dialog, setDialog] = useState<{ from: ThumbnailRole; to: ThumbnailRole } | null>(
-    null,
-  );
+  const [dialog, setDialog] = useState<{
+    from: ThumbnailRole;
+    to: ThumbnailRole;
+    /**
+     * A sentence to start the reason from, when something proposed this swap.
+     *
+     * Only the critique panel ever sets it, and only ever as a *starting
+     * point*: the textarea is editable, the log records what is confirmed, and
+     * a swap nobody typed a reason for is still refused. See
+     * `components/thumbnails/assist-target.tsx`.
+     */
+    suggestedReason?: string;
+  } | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
@@ -219,13 +230,17 @@ export function ThumbnailsSection({
     adopt(result);
   }
 
-  async function onShip(role: ThumbnailRole, from?: HTMLElement | null) {
+  async function onShip(
+    role: ThumbnailRole,
+    from?: HTMLElement | null,
+    suggestedReason?: string,
+  ) {
     opener.current = from ?? null;
 
     // Something is already live: this is a swap, and a swap is explained.
     if (shippedRole !== null && shippedRole !== role) {
       setDialogError(null);
-      setDialog({ from: shippedRole, to: role });
+      setDialog({ from: shippedRole, to: role, suggestedReason });
       return;
     }
 
@@ -348,7 +363,32 @@ export function ThumbnailsSection({
     }
   }
 
+  /*
+    What the critique panel is allowed to do, handed down rather than imported.
+
+    The panel is mounted from the `assist` slot — an element built by a server
+    component, which cannot be given props from here — so this is how it learns
+    which slots have images, which one is live, and how to ship one. `ship` is
+    `onShip`: the same function the button under each slot calls, so there is
+    one path to `swap_thumbnail` and the critique is not a second one.
+
+    Rebuilt on every render rather than memoised: every field in it is derived from
+    props or state that change together, and the panel holds its own in-flight
+    state, so a new object costs a re-render of a closed panel and nothing else.
+  */
+  const assistTarget = {
+    variants: THUMBNAIL_ROLES.map((role) => ({
+      role,
+      hasAsset: byRole.get(role)?.hasAsset ?? false,
+      live: shippedRole === role,
+    })),
+    hasConcept: (concept ?? "").trim() !== "",
+    ship: (role: ThumbnailRole, suggestedReason: string, from: HTMLElement | null) =>
+      void onShip(role, from, suggestedReason),
+  };
+
   return (
+    <ThumbnailAssistProvider target={assistTarget}>
     <section
       aria-labelledby="thumbnails-heading"
       data-testid="thumbnails-section"
@@ -462,6 +502,7 @@ export function ThumbnailsSection({
         <SwapDialog
           from={dialog.from}
           to={dialog.to}
+          suggestedReason={dialog.suggestedReason}
           busy={dialogBusy}
           error={dialogError}
           /*
@@ -480,5 +521,6 @@ export function ThumbnailsSection({
         />
       )}
     </section>
+    </ThumbnailAssistProvider>
   );
 }

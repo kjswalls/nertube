@@ -18,8 +18,25 @@ export default defineConfig({
    * component imports with. Without it a pure module under `components/` can be
    * typechecked but not unit-tested, which quietly pushes testable logic into
    * `lib/` for the resolver's sake rather than for a reason.
+   *
+   * `server-only` is the M8 addition. `lib/assist/anthropic.ts` and
+   * `lib/assist/provider.ts` import it as a build-time tripwire: a client
+   * component that reaches the module holding the API key fails the build
+   * instead of shipping the key to a browser. It is not a dependency — Next
+   * aliases the bare specifier to its own bundled copy and declares the module
+   * in `next/types/global.d.ts` — so Node, and therefore Vitest, cannot
+   * resolve it on its own and the unit tests would fail on the import alone.
+   * This points it at the empty stub Next itself serves under the
+   * `react-server` condition, which is exactly what those modules see in the
+   * app.
    */
   resolve: {
-    alias: { '@': new URL('.', import.meta.url).pathname.replace(/\/$/, '') },
+    alias: {
+      '@': new URL('.', import.meta.url).pathname.replace(/\/$/, ''),
+      'server-only': new URL(
+        './node_modules/next/dist/compiled/server-only/empty.js',
+        import.meta.url,
+      ).pathname,
+    },
   },
 });

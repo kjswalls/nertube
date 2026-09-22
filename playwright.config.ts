@@ -126,6 +126,17 @@ export default defineConfig({
       env: {
         NEXT_PUBLIC_SUPABASE_URL: GATEWAY_URL,
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ANON_KEY,
+        /*
+          The brainstorm answers from fixtures, never from a model.
+
+          `lib/assist/fake.ts` is deterministic, offline and free, so
+          `e2e/brainstorm.spec.ts` drives the real panel, the real server
+          action and the real `brainstorm_last` write on every run — in CI, and
+          on a laptop with no API key. The suite would otherwise be a suite
+          that costs money, answers differently every time and cannot assert on
+          a single suggestion.
+        */
+        ASSIST_PROVIDER: 'fake',
       },
     },
   ],

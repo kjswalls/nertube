@@ -26,7 +26,13 @@ import { readExpectation } from "@/lib/expectation";
 import { formatPublishDate } from "@/lib/next-action";
 import { requireUser } from "@/lib/supabase/require-user";
 
-import { AssistPill } from "@/components/preview/assist-pill";
+import {
+  BrainstormAssist,
+  BrainstormHookPill,
+} from "@/components/assist/brainstorm-assist";
+import { readStoredBrainstorm } from "@/components/assist/stored";
+import { ConceptAssist } from "@/components/assist/concept-assist";
+import { ThumbnailCritiqueAssist } from "@/components/assist/critique-assist";
 import { TitleTruncationWarning } from "@/components/preview/truncation-warning";
 import { YouTubePreview } from "@/components/preview/youtube-preview";
 import {
@@ -60,6 +66,14 @@ import { VideoVersionProvider } from "@/components/video-version";
 import { ConceptSketch } from "./concept-sketch";
 
 export const metadata = { title: "Video · NerTube" };
+
+/**
+ * PLAN.md: *brainstorm can take 10–40 s — `export const maxDuration = 60` on
+ * the hosting segment*. `app/actions/assist.ts` runs on this segment, and its
+ * own deadline (45 s) sits inside this one so a slow model becomes a sentence
+ * in the panel rather than a platform timeout with nothing on the screen.
+ */
+export const maxDuration = 60;
 
 /** `videos.id` is a uuid; anything else cannot name a row. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -127,7 +141,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, filming_day_id, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, filming_day_id, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at, brainstorm_last")
     .eq("id", id)
     .maybeSingle();
 
@@ -145,6 +159,13 @@ export default async function VideoDetailPage({
     the reason the section can never be asked "which of these two is the safe
     one": there is one safe slot and it is a column.
   */
+  /*
+    `videos.brainstorm_last`, read once and handed to both controls that show
+    it: the title/hook panel and the concept one. Two calls would parse the
+    same column twice per render to produce the same object.
+  */
+  const storedBrainstorm = readStoredBrainstorm(video.brainstorm_last);
+
   const variantPaths: Readonly<Record<ThumbnailRole, string | null>> = {
     wild_card: video.thumb_wild_card_path,
     moderate: video.thumb_moderate_path,
@@ -633,27 +654,32 @@ export default async function VideoDetailPage({
                       />
                     }
                     assist={{
+                      /* M8: the pill M2 placed and left inert is now the way
+                         into the brainstorm panel, and `brainstorm_last` is
+                         read here so reopening it costs no model call. */
                       candidates: (
-                        <AssistPill
+                        <BrainstormAssist
                           key="assist-candidates"
-                          verb="Generate 20"
-                          what="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+                          videoId={video.id}
+                          initial={storedBrainstorm}
                         />
                       ),
+                      /* M8: the concept pill M2 placed now proposes concepts
+                         to film against — prose describing a shot, never an
+                         image (BRIEF.md principle 2). Its own control rather
+                         than a third tab on the panel above, because the
+                         concept is a single field and accepting one replaces
+                         what is in it; see the component. */
                       concept: (
-                        <AssistPill
+                        <ConceptAssist
                           key="assist-concept"
-                          verb="Suggest concepts"
-                          what="Proposes thumbnail concepts for the chosen title."
+                          videoId={video.id}
+                          initial={storedBrainstorm}
                         />
                       ),
-                      hooks: (
-                        <AssistPill
-                          key="assist-hooks"
-                          verb="Draft a third"
-                          what="Writes the hooks you have not written yet, up to three."
-                        />
-                      ),
+                      /* The same panel, opened at the spoken hooks it
+                         proposed — one answer, one place to accept it. */
+                      hooks: <BrainstormHookPill key="assist-hooks" />,
                     }}
                   />
 
@@ -711,12 +737,13 @@ export default async function VideoDetailPage({
                   variants={variants}
                   shippedRole={shippedRole}
                   swaps={swaps}
-                  assist={
-                    <AssistPill
-                      verb="Critique at tile size"
-                      what="Judges each variant against the concept at 360px, the way a viewer sees it."
-                    />
-                  }
+                  /* M8: the pill M4 placed and left inert now asks the model to
+                     look at the three files — at tile size, against the written
+                     concept — and offers to ship the one it would. It never
+                     makes an image; BRIEF.md principle 2 is that the concept
+                     and the assets are two things, and this section is the
+                     assets. */
+                  assist={<ThumbnailCritiqueAssist videoId={video.id} />}
                 />
               ),
 

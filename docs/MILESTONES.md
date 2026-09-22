@@ -6794,4 +6794,504 @@ format characters — the migration fails on the first violating row, which is
 the point, but it means the row is fixed first. The seeds are within every
 bound.
 
+## M8 — The brainstorm panel: proposals, and the line between them and your writing
+
+*Slice: `components/assist/**`, `app/actions/assist.ts`, the pill on the
+packaging block. The provider module under `lib/assist/**` is its own slice;
+this one programs against that interface and reaches past it nowhere.*
+
+### What this slice delivers
+
+- **A panel on the packaging block**, opened by the pill M2 placed and left
+  deliberately inert. It is inline rather than modal, because a model call takes
+  seconds and a dialog over the page for forty seconds is a page you cannot use.
+  The rest of the block keeps working while it thinks.
+- **Proposals with their reasons.** Ten to twenty title candidates, each with a
+  rationale, and one marked as the model's own pick with its reason spelled out
+  under it. BRIEF.md's first principle is that packaging is a craft; a flat list
+  of twenty titles is a slot machine, and a title with a reason beside it is the
+  part that is still useful after the panel closes.
+- **Accepting**: `Add as candidate`, `Add all as candidates`, `Use as hook`.
+  Every one of them goes through `push()` on `components/packaging/packaging-block.tsx`
+  — the same draft, the same diff, the same queue, the same `updateVideo`. There
+  is no second write path, and a rationale becomes the candidate's `note`, so the
+  list still says *why* three weeks later. Accepted rows carry `source: "ai"`
+  (PLAN.md line 166).
+- **`videos.brainstorm_last`**, written by the action after every answer and read
+  by the page on the way in. Closing the panel loses nothing, reopening costs no
+  call, and the panel says which it is showing — "Fresh, just now" or "From
+  earlier — asked for 2 hours ago and kept". Asking again is one click.
+- **One panel, two questions.** The candidate pill opens it on titles, the hooks
+  pill opens it on hooks, and the tabs switch between them. Asking for hooks does
+  not throw away twenty titles nobody has accepted yet; the column holds both.
+- **Every failure as a sentence**, with one-click retry: refusal, timeout, rate
+  limit, upstream 5xx, unreachable, unauthorised, rejected request, a body that
+  is not JSON, JSON of the wrong shape, an empty answer, and no key configured.
+  Each says what happened and that nothing was changed.
+
+### The seams, and why they are where they are
+
+**The panel does not write, and the block does not know the panel exists.**
+`components/assist/packaging-assist.tsx` is a context the block fills with
+`addCandidates` / `addHook` / how much room each list has. The block imports the
+provider component, the panel reads the context, and neither imports the other.
+This is what keeps the "one save queue" rule true through a feature whose whole
+job is to put text into two of its fields.
+
+**The answers live above the panel.** Closing unmounts the panel — that is what
+keeps the block quiet — so a fresh answer is handed up to
+`components/assist/brainstorm-assist.tsx` and survives the unmount. Without that,
+closing and reopening in the same sitting would ask the model again, which is
+exactly what `brainstorm_last` exists to prevent.
+
+**The envelope in the column is this app's, not the provider's.**
+`components/assist/stored.ts` owns the shape of `brainstorm_last`, versioned and
+read leniently: a different vendor behind the same interface must not change what
+is already in a column, and a detail page that will not open because a cached
+suggestion is the wrong shape is a page you cannot use.
+
+**The client sends a video id and a kind, and nothing else.** Everything the call
+needs is RLS-scoped user data or the API key; a client that could choose the
+prompt, the voice guide or the past titles could spend the key on anything.
+
+### Decisions taken without the user
+
+- **The panel is inline, not a modal.** BRIEF.md principle 6 is that friction is
+  the failure mode, and a forty-second modal is friction with a lock on it. The
+  cost is that the packaging block is taller while the panel is open.
+- **Opening an empty panel asks immediately; opening one with a stored answer
+  does not.** The pill says "Generate 20", so pressing it *is* the ask — but
+  reopening must be free, which is what the column is for.
+- **"Cancel" means stop waiting, not stop the model.** A server action cannot be
+  recalled; the call is already running and the row will still be written. The
+  panel says so in as many words rather than implying the charge was avoided,
+  and the answer is kept, so the next open shows it as "from earlier".
+- **A refusal offers "Try anyway" rather than "Try again".** The module marks
+  `refused` as not retryable — the same prompt is declined the same way — but the
+  button is still there, because the person may have just edited the notes.
+- **Rationales are truncated at the note column's ceiling** (300 characters, with
+  an ellipsis) rather than dropped. A long reason is still a reason; a patch that
+  cannot be written is not.
+- **The two remaining assist pills (thumbnail concept, thumbnail critique) are
+  still inert and now say M9 rather than M8.** They belong to other slices, and a
+  pill promising the milestone that has just shipped is a lie in the UI.
+
+### Deviations from PLAN.md, stated plainly
+
+- **The provider module is `lib/assist/**`, not `lib/brainstorm/{types,anthropic}.ts`.**
+  The milestone was split across two agents and the provider slice owns that
+  directory; the interface it exposes is per-kind (`titles`, `hooks`, and later
+  concepts and thumbnail critique) rather than one `generate()` returning titles
+  and hooks together. The panel therefore makes one call per kind. PLAN.md's
+  substance — structural-only schema, clamping rather than discarding, refusal
+  first, `{source:'ai'}`, "Add all", `brainstorm_last` — is unchanged.
+- **The action is `assist({videoId, kind})`, not `brainstorm(videoId)`.** Same
+  segment, same `maxDuration = 60` (now declared on `app/videos/[id]/page.tsx`),
+  with the app's own 45-second deadline inside it so a slow model becomes a
+  sentence rather than a platform timeout.
+
+### Honest limits
+
+- **No live model call has ever been made from this container.** Outbound egress
+  to `api.anthropic.com` is blocked and there is no key here. Everything in this
+  slice is exercised against the fake provider; the real one is the provider
+  slice's to prove.
+- **The e2e suite runs with `ASSIST_PROVIDER=fake`** (set in
+  `playwright.config.ts`). The default provider is the real one, so a deployment
+  with no key gets "the brainstorm has no API key configured" rather than
+  fixtures presented as a model's work.
+- **The in-flight walk creates its own delay** by holding the server action's POST
+  in a Playwright route, because the fixtures answer immediately. What it proves
+  is this app's behaviour while something is in flight, which is the same whether
+  the wait is a network or a model.
+- **`brainstorm_last` is written even when the panel is closed mid-flight.** That
+  is deliberate — the answer is paid for either way — but it means "Cancel"
+  leaves a stored answer behind. The panel says so.
+
+### Two agents in one directory, and how it was resolved
+
+This milestone was built by several agents at once, and two of them landed in
+`components/assist/**`. While this slice was being written, the slice that wires
+the *other* assist controls (thumbnail concept, thumbnail critique, capture)
+added `components/assist/chrome.tsx` and `components/assist/run.ts`: shared
+versions of the in-flight row, the failure block, the notice line, the proposal
+frame and the request-id/cancel bookkeeping this panel had written inline. That
+slice then refactored this panel onto them.
+
+The seam that made it safe is worth recording: `chrome.tsx` takes a `prefix` for
+its test ids, so with `prefix="brainstorm"` it emits exactly the ids
+`e2e/brainstorm.spec.ts` already asserted on, and the markup converged without
+either agent editing the other's spec mid-flight. `describeMeta` in
+`components/assist/acceptance.ts` — the clamp sentence, with unit tests — is the
+one that survived, and `chrome.tsx` imports it.
+
+What has to stay true after any further reconciliation, because it is what this
+slice is for:
+
+- **One save path.** Accepting goes through `push()` in the packaging block. No
+  component under `components/assist/**` may call `updateVideo`.
+- **Reopening is free.** The answers live above the panel and in
+  `videos.brainstorm_last`; closing and reopening must never ask again.
+- **Two questions side by side.** Asking for hooks must not discard titles
+  nobody has accepted yet.
+- **One registered opener.** `packaging-assist.tsx` keeps a single
+  `register`ed open-and-ask callback so the hooks pill can start a call the
+  panel owns. A second component registering would silently win; if more
+  controls need it, that ref has to become a map keyed by kind.
+
+## M8 — The service module: one seam, two implementations, no key in this room
+
+`lib/assist/**` is the swappable service module BRIEF.md asks for ("behind a
+small, swappable service module"). Nothing above it imports `@anthropic-ai/sdk`,
+names a model, or knows what a `stop_reason` is.
+
+| File | What it is |
+|---|---|
+| `types.ts` | The seam: `AssistProvider.run(request, options)`, the request/result unions, `AssistMeta`, `AssistError` + `AssistErrorCode`. Pure types and one class — a client component may import it. |
+| `schema.ts` | The zod shapes the model answers in. **Structural only.** |
+| `clamp.ts` | Counts, caps, de-duplication, the recommendation repair, and `assemble()` — the one path from a validated payload to an `AssistResult`. |
+| `prompts.ts` | The system and user prompts, as prose, with the voice guide as the governing section. |
+| `anthropic.ts` | The real provider. `server-only`, reads the key at call time, injectable transport. |
+| `fake.ts` | Deterministic fixtures, no network, every failure summonable on demand. |
+| `test-fixtures.ts` | Request builders shared by the four test suites, so the builder is not copied four times. |
+
+### The constraint that shaped it
+
+There is no `ANTHROPIC_API_KEY` in this container and egress to
+`api.anthropic.com` is blocked, so **not one line of `anthropic.ts` has ever run
+against the real endpoint.** That is why the transport is a constructor option:
+`anthropic.test.ts` hands the SDK a stub `fetch` and asserts on the request the
+SDK actually builds, then on what the provider does with each kind of reply. No
+test in this module leaves the machine, and none can.
+
+Everything asserted about the API was read out of the installed package
+(`@anthropic-ai/sdk` 0.128.0 — `resources/beta/messages/messages.d.ts`,
+`helpers/beta/zod.d.ts`, `lib/transform-json-schema.js`) or out of the bundled
+`claude-api` skill. Nothing came from recall:
+
+- `claude-opus-5`, overridable by `ANTHROPIC_MODEL` — skill's model table.
+- `output_config: { effort: "medium" }` — PLAN.md line 248. `BetaOutputConfig`
+  in the installed types has exactly `effort | format | task_budget`, and
+  `effort` takes `low|medium|high|xhigh|max`. There is no top-level `effort`.
+- `fallbacks: "default"` with beta `server-side-fallback-2026-07-01` — also
+  PLAN.md 248. `BetaFallbacksParam = Array<BetaFallbackParam> | 'default'`, and
+  that flag is in the `AnthropicBeta` union. The scalar form pairs with `-07-01`;
+  the array form pairs with `-06-01`, and crossing them is a 400. The test reads
+  the outgoing header back, so a future edit cannot quietly drop it.
+- **No `thinking` parameter.** Thinking is on and adaptive by default on this
+  model and `budget_tokens` was removed — sending it would be a 400. A test
+  asserts the request carries no `thinking`, no `budget_tokens`.
+- `stop_reason: "refusal"` + `stop_details {category, explanation}` — checked
+  before the content is read, because a refusal carries no JSON.
+
+### Structural-only schema, clamped counts
+
+PLAN.md line 155 in practice, with the mechanical reason now verified rather than
+assumed: `zodOutputFormat` runs the schema through the SDK's
+`transformJSONSchema`, which keeps `minItems` only when it is 0 or 1 and folds
+every other bound (`maxItems`, `maxLength`, …) into the schema's *description*.
+So a `.max(20)` would not constrain the model at all — but it *would* run
+strictly on our side and turn a 21-title answer into a validation failure.
+Instead: validate shape, clamp count, keep the work. A test walks the JSON Schema
+actually sent and fails if any bound appears in it.
+
+The clamp drops only what cannot be used — blank text, text past the column it
+is destined for, and duplicates of what the video already has — and counts
+everything it did into `AssistMeta`, which is what lets the panel say "the model
+sent 21; here are 20" instead of hiding it.
+
+### Every failure mode, and where it is proved
+
+`anthropic.test.ts` drives each one through the real provider with a stubbed
+transport: refusal → `refused` (not retryable, category carried), 429 →
+`rate_limited` (+ `retry-after`), 5xx → `upstream`, 401/403 → `unauthorized`,
+400 → `rejected`, non-JSON body → `malformed`, JSON of the wrong shape →
+`wrong_shape`, empty list → `empty`, `stop_reason: "max_tokens"` with no text →
+`malformed` (it was cut off, not empty), connection failure → `unreachable`, our
+deadline → `timeout`, the caller's signal → `cancelled`, and anything thrown at
+all → still an `AssistError`. 96 tests across five files; `npm test` is 494
+passing in 30 files.
+
+### Decisions taken without the user
+
+1. **`maxRetries: 0` on the SDK client.** Its default retries 429s, 5xx *and*
+   timeouts twice, which would put the worst case at three times the deadline —
+   past PLAN.md's `maxDuration = 60`. One attempt, a typed error, and the retry
+   is the person's button.
+2. **`cancelled` is not retryable and `refused` is not either.** The first
+   because nobody is waiting for advice about a panel they closed; the second
+   because the same prompt earns the same refusal, and a retry button that cannot
+   work is a lie.
+3. **A fully de-duplicated answer is a success with an empty list, not an
+   `empty` error.** Nothing went wrong: the model proposed what the person had
+   already written. `meta.droppedDuplicates` carries the sentence.
+4. **The rationale is cut to `MAX_CANDIDATE_NOTE_LENGTH` rather than dropped.**
+   Accepting a suggestion writes the rationale into the candidate's `note`; an
+   over-long one would turn "Add as candidate" into a validation error at the
+   write path.
+5. **Hooks are asked for by how many are missing** (the pill says "Draft a
+   third"), floored at one so a full list still gets an alternative to compare.
+6. **The fake takes a scenario from a marker in the video's own text**
+   (`[[assist:refused]]`), as well as from an option and from
+   `ASSIST_FAKE_SCENARIO`. A browser test can then ask for a refusal mid-run by
+   typing into a field it already has open, instead of restarting a server per
+   failure mode.
+7. **`concepts` and `thumbnail_critique` exist in the provider surface** even
+   though this milestone's panel only asks for `titles` and `hooks`. The pills
+   for them were placed in M4/M2 and the module is where their request shapes
+   belong; wiring them is a UI decision, not a module one.
+
+### Deviations from PLAN.md
+
+- **`lib/assist/**`, not `lib/brainstorm/{types,anthropic}.ts`.** The directory
+  name came from the milestone's own task text and from the control the earlier
+  milestones placed (`AssistPill`). Same two implementations, one more file each
+  for the schema, the clamp and the prompts, because PLAN.md's own instruction
+  was that the prompt is a first-class artifact.
+- **`server-only` is not a new dependency.** Next aliases the bare specifier to
+  its own bundled copy and declares the module in `next/types/global.d.ts`, so
+  the tripwire costs nothing at the dependency ceiling. Vitest has no such alias,
+  so `vitest.config.mts` points the specifier at Next's own `empty.js` — the
+  stub Next itself serves under the `react-server` condition. That is the one
+  file outside `lib/assist/**` this slice touched.
+- **`@anthropic-ai/sdk` 0.128.0 installed**, as PLAN.md's dependency list
+  allows. Verified against its own types rather than over raw `fetch`.
+
+### Honest limits
+
+- **No live call, ever, from here.** The real provider is verified by reading the
+  installed SDK and by asserting on the request it builds — not by using it. The
+  first real exchange will happen in Vercel, and the first thing worth checking
+  there is that the request goes out with `effort: "medium"`, the `-07-01` beta
+  header and `fallbacks: "default"`, and that a refusal comes back as a sentence.
+- **The key was grepped for, in a real build.** `npm run build` succeeds;
+  `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` appear nowhere under
+  `.next/static`, and the SDK appears only in server chunks.
+- **Two providers wrote `lib/assist` at once.** This slice and the panel slice
+  raced: three files in this directory were overwritten mid-flight and rebuilt
+  against the interface the action and the panel had by then been written for.
+  The module that ships is the one the consumers compile against (`npm run
+  typecheck` is clean for the app program), but the churn is worth knowing about
+  if a later reviewer finds a doc comment describing a shape that no longer
+  exists.
+- **One typecheck error outside this slice** at the time of writing:
+  `e2e/brainstorm.spec.ts(490,3)` — a local `release` variable typed `never` in
+  the panel slice's spec. Untouched here.
+
+
+## M8 — Every other assist: concepts, the third hook, the critique, and the two places a pill would have been noise
+
+*Slice: `components/assist/{run.ts,chrome.tsx,concept-assist.tsx,critique-assist.tsx}`,
+`components/thumbnails/assist-target.tsx`, the critique half of
+`app/actions/assist.ts`, and the wiring in the packaging block, the thumbnails
+section and `app/videos/[id]/page.tsx`. The provider module and the title/hook
+panel are the other two M8 slices; this one programs against both.*
+
+The user's words when the design was signed off: *there should be UI options to
+have AI generate, research or assist you on every field that makes sense.*
+Seven milestones shipped those controls inert. This is the rest of them turned
+on — and, for two of them, the honest finding that turning them on would have
+been shipping noise.
+
+### What this slice delivers
+
+- **"Suggest concepts", beside the written thumbnail concept.** Four proposals,
+  each a description of a *shot to film* with a reason, in the channel's voice.
+  Accepting writes the concept box through the packaging block's one save queue.
+  It is the only acceptance in the app that **replaces** rather than appends, so
+  it carries an undo in the notice line under it.
+- **"Draft a third", beside the hooks.** Already opened the brainstorm panel on
+  hooks when this slice started (the panel slice built it); what this slice
+  checked is the thing the task asked for — that the hook is drafted *against the
+  packaging it belongs to*. `lib/assist/prompts.ts` puts the working title and
+  the locked thumbnail concept in the user message for every kind, and
+  `videos.title` **is** the chosen candidate (choosing one writes it, see
+  `packaging-block.tsx`), so a hook cannot be drafted in ignorance of the title
+  that was picked. The panel's waiting line now says so.
+- **"Critique at tile size", in the Thumbnails section.** The one assist that
+  looks at pixels: it sends the uploaded variants with the title and the locked
+  concept, and comes back with one verdict per image — reads at tile size or
+  not, adds to the title or repeats it, and a sentence to act on — plus the role
+  it would ship. Accepting *is* shipping that role, through `swap_thumbnail`,
+  the one door there is.
+- **One mechanism for all of them.** `components/assist/run.ts` is the only
+  in-flight state in the app (ask, wait, cancel, fail, say what happened) and
+  `components/assist/chrome.tsx` is the only place the waiting row, the failure
+  block, the notice, the clamp line, the proposal frame and the pill are drawn.
+  The packaging panel was moved onto both, so the three panels are the same
+  panel wearing different questions.
+- **The inert pill is gone.** `components/preview/assist-pill.tsx` had no call
+  sites left once the last two were wired, and a disabled control whose tooltip
+  promises a milestone that has shipped is a lie in the UI. Its reasoning — the
+  layout decision is worth making early; a listener behind a button nobody can
+  press is the illusion of a feature — is carried in `AssistPillButton`'s doc
+  comment, which is the same control with something behind it.
+
+### The critique, in detail, because it is the unusual one
+
+**It judges; it never generates.** BRIEF.md principle 2 is that a thumbnail
+*concept* and a thumbnail *asset* are two things at two stages. The concept is
+proposed at packaging by the pill above; this section holds the files, and the
+only useful thing a model can add here is what the person cannot do for
+themselves — see their own thumbnail small, beside the title, the way a stranger
+meets it. Nothing in this app returns an image or a prompt for one.
+
+**The bytes are read on the server, and `lib/storage.ts` says why.** That file's
+header used to say the server never holds image bytes; that is still true of the
+*upload* path (browser → Storage directly, because a server action is a request
+body and Vercel caps those at 4.5 MB). The critique goes the other way and has
+no choice: the key may only exist on the server, so the request carrying the
+images is built there. `downloadObject` reads them with the caller's own
+RLS-scoped client — the same `thumbnails owner rw` policy a signed URL goes
+through — holds them for one call, and writes them nowhere.
+
+**Three ways a variant is left out, all named rather than dropped.** A format
+the vision API cannot read (the bucket accepts AVIF; the API's list, read out of
+the installed SDK's types, does not), an object that is no longer there, and a
+file past the 5 MB ceiling each become a sentence in the panel while the others
+are still judged. All three variants failing is the one case that fails the
+call, and the message is the first variant's reason rather than "it did not
+work".
+
+**The verdict is deliberately not stored, and closing the panel forgets it.** `videos.brainstorm_last` makes
+reopening the text panels free, because their proposals are about text that has
+not changed. A verdict is about the bytes that were in the bucket when it ran:
+replace the wild card and a stored verdict becomes a confident paragraph about
+an image that no longer exists, which is worse than no verdict because it reads
+as current. The panel says "Not kept", closing it drops the answer rather than
+holding a stale one for the next open, and asking again is one click.
+
+**Accepting lands in a real field, and the log stays the person's.** Nothing is
+live yet → one click ships it, logged as `Chosen at launch.` like any first
+ship. Something is live → the existing swap dialog opens, with the model's
+sentence *pre-filled in the textarea*, editable, and the dialog says where it
+came from. `thumbnail_swaps.reason` records what was confirmed, never what was
+proposed: the log is the record of what the person decided.
+
+### Capture: the assist is one press *after* it, not inside it
+
+`components/capture/capture-form.tsx` is one input, a channel chip and Enter,
+with everything else behind a disclosure. BRIEF.md principle 6 says friction
+reduction *is* the product, and this is the least friction in the app. There is
+no assist on that path, for two reasons and the second is the harder one:
+
+1. A model call takes ten to forty seconds. Putting one on the fastest screen
+   in the app makes it the slowest.
+2. **It could not be built honestly.** `app/actions/assist.ts` takes a video id
+   and nothing else, *precisely* so a browser can never hand the key a prompt of
+   its own — everything the call needs is either RLS-scoped user data or the
+   key. At capture time there is no row yet, so an assist there would have to
+   accept free text from the client and spend the key on it. That is the one
+   thing the action's shape exists to prevent, and it is not worth trading for a
+   button.
+
+What changed instead: the capture toast now carries a link to the video it just
+wrote. Capture stays one field and Enter; the four controls that can do
+something with the idea are one press away, on the page that owns it.
+
+### Script: no pill, because there is no field
+
+`components/video-sections/script-section.tsx` is read-only, and not by
+oversight: `script` is not in `lib/video-fields.ts`'s patch vocabulary and
+`app/actions/videos.ts` has no branch for it, so **there is no write path to
+land a suggestion in**. A generate button over a column that cannot be saved
+would produce text with nowhere to go, which is the definition of noise.
+
+There is also less missing here than it looks. The part of a script this app
+actually owns is the hook — BRIEF.md's scripting checklist wants it *scripted
+word for word* and the rest as bullets — and the hook has an assist already, one
+stage upstream, whose output `move_video` splices into the script template on
+the way into Scripting. So the script's own assist is the editor's to ship with
+the editor (M9's job, per PLAN.md), and adding a pill now would mean choosing
+between a button that does nothing and a second write path to a column with
+none. Recorded as a finding rather than built.
+
+The same test applies to a review-only assist ("critique this script"): it would
+be the only assist in the app with nothing to accept, and this milestone's rule
+is that a proposal has a field to land in.
+
+### Decisions taken without the user
+
+1. **Concepts got their own control rather than a third tab on the brainstorm
+   panel.** That panel sits beside the title candidates and answers two
+   questions about *lists*, where accepting appends a row. The concept is a
+   single field where accepting **overwrites**, possibly something the person
+   wrote; it belongs beside the box it overwrites and it needs an undo a
+   list-shaped panel has no use for. It is not a second mechanism: same
+   `useAssistRun`, same chrome, same `brainstorm_last` envelope under its own
+   key.
+2. **Accepting a concept replaces immediately, with an undo, rather than asking
+   first.** A confirm step on every acceptance is friction on the gesture the
+   whole feature is about; an undo is one press and only appears when there was
+   something to lose.
+3. **The critique is not stored** (above), which also means "Ask again" is the
+   only way to see one after a reload. That is the honest cost of the answer
+   being about bytes.
+4. **The critique's accept is "ship this one".** A verdict's proposal *is* which
+   variant to run; making the person read it, close the panel and find the slot
+   would be the panel knowing something the page will not act on.
+5. **`brainstorm_last` gained a `concepts` key without a version bump.** Every
+   key in the envelope is optional, so an older build ignores it key-by-key and
+   a row written before it exists reads exactly as it did. A version is for a
+   change that makes the old shape unreadable.
+6. **The capture toast gained a link** rather than capture gaining a control.
+7. **The four pills all render `AssistPillButton`**, so the one that can still
+   be unavailable — the critique, with no images to look at — is disabled *and*
+   says why, instead of being a button that does nothing.
+
+### Deviations from PLAN.md, stated plainly
+
+- **PLAN.md's M8 is "panel on the packaging block, Add all, add-as-candidate /
+  use-as-hook, `brainstorm_last`".** That is the other slice. This one is the
+  rest of the user's "every field that makes sense", which PLAN.md does not
+  enumerate; nothing here contradicts it. The thumbnail critique is the one
+  capability PLAN.md's brainstorm section does not mention at all — it comes
+  from the control M4 placed and from BRIEF.md principles 2 and 7 — and it is
+  additive: it reads images, writes nothing but a ship through the existing
+  function.
+- **`app/actions/assist.ts` holds two exported actions now**, `assist` (titles,
+  concepts, hooks) and `critiqueThumbnails`. One file, one provider chooser, one
+  deadline, one failure mapping (`failureOf`), two questions with different
+  inputs and different return shapes.
+
+### Honest limits
+
+- **No live model call has ever been made from this container**, here or in
+  either sibling slice. Egress to `api.anthropic.com` is blocked and there is no
+  key. Everything is exercised against `lib/assist/fake.ts`. The first real
+  exchange will be in Vercel, and the first thing worth watching there is a
+  critique: it is the only call that sends images, and nothing about that path —
+  the base64 size, the per-image cost, the latency of three photographs — has
+  been measured against the real API.
+- **The critique's cost is real and this app does not show it.** Three images
+  plus a prompt is the most expensive thing in here by some distance, and the
+  panel says nothing about that beyond warning that it is the slowest.
+- **Two slices wrote `components/assist/**` at the same time.** The panel slice
+  and this one collided on `brainstorm-panel.tsx` mid-edit: this slice had begun
+  making the panel three-kinded while that slice was narrowing it to a
+  `PanelKind` of exactly two. The tree was briefly uncompilable. It was resolved
+  in this slice's favour on the shared chrome and in the panel slice's favour on
+  the question of what that panel answers — which is how concepts came to have
+  their own control, and it is a better answer than the one this slice started
+  with. If a reviewer finds a doc comment describing a three-tab panel, that is
+  the fossil.
+- **`e2e/preview.spec.ts`'s "the assists, inert" case was rewritten here**, by
+  this slice, because all four pills are live and it asserted all four were
+  disabled with an "Arrives in M8" tooltip. It now asserts the opposite, plus
+  the one control that can still be legitimately unavailable.
+- **The packaging panel renders the shared chrome but still keeps its own
+  in-flight state.** `components/assist/brainstorm-assist.tsx` holds a
+  `Record<PanelKind, KindView>` with its own request-id, cancel sentence and
+  patch function; `components/assist/run.ts` is the same machine written once,
+  and the two other controls use it. They agree today — the cancel sentence is
+  the same words in both — but they agree by hand, which is precisely the kind
+  of agreement that stops being true. Converting that component to hold two
+  `useAssistRun`s is a contained change and was left undone rather than made
+  blind while its own slice was still being written. It is the first thing to
+  do to this directory.
+- **The critique reads its images with three concurrent `download` calls**, one
+  per slot, before the model call starts. Storage has no batch download, so the
+  floor is one round trip per variant; running them together makes it one wait
+  rather than three. It has never been measured against real Storage latency.
+
 <!-- GATES -->

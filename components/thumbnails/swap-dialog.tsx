@@ -52,6 +52,7 @@ export function SwapDialog({
   busy,
   error,
   returnFocusRef,
+  suggestedReason,
   onClosed,
   onConfirm,
   onCancel,
@@ -73,6 +74,17 @@ export function SwapDialog({
    * parameter is the answer to it; this dialog simply was not passing one.
    */
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * A sentence to start from, when something proposed this swap.
+   *
+   * The critique panel passes the model's own note here. It is the *initial*
+   * value of the textarea and nothing more: it can be edited or cleared, it is
+   * checked by `describeReasonRejection` like anything typed by hand, and what
+   * lands in `thumbnail_swaps.reason` is whatever is in the box when Swap is
+   * pressed. The log is a record of what the person decided, so a proposal may
+   * reach the box but never the row unread.
+   */
+  suggestedReason?: string;
   /** Run after the dialog has gone, for the caller to place focus itself. */
   onClosed?: () => void;
   onConfirm: (reason: string) => void;
@@ -80,7 +92,7 @@ export function SwapDialog({
 }) {
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const noticeId = useId();
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(suggestedReason ?? "");
   const [notice, setNotice] = useState<string | null>(null);
 
   function confirm() {
@@ -120,6 +132,14 @@ export function SwapDialog({
         <label htmlFor="swap-reason" className="text-xs font-medium text-muted">
           Why are you swapping?
         </label>
+
+        {suggestedReason ? (
+          <p data-testid="swap-reason-proposed" className="text-xs text-muted">
+            The box starts from the critique&rsquo;s sentence, because it is the
+            one you just read. Edit it or clear it — the log records what you
+            write.
+          </p>
+        ) : null}
         <textarea
           id="swap-reason"
           ref={reasonRef}

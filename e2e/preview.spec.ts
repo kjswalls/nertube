@@ -397,10 +397,10 @@ test('switching sections keeps edits that have not been committed', async ({
 });
 
 /* -------------------------------------------------------------------------- */
-/* 4. The assists, inert                                                       */
+/* 4. The assists, live                                                        */
 /* -------------------------------------------------------------------------- */
 
-test('the assist controls are present, disabled, and say when they arrive', async ({
+test('the assist controls are present, live, and each opens its own panel', async ({
   page,
 }) => {
   const videoId = await capture('Assists');
@@ -412,6 +412,9 @@ test('the assist controls are present, disabled, and say when they arrive', asyn
   // size". Every section stays mounted, so they are all in the document.
   await expect(pills).toHaveCount(4);
 
+  // M2 and M4 placed these disabled, with "Arrives in M8" drawn on them. M8
+  // is what this now is, so the milestone is gone from every one of them —
+  // including the tooltips, which is where the promise used to live.
   for (const verb of [
     'Generate 20',
     'Suggest concepts',
@@ -419,25 +422,26 @@ test('the assist controls are present, disabled, and say when they arrive', asyn
     'Critique at tile size',
   ]) {
     const pill = page.locator(`[data-assist="${verb}"]`);
-    // Attached rather than visible: the fourth belongs to the Thumbnails
-    // section, which is mounted and hidden until its tab is opened.
     await expect(pill).toBeAttached();
-    await expect(pill).toBeDisabled();
-    await expect(pill).toHaveAttribute('title', /Arrives in M8\.$/);
-    // The milestone is drawn on the control as well as hidden in its tooltip:
-    // a disabled button cannot be focused, so the tooltip alone reaches nobody
-    // using a keyboard.
-    await expect(pill).toContainText('M8');
+    await expect(pill).not.toHaveAttribute('title', /Arrives in M\d/);
   }
 
-  // The three on the section this URL opened at are on screen…
+  // The three on the section this URL opened at are on screen, and pressable.
   for (const verb of ['Generate 20', 'Suggest concepts', 'Draft a third']) {
-    await expect(page.locator(`[data-assist="${verb}"]`)).toBeVisible();
+    const pill = page.locator(`[data-assist="${verb}"]`);
+    await expect(pill).toBeVisible();
+    await expect(pill).toBeEnabled();
   }
 
-  // …and the fourth is, on the section it belongs to.
+  // The fourth is on the section it belongs to — and it is the one control
+  // that can still be unavailable, because a critique of three empty slots is
+  // nothing. It says which, rather than being a button that does nothing.
   await page.goto(`/videos/${videoId}?section=thumbnails`);
-  await expect(page.locator('[data-assist="Critique at tile size"]')).toBeVisible();
+  const critique = page.locator('[data-assist="Critique at tile size"]');
+  await expect(critique).toBeVisible();
+  await expect(critique).toBeDisabled();
+  await expect(critique).toHaveAttribute('title', /upload at least one variant/i);
+  await expect(page.getByTestId('critique-nothing')).toBeVisible();
 });
 
 /* -------------------------------------------------------------------------- */
