@@ -6939,6 +6939,34 @@ slice is for:
   panel owns. A second component registering would silently win; if more
   controls need it, that ref has to become a map keyed by kind.
 
+### Gates for this slice
+
+Run after the two `components/assist/**` slices converged, against the tree as
+it stands:
+
+- `npx tsc --noEmit` — clean.
+- `npx eslint components/assist app/actions/assist.ts e2e/brainstorm.spec.ts components/packaging app/videos/[id]/page.tsx` — clean.
+- `npx vitest run` — 30 files, 494 tests, all passing.
+- `npx playwright test brainstorm` — 21 passing, run three times end to end.
+- `npx playwright test` (whole suite) — 241 passed, 3 failed *while another
+  agent was rewriting `components/assist/**` underneath it*; all three were
+  re-run afterwards and pass (`e2e/packaging.spec.ts`, `e2e/m2-review.spec.ts`,
+  and `e2e/preview.spec.ts`, whose assist assertion that slice updated from
+  "disabled" to "live"). A clean full-suite run on a settled tree still belongs
+  to the integration pass.
+
+Two things the spec had to learn, both properties of the page rather than of
+the feature:
+
+- **The pill's first click can be swallowed.** `/videos/[id]` renders on the
+  server and hydrates in one pass; a click inside that window does nothing.
+  `openPanel` retries through `untilTaken` (`e2e/hydration.ts`), clicking only
+  while the panel is absent, because the pill is a toggle.
+- **The fixtures answer instantly**, so the in-flight walk makes its own delay
+  by holding the server action's POST in a Playwright route. What it proves is
+  the app's behaviour while something is in flight, which is the same whether
+  the wait is a network or a model.
+
 ## M8 — The service module: one seam, two implementations, no key in this room
 
 `lib/assist/**` is the swappable service module BRIEF.md asks for ("behind a
