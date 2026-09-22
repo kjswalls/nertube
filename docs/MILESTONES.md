@@ -7142,12 +7142,15 @@ been shipping noise.
   not, adds to the title or repeats it, and a sentence to act on — plus the role
   it would ship. Accepting *is* shipping that role, through `swap_thumbnail`,
   the one door there is.
-- **One mechanism for all of them.** `components/assist/run.ts` is the only
-  in-flight state in the app (ask, wait, cancel, fail, say what happened) and
-  `components/assist/chrome.tsx` is the only place the waiting row, the failure
-  block, the notice, the clamp line, the proposal frame and the pill are drawn.
-  The packaging panel was moved onto both, so the three panels are the same
-  panel wearing different questions.
+- **One mechanism, nearly all the way down.** `components/assist/chrome.tsx` is
+  now the only place the waiting row with its measured seconds, the failure
+  block with its retry, the notice line, the clamp line, the proposal frame and
+  the pill are drawn — the packaging panel was moved onto it, so all three
+  panels are the same panel wearing different questions.
+  `components/assist/run.ts` is the same for the *state* (ask, wait, cancel,
+  fail, say what happened) and the two controls this slice built use it; the
+  packaging panel still holds its own copy of that state, which is written up
+  under Honest limits as the one piece of this that did not converge.
 - **The inert pill is gone.** `components/preview/assist-pill.tsx` had no call
   sites left once the last two were wired, and a disabled control whose tooltip
   promises a milestone that has shipped is a lie in the UI. Its reasoning — the
@@ -7317,6 +7320,18 @@ is that a proposal has a field to land in.
   `useAssistRun`s is a contained change and was left undone rather than made
   blind while its own slice was still being written. It is the first thing to
   do to this directory.
+- **This slice made `/videos/[id]` heavier, and one spec elsewhere felt it.**
+  The first full run after it landed failed `e2e/flow-fields.spec.ts` — the
+  target date typed and blurred before the route had hydrated, so no draft ever
+  saw it and the save never happened. It passes alone and failed under the full
+  suite, which is exactly the property `e2e/hydration.ts` was written for: the
+  page renders as real HTML first, and every client panel added to it widens
+  the window where a click or a keystroke is swallowed. The fix is that file's
+  documented remedy — retry the interaction until the page takes it — applied
+  to that one spot. The underlying cost is real and is worth naming: three
+  assist panels now hydrate with the rest of the detail page, and the honest
+  answer if it worsens is to make the sections lighter, not to unmount the ones
+  that are not showing.
 - **The critique reads its images with three concurrent `download` calls**, one
   per slot, before the model call starts. Storage has no batch download, so the
   floor is one round trip per variant; running them together makes it one wait

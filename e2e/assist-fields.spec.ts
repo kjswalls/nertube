@@ -9,6 +9,7 @@ import {
   SEED_STAGES,
 } from '../lib/defaults';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { untilTaken } from './hydration';
 import { makePng } from './png';
 
 /**
@@ -253,6 +254,46 @@ async function savedCleanly(page: Page): Promise<void> {
   await expect(page.getByTestId('packaging-save-status')).toHaveText(/^Saved$/);
 }
 
+/**
+ * Press a pill, through the hydration window.
+ *
+ * `/videos/[id]` is server-rendered and its controls are real HTML before any
+ * JavaScript runs, so a click that lands before the route hydrates is swallowed
+ * silently — see `e2e/hydration.ts`. The retry is made idempotent by clicking
+ * only while the panel is absent: every one of these pills is a toggle, so a
+ * blind second click would close what the first one opened.
+ */
+async function openAssist(page: Page, verb: string, panelId: string): Promise<void> {
+  const panel = page.getByTestId(panelId);
+  await untilTaken(
+    async () => {
+      if ((await panel.count()) === 0) await pill(page, verb).click();
+    },
+    () => expect(panel).toBeVisible({ timeout: 2_000 }),
+  );
+}
+
+/**
+ * Type into the concept box and wait for the row to have it.
+ *
+ * The box commits on blur (`components/packaging/thumbnail-concept.tsx`), and
+ * typing into it before hydration puts text in the DOM that no draft knows
+ * about — so both the typing and the blur are retried until the save queue
+ * says the edit landed.
+ */
+async function writeConcept(page: Page, text: string): Promise<void> {
+  await untilTaken(
+    async () => {
+      await concept(page).fill(text);
+      await concept(page).blur();
+    },
+    () =>
+      expect(page.getByTestId('packaging-save-status')).toHaveText(/^Saved$/, {
+        timeout: 4_000,
+      }),
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* 1. Thumbnail concepts — a proposal that replaces a field, and can be undone */
 /* -------------------------------------------------------------------------- */
@@ -265,10 +306,9 @@ test('suggest concepts: generates, presents as proposals, and writes the concept
 
   // Nothing yet, and the box is empty.
   await expect(concept(page)).toHaveValue('');
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
 
   const panel = page.getByTestId('concept-assist-panel');
-  await expect(panel).toBeVisible();
   await expect(page.getByTestId('concept-assist-provenance')).toContainText(
     'Fresh, just now',
   );
@@ -314,10 +354,9 @@ test('suggest concepts: replacing what you wrote is one press, and so is putting
   await openPackaging(page, videoId);
 
   const mine = 'Me, unimpressed, holding the broken tripod. No text.';
-  await concept(page).fill(mine);
-  await savedCleanly(page);
+  await writeConcept(page, mine);
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   const proposals = page.getByTestId('concept-assist-suggestion');
   await expect(proposals.first()).toBeVisible();
 
@@ -348,7 +387,7 @@ test('suggest concepts: reopening is free and says the answer is from earlier', 
   const videoId = await capture('Six months of cold showers');
   await openPackaging(page, videoId);
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   await expect(page.getByTestId('concept-assist-suggestion').first()).toBeVisible();
   await page.getByTestId('concept-assist-close').click();
   await expect(page.getByTestId('concept-assist-panel')).toHaveCount(0);
@@ -356,12 +395,12 @@ test('suggest concepts: reopening is free and says the answer is from earlier', 
   // The pill says there is something kept, and opening it again shows it
   // without asking the model a second time.
   await expect(pill(page, 'Suggest concepts')).toContainText('saved');
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   await expect(page.getByTestId('concept-assist-provenance')).toContainText('From earlier');
 
   // A full reload reads it back out of `brainstorm_last` rather than re-asking.
   await openPackaging(page, videoId);
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   await expect(page.getByTestId('concept-assist-provenance')).toContainText('From earlier');
   await expect(page.getByTestId('concept-assist-suggestion')).toHaveCount(4);
 });
@@ -376,12 +415,21 @@ test('draft a third: a hook proposal lands in the hooks list', async ({ page }) 
 
   // The packaging it belongs to: a chosen title and a written concept. The
   // prompt carries both, which is the whole reason this pill is on this block.
-  await concept(page).fill('Stack of books to the ceiling, me peering around it.');
-  await savedCleanly(page);
+  await writeConcept(page, 'Stack of books to the ceiling, me peering around it.');
 
-  await pill(page, 'Draft a third').click();
-  const panel = page.getByTestId('brainstorm-panel');
-  await expect(panel).toHaveAttribute('data-kind', 'hooks');
+  await untilTaken(
+    async () => {
+      if ((await page.getByTestId('brainstorm-panel').count()) === 0) {
+        await pill(page, 'Draft a third').click();
+      }
+    },
+    () =>
+      expect(page.getByTestId('brainstorm-panel')).toHaveAttribute(
+        'data-kind',
+        'hooks',
+        { timeout: 2_000 },
+      ),
+  );
 
   const first = page.getByTestId('brainstorm-suggestion').first();
   await expect(first).toBeVisible();
@@ -422,10 +470,9 @@ test('critique: judges the uploaded variants, and accepting ships one', async ({
 
   await expect(pill(page, 'Critique at tile size')).toBeEnabled();
   await expect(pill(page, 'Critique at tile size')).toContainText('2/3');
-  await pill(page, 'Critique at tile size').click();
+  await openAssist(page, 'Critique at tile size', 'critique-panel');
 
   const panel = page.getByTestId('critique-panel');
-  await expect(panel).toBeVisible();
 
   // One verdict per image that was sent, and no verdict about the empty slot.
   const verdicts = page.getByTestId('critique-verdict');
@@ -500,7 +547,7 @@ test('a refusal is a sentence with “Try anyway”, and changes nothing', async
   const videoId = await capture('A topic Claude will not touch [[assist:refused]]');
   await openPackaging(page, videoId);
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   const failure = page.getByTestId('concept-assist-failure');
   await expect(failure).toHaveAttribute('data-code', 'refused');
   await expect(failure).toContainText('declined');
@@ -521,7 +568,7 @@ test('a rate limit says how long, and the critique fails the same way as the res
   await page.goto(`/videos/${videoId}?section=thumbnails`);
   await upload(page, 'safe', MODERATE);
 
-  await pill(page, 'Critique at tile size').click();
+  await openAssist(page, 'Critique at tile size', 'critique-panel');
   const failure = page.getByTestId('critique-failure');
   await expect(failure).toHaveAttribute('data-code', 'rate_limited');
   await expect(failure).toContainText('wait a moment');
@@ -539,7 +586,7 @@ test('an unusable answer is clamped, and the panel says what it dropped', async 
   const videoId = await capture('A blank and a monster [[assist:unusable]]');
   await openPackaging(page, videoId);
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
 
   /*
     The fixture sends a blank suggestion and one far longer than the column
@@ -584,14 +631,17 @@ test('while it thinks the page still works, and cancelling stops the waiting hon
     },
   );
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
 
   const pending = page.getByTestId('concept-assist-pending');
   await expect(pending).toBeVisible();
   await expect(page.getByTestId('concept-assist-elapsed')).toBeVisible();
 
-  // The rest of the block is not blocked: this is a panel, not a modal.
+  // The rest of the block is not blocked: this is a panel, not a modal. The
+  // blur commits the edit, whose own POST is held by the same route — which is
+  // the honest version of this situation anyway.
   await concept(page).fill('Typed while it was thinking.');
+  await concept(page).blur();
   await expect(concept(page)).toHaveValue('Typed while it was thinking.');
 
   await page.getByTestId('concept-assist-cancel').click();
@@ -613,7 +663,7 @@ test('closing the panel keeps the answer in the row and touches no field', async
   const videoId = await capture('Closed too early');
   await openPackaging(page, videoId);
 
-  await pill(page, 'Suggest concepts').click();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   await expect(page.getByTestId('concept-assist-suggestion').first()).toBeVisible();
   await page.getByTestId('concept-assist-close').click();
 
@@ -632,15 +682,13 @@ test('every panel takes focus when it opens and closes on Escape', async ({ page
   const videoId = await capture('Keyboard only');
   await openPackaging(page, videoId);
 
-  await pill(page, 'Suggest concepts').click();
-  await expect(page.getByTestId('concept-assist-panel')).toBeVisible();
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
   await expect(page.locator('#concept-assist-heading')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('concept-assist-panel')).toHaveCount(0);
 
   // The same gesture, on the panel another slice built, from the same chrome.
-  await pill(page, 'Draft a third').click();
-  await expect(page.getByTestId('brainstorm-panel')).toBeVisible();
+  await openAssist(page, 'Draft a third', 'brainstorm-panel');
   await expect(page.locator('#brainstorm-heading')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('brainstorm-panel')).toHaveCount(0);
@@ -648,8 +696,7 @@ test('every panel takes focus when it opens and closes on Escape', async ({ page
   // And on the critique, three sections along.
   await page.goto(`/videos/${videoId}?section=thumbnails`);
   await upload(page, 'safe', WILD);
-  await pill(page, 'Critique at tile size').click();
-  await expect(page.getByTestId('critique-panel')).toBeVisible();
+  await openAssist(page, 'Critique at tile size', 'critique-panel');
   await expect(page.locator('#critique-heading')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('critique-panel')).toHaveCount(0);

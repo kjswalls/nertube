@@ -9,6 +9,7 @@ import {
   SEED_STAGES,
 } from '../lib/defaults';
 import { apiKey } from '../scripts/dev-stack/jwt';
+import { untilTaken } from './hydration';
 import {
   API_KEY_EXP,
   API_KEY_IAT,
@@ -360,11 +361,25 @@ test('the target date can be set and cleared, and the card follows', async ({
   await expect(field).toHaveValue('');
   await expect(page.getByTestId('target-date-clear')).toBeDisabled();
 
-  // Set it. The field saves on change *and* on blur; either alone is enough,
-  // and `commit` is a no-op the second time, so this is one save.
-  await field.fill('2026-11-20');
-  await field.blur();
-  await expect(status).toHaveText('Saved');
+  /*
+    Set it. The field saves on change *and* on blur; either alone is enough,
+    and `commit` is a no-op the second time, so this is one save.
+
+    Retried through `untilTaken` because this is the first interaction after a
+    navigation and `/videos/[id]` is the heaviest route in the app: a fill that
+    lands before hydration puts text in the box that no draft knows about, and
+    the save never happens. M8 widened that window again by giving the page
+    three assist panels, which is how this surfaced — see `e2e/hydration.ts`,
+    which is explicit that the retry is the faithful assertion and not a
+    workaround. Filling the same date twice is idempotent.
+  */
+  await untilTaken(
+    async () => {
+      await field.fill('2026-11-20');
+      await field.blur();
+    },
+    () => expect(status).toHaveText('Saved', { timeout: 4_000 }),
+  );
 
   expect((await row('Date target'))?.target_publish_date).toBe('2026-11-20');
 

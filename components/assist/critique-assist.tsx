@@ -243,7 +243,7 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                 target.ship(role, reason, from);
                 run.note(
                   variants.some((variant) => variant.live)
-                    ? `Opening the swap — its sentence is in the box, edit it before you confirm. The log records what you write, not what it said.`
+                    ? "Opening the swap — its sentence is in the box, so edit it before you confirm. The log records what you write, not what it said."
                     : `Shipping ${ROLE_LABEL[role].toLowerCase()}. It is logged as chosen at launch.`,
                 );
               }}
