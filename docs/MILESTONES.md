@@ -9055,3 +9055,76 @@ not assumed:
   after.
 - **Per-thumbnail notes:** the brief's "each with a note" became the role's
   description plus the swap reason.
+
+### Gates
+
+Run in this container: no `ANTHROPIC_API_KEY`, no stale stack (checked with
+`pgrep` before each run), Postgres up (`pg_isready`), `E2E_REUSE=0`.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | exit 0, both programs |
+| Lint | `npm run lint` | exit 0 |
+| Build | `npm run build` | exit 0. 19 routes plus the proxy. `.next/static` holds none of `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key` (0 files) |
+| SQL | `./scripts/verify-db.sh m9_check` | `OK (migrations applied, 17 test file(s) passed)` |
+| Unit | `npm run test` | 525 passed, 33 files |
+| Browser | `E2E_REUSE=0 npx playwright test`, three cold full runs | **1:** 291 passed, 2 failed, 1 skipped (34.1m). **2:** 292 passed, 1 failed, 1 skipped (33.7m). **3:** 292 passed, 1 failed, 1 skipped (35.1m) |
+| Browser, the failures again | every spec that failed in any of the three (`board.m1`, `preview`, `post-publish`, `settings-stages`) | 45 passed, 0 failed. `board.m1` also passed 52/52 over `--repeat-each=4`, cold |
+
+The skip is `session-refresh`, as in every milestone. It runs only under
+`npm run e2e:refresh`.
+
+**`npm run e2e` did not exit 0 in any of the three full runs.** Each failure
+is named here, with its cause where one was found. None of them are
+rounded off.
+
+1. **Three of the four failures were Next's development server restarting
+   itself mid-navigation.** The runs failed `preview.spec.ts:403`, then
+   `post-publish.spec.ts:644`, then `settings-stages.spec.ts:323`. Each failed
+   a `page.goto` on its 60-second load timeout. In every case the line just
+   before the failure in the server log reads *"⚠ Server is approaching the
+   used memory threshold, restarting…"*. `next dev` exits and restarts when
+   its V8 heap passes 80% of its limit (`getMemoryRestartStats` in
+   `next/dist/server/lib/utils.js`), and the page it was serving never
+   finishes loading. It happens once per full run, about two thirds of the
+   way through. The spec it lands on is whichever one is in flight at that
+   moment.
+
+   **This is the development server, not the application.** It was measured,
+   not assumed. The same 240 authenticated page loads (`/videos/<id>` and
+   `/now`, alternating), run against the same stack:
+
+   | Server | Memory after 0 / 40 / 80 / 120 rounds |
+   |---|---|
+   | `next start` (the production build) | 192 / 345 / 345 / 371 MB, flat after warm-up |
+   | `next dev` | 982 / 2007 / 2714 / 3384 MB, about 20 MB per round, growing |
+
+   One mitigation was tried and taken out. A 10 GB heap for the suite's dev
+   server only (`NODE_OPTIONS` in `playwright.config.ts`) moved the restart
+   from about spec 210 to spec 251, and run 3 still lost a test to it. It
+   delayed the failure, so it was reverted. The options not taken, and why:
+   - Turning Next's restart off would let the heap run into the machine's
+     memory.
+   - `retries: 1` would absorb this, but it would also hide every other
+     intermittent failure in the suite behind a green run.
+   - Running the suite against `next build && next start` would remove the
+     cause. It is the right next step. It is also a bigger harness change
+     than this pass should make blind: every spec was written and timed
+     against `next dev` for nine milestones, and changing the server under
+     about 290 of them is its own piece of work.
+2. **One failure is not explained: `board.m1.spec.ts:513`** (drag an idea
+   into Packaging, run 1, the 16th spec, long before any restart). The server
+   log shows the `moveVideo` request made and answered 200. The screenshot
+   shows the card in neither column's visible part, and Packaging still holds
+   one card. The trace was lost when a re-run cleared `test-results/`. It did
+   not recur in 52 cold repeats of that file or in the other two full runs.
+   Nothing this pass changed is on the path it exercises at that viewport
+   (2880px, where the board's new phone-only scroll returns immediately).
+   Recorded as unexplained rather than as a flake.
+
+**What a reader should take from this:** every spec in the suite passed in
+at least two of the three full runs, and each one that failed passed again
+on its own run. The command does not
+yet give a clean exit over a full run, because of the development server's
+memory. A fresh session's first job, if it wants a green `npm run e2e`, is to
+run the suite against a production build.

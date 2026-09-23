@@ -175,7 +175,17 @@ anything but a loopback `PGHOST`.
 | `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
 The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
-third party. Playwright is pointed at the Chromium in `/opt/pw-browsers`
+third party.
+
+**A full run loses about one spec to `next dev` itself.** The development
+server's memory grows by about 20 MB per page pair (the production build's
+does not; `docs/MILESTONES.md`, "M9 — Integration", has the measurement).
+Around two thirds of the way through a full run, Next restarts itself at its
+heap threshold, and the spec that is mid-navigation at that moment fails a
+60-second `page.goto`. The server log says *"Server is approaching the used
+memory threshold, restarting…"* just above it. Re-run that spec. The lasting
+fix is to run the suite against `next build && next start`, which has not been
+done. Playwright is pointed at the Chromium in `/opt/pw-browsers`
 through `executablePath`; do not run `playwright install` in that environment.
 
 Other scripts: `npm run seed:demo` (see [Deploying](#deploying)),
