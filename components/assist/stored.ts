@@ -156,8 +156,8 @@ export function withEntry(
       reports success. The column's whole job is that closing the panel loses
       nothing, and no answer is worth less than the one it would overwrite.
     */
-    const value =
-      replacing && entry.suggestions.length === 0 ? current[which] : replacing ? entry : current[which];
+    const usable = replacing && entry.suggestions.length > 0;
+    const value = usable ? entry : current[which];
     if (value) next[which] = value;
   }
   return next;

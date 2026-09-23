@@ -228,6 +228,17 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
    */
   const inFlight = useRef<number | null>(null);
 
+  /**
+   * The newest request whose answer has actually landed on screen.
+   *
+   * A retained (cancelled) reply must not overwrite something newer, and
+   * "newer" cannot be read off `fresh`: `ask()` leaves the previous answer's
+   * `fresh` alone while it waits, so a second ask that is cancelled would find
+   * `fresh: true` from the *first* one and skip itself. Comparing request ids
+   * says what was actually meant.
+   */
+  const landed = useRef(0);
+
   const patch = useCallback((next: Partial<AssistRunState<T>>) => {
     setState((previous) => ({ ...previous, ...next }));
   }, []);
@@ -277,19 +288,18 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
         */
         if (retained.current !== id) return;
         retained.current = null;
-        setState((previous) => {
-          if (previous.pending || previous.fresh) {
-            return { ...previous, outstanding: false };
-          }
-          if (!answer.ok) return { ...previous, outstanding: false };
-          return {
-            ...previous,
-            outstanding: false,
-            data: answer.data,
-            fresh: false,
-            meta: answer.meta,
-            persisted: answer.persisted,
-          };
+        patch({ outstanding: false });
+        // A late *failure* is dropped: nobody wants an alert about a request
+        // they already walked away from.
+        if (!answer.ok) return;
+        // A newer ask is in flight, or a newer answer is already on screen.
+        if (inFlight.current !== null || landed.current > id) return;
+        landed.current = id;
+        patch({
+          data: answer.data,
+          fresh: false,
+          meta: answer.meta,
+          persisted: answer.persisted,
         });
         return;
       }
@@ -303,6 +313,7 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
         return;
       }
 
+      landed.current = id;
       patch({
         pending: false,
         data: answer.data,
@@ -355,6 +366,7 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
     wanted.current += 1;
     inFlight.current = null;
     retained.current = null;
+    landed.current = wanted.current;
     setState(emptyRun<T>());
   }, []);
 

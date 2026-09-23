@@ -8024,4 +8024,41 @@ titles for the same video.
    20" and then "Draft a third" is two panels' worth of work and the design
    supports it; refusing the second would have made the guard a bug.
 
+### Gates for this pass
+
+Every one of these was run after the last edit, on the settled tree, in this
+container, with **no `ANTHROPIC_API_KEY` set** — which is the state this
+container is always in and the state every number below was produced under.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs (the app, and the harness `tsconfig.harness.json`) |
+| Lint | `npm run lint` | clean |
+| Build | `npm run build` | succeeds, from `rm -rf .next` |
+| Key leak | grep of `.next/static` | **0 files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `structured-outputs`, `server-side-fallback`, `claude-opus` and `ASSIST_PROVIDER`, across all 52 files. The same grep over `.next/server` finds 6, 5, 7, 2, 2, 2 and 3 — the control that makes the zeroes mean something |
+| Database | `./scripts/verify-db.sh m8_final` | **OK — migrations applied, 17 test files passed** (16 before: `75_brainstorm_merge.test.sql` is new, and `90_schema_contract.test.sql` grew three assertions) |
+| Unit | `npm test` | **519 passing in 32 files** (was 501 in 31; `components/assist/stored.test.ts` is the new file) |
+| End to end, run 1 | `npm run e2e` | **264 passed, 1 skipped, 0 failed (19.7m)** |
+| End to end, run 2 | `npm run e2e` | **264 passed, 1 skipped, 0 failed (19.0m)** |
+
+264 rather than 262: `e2e/brainstorm.spec.ts` gained the blocker's walk and the
+cancel-and-reopen walk. The skipped one is `session-refresh`, which only runs
+under `npm run e2e:refresh` with its own short-lived tokens; it has been
+skipped in the default run since M1.
+
+**An intermittent failure is a finding, not noise — and there was one, but it
+was not intermittent.** The first full run after these changes reported **8
+failed**, every one of them a `videos.brainstorm_last` that stayed null.
+The cause was not the code: `playwright.config.ts` sets
+`reuseExistingServer` unless `E2E_REUSE=0`, a dev stack from an earlier session
+was still listening on the gateway port, and Playwright reused it — so the
+suite ran against a database built before migration 0009 existed, where
+`merge_brainstorm_entry` is simply not there and every write failed with
+`persisted: false`. Confirmed directly (`select count(*) from pg_proc where
+proname = 'merge_brainstorm_entry'` → 0 against that database, 1 against a
+freshly built one). Both runs above were started with the stack stopped and
+`E2E_REUSE=0`, and both are clean. Worth writing down because the failure mode
+is silent and looks exactly like a regression: **a run that reuses a stack
+predating a migration is not a run of this tree.**
+
 <!-- GATES -->

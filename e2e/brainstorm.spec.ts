@@ -563,10 +563,21 @@ test('a slow call shows the wait, keeps the page usable, and can be cancelled', 
   await expect(page.getByTestId('brainstorm-notice')).toContainText('Stopped waiting');
   await expect(suggestions(page)).toHaveCount(0);
 
-  // The answer that arrives afterwards is dropped rather than landing in a
-  // panel the person has moved on from.
+  /*
+    The answer that arrives afterwards is *kept*, which is what the notice
+    says will happen.
+
+    This used to assert the opposite — that a late reply is dropped — and the
+    M8 review showed what that cost. The call is not abortable from a browser,
+    so it ran to completion and wrote `videos.brainstorm_last` either way; the
+    panel simply refused to look at the answer, which meant reopening bought a
+    second one. Cancelling stops the *waiting*. It lands quietly, as "from
+    earlier" rather than "fresh, just now", and the notice stays put.
+  */
   release();
-  await expect(suggestions(page)).toHaveCount(0);
+  await expect(suggestions(page).first()).toBeVisible();
+  expect(await suggestions(page).count()).toBe(TITLES_WANT);
+  await expect(page.getByTestId('brainstorm-provenance')).toContainText('From earlier');
   await expect(page.getByTestId('brainstorm-notice')).toContainText('Stopped waiting');
 });
 
@@ -737,9 +748,9 @@ test('an answer that is entirely repeats fails in words and does not wipe what w
   // Retryable, so the offer is "Try again" rather than a dead end.
   await expect(page.getByTestId('brainstorm-retry')).toHaveText('Try again');
 
-  // Not a list of nothing: the failure replaces the answer rather than
-  // rendering beside an empty `<ul>` that claims zero proposals.
-  await expect(page.getByTestId('brainstorm-count')).toHaveCount(0);
+  // And the answer that *was* good is still on screen under the failure,
+  // rather than replaced by a list of nothing claiming zero proposals.
+  await expect(page.getByTestId('brainstorm-count')).toHaveText(String(TITLES_WANT));
 
   // And the thing the blocker was really about: the kept answer is still kept.
   const after = await readRow(videoId);

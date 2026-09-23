@@ -655,9 +655,20 @@ test('while it thinks the page still works, and cancelling stops the waiting hon
   await expect(pending).toHaveCount(0);
   await expect(page.getByTestId('concept-assist-notice')).toContainText('Stopped waiting');
 
-  // The answer that arrives after a cancel is not dropped into the panel.
+  /*
+    The answer that arrives after a cancel is kept, marked "from earlier".
+
+    This asserted the opposite until the M8 review: the reply was discarded,
+    so the panel forgot an answer the column had already been given and
+    reopening paid for a second one. A server action cannot be recalled, so
+    cancelling stops the waiting and nothing else — and the notice now says
+    so. `useAssistRun` retains the request and settles its answer in quietly.
+  */
   release();
-  await expect(page.getByTestId('concept-assist-suggestion')).toHaveCount(0);
+  await expect(page.getByTestId('concept-assist-suggestion').first()).toBeVisible();
+  await expect(page.getByTestId('concept-assist-provenance')).toContainText(
+    'From earlier',
+  );
 
   // And what was typed meanwhile is what the column holds.
   await savedCleanly(page);
