@@ -8897,7 +8897,7 @@ not take them. **Fixed** means fixed in code, by the milestone named.
 | # | From | Item | Disposition |
 |---|---|---|---|
 | 1 | M0 | Everything M1+ "deliberately not built yet" | Fixed, M1–M8 |
-| 2 | M1 | The deploy to Vercel, and an upload to a hosted bucket | **README** ("It has never been deployed"). It cannot be done from this environment |
+| 2 | M1 | The deploy to Vercel, and an upload to a hosted bucket | **README** ("It is deployed, but nothing here was tested against the deployment"). The user created both projects by hand on 17 September. All nine migrations are applied to the hosted database (Postgres 17.6). No spec has run against the live site, and no upload has gone to a hosted bucket |
 | 3 | M1 review 18 | Reconsider the hint bar once the `?` sheet exists | Fixed, M9 keyboard slice: the bar is kept, and its last item opens the sheet |
 | 4 | M1 | The packaging editor and the gate-refusal links | Fixed, M2 |
 | 5 | M1 | The checklist ratio on the card | Fixed, M3 |
@@ -9053,8 +9053,9 @@ not assumed:
   script template exists and fills the script on entry to Scripting, but the
   script is **read-only**. `script_structure` and `end_screen_target` are
   columns with no UI. This is the biggest gap against the brief.
-- **Deploy on Vercel.** Never done. There are no credentials and no egress.
-  There is a runbook.
+- **Deploy on Vercel.** Done by the user by hand: a Vercel project and a hosted
+  Supabase project (Postgres 17.6) with all nine migrations applied. Nothing in
+  this repository has been tested against the deployment.
 - **The brainstorm against Claude itself.** Built and unit-tested against a
   stubbed transport, and never sent to the live API.
 - **The one-line hook after capture:** set at capture and editable nowhere

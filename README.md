@@ -352,10 +352,25 @@ found.
 
 ### Never proven from here
 
-- **It has never been deployed.** No hosted Supabase project, no Vercel
-  deployment, no upload to a hosted bucket (M1's one unfinished acceptance
-  item). Every result in this repository is against the local harness, which
+- **It is deployed, but nothing here was tested against the deployment.** There
+  is a hosted Supabase project and a Vercel project, both created by hand on
+  17 September. All nine migrations were applied to the hosted database, one at
+  a time, through Supabase's management API (the MCP connector), and each
+  was read back afterwards. But no test in this repository has run against either one:
+  - no spec has signed in to the live site;
+  - no upload has gone to a hosted bucket (M1's one unfinished acceptance
+    item);
+  - the SQL suite in `supabase/tests/` has never run against the hosted
+    database.
+
+  Every result in this repository is against the local harness, which only
   approximates GoTrue and Storage.
+- **The deployment has to track this branch.** Migrations 0007–0009 take back
+  table grants that earlier code wrote through directly: stage and channel
+  columns, `archived_at` and `brainstorm_last` on videos. Those writes now go
+  through database functions. If Vercel builds an older commit, the current
+  database will refuse that build's archive, restore, saved brainstorm
+  results and most settings edits.
 - **No request has ever been sent to Anthropic.** There is no key in the build
   environment and egress is blocked. The real provider is verified by reading
   the installed SDK's types and asserting on the request it builds against a
@@ -366,11 +381,11 @@ found.
 - **`supabase start` has never run** (no Docker), and `supabase/config.toml` was
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
-- **Postgres 17 has never run these migrations.** `supabase/config.toml`
-  pins `major_version = 17`, and new hosted Supabase projects run 17, but the
-  migrations and all of `supabase/tests/` have only ever been run on
-  PostgreSQL 16 (16.15, the harness's). Nothing in them is known to differ on
-  17; nothing has checked.
+- **The SQL tests have never run on Postgres 17.** The hosted database is
+  17.6, and all nine migrations applied to it cleanly. `supabase/config.toml`
+  pins `major_version = 17` to match. `supabase/tests/` has only ever run on
+  PostgreSQL 16 (16.15, the harness's version). Nothing in the tests is known to
+  behave differently on 17, but nothing has checked.
 - **No real phone and no touchscreen.** Every phone measurement is Chromium at a
   phone-sized viewport. `e2e/m9-week.spec.ts` walks the whole week at 390×844
   as an emulated touch device (`hasTouch`, `isMobile`, so `pointer: coarse` is
