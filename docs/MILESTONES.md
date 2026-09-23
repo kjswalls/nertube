@@ -9445,3 +9445,28 @@ in all five files that used that locator.
 `board.m1.spec.ts:513`, the one failure M9's integration pass could not
 explain, passed in all three full runs of this pass and in a targeted run of its file. That is not an
 explanation, and the README keeps it as an open item.
+
+### Independent verification, after the fix pass
+
+The orchestrating session re-ran every gate on the final tree, cold. It did not
+take the fix pass's report on trust.
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` | clean |
+| `npm run lint` | clean |
+| `npm run build` | clean |
+| `npx vitest run` | 528 passed, 33 files |
+| `./scripts/verify-db.sh m9_verify` | 17 test files passed |
+| `E2E_REUSE=0 npm run e2e`, twice, cold | 307 passed, 0 failed, 1 skipped (`session-refresh`); 11.9 and 11.7 min; exit 0 both times |
+
+It also ran a separate probe of the phone layout. The probe signed in and loaded
+thirteen routes at 390px and 360px. At 390px the content column is 358px on
+`/now`, the board and the video page, and 350px on every other route; at 360px
+it is 328px and 320px. No route scrolls sideways. M3 measured 102px at 390.
+
+The README's "It has never been deployed" was corrected in the same pass. The
+user created the hosted Supabase and Vercel projects on 17 September, and all
+nine migrations are applied to the hosted database, which runs Postgres 17.6.
+`package.json` is unchanged since M8, so M9 added no runtime dependency. It also
+added no migration.

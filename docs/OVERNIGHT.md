@@ -23,7 +23,7 @@ All nine milestones are built, on branch `claude/tender-davinci-rq7n9y`.
 | M6: calendar across channels, batch filming days | `369398a` | 1.88M |
 | M7: settings (stages, checklist templates, buckets, channel) | `2af8bc8` | 2.57M, plus 1.07M for the fix pass that finished its review |
 | M8: brainstorm (swappable provider, assist panel) | `4a7748c` | 3.50M |
-| M9: responsive pass, full shortcut set, empty and error states, README | see the M9 row below | 3.56M |
+| M9: responsive pass, full shortcut set, empty and error states, README | the `feat(m9)` commit | 3.56M |
 | **Total** | | **15.24M** |
 
 The numbers are the tokens the milestone's workflow agents reported. My own
@@ -42,11 +42,27 @@ cold:
 | Build (`npm run build`) | clean |
 | Unit (`npx vitest run`) | 528 passed, 33 files |
 | SQL suite (`./scripts/verify-db.sh m9_verify`) | 17 files passed |
-| Browser (`E2E_REUSE=0 npm run e2e`), run 1 | _filled in below_ |
-| Browser, run 2 | _filled in below_ |
+| Browser (`E2E_REUSE=0 npm run e2e`), run 1, cold | 307 passed, 0 failed, 1 skipped (`session-refresh`, as always), 11.9 min, exit 0 |
+| Browser, run 2, cold | 307 passed, 0 failed, 1 skipped, 11.7 min, exit 0 |
 
 M9 added no runtime dependency (`package.json` is unchanged since M8) and no
 migration.
+
+**The phone layout, measured by me rather than taken from the report.** M3
+measured a 102px content column at 390px wide, because the 224px sidebar
+stayed on screen. I signed in and loaded thirteen routes at 390 and 360:
+`/now`, capture, the board, the bank, the matrix, the calendar, all five
+settings screens, and a video page on two of its tabs.
+
+| Width | Content column | Sideways scroll |
+|---|---|---|
+| 390px | 358px on `/now`, the board and the video page; 350px elsewhere | none |
+| 360px | 328px and 320px | none |
+
+The sidebar is a 57px bar with a menu. The screenshots look right: the cards
+use the full width and nothing is squeezed. One cosmetic thing I saw and did
+not change: the video page's checklist strip cuts off "Idea has no checklist
+on th…" at 390px.
 
 ## Things to check yourself
 
