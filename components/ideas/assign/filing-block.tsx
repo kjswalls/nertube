@@ -76,9 +76,8 @@ export function FilingBlock({
           Filing
         </h2>
         <p className="text-xs text-muted">
-          Where this sits in the channel’s matrix, and how it will be found
-          again. One pillar and one format at most — a video belongs to its
-          channel’s buckets and to no others.
+          Where it sits in the channel’s matrix: one pillar and one format at
+          most.
         </p>
       </div>
 

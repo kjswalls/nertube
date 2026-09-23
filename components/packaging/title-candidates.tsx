@@ -240,7 +240,7 @@ export function TitleCandidates({
                   }
                   onClick={() => onToggleChosen(candidate.id)}
                   className={[
-                    "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent",
+                    "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11",
                     candidate.chosen
                       ? "border-ready/60 bg-ready/10"
                       : "border-border hover:bg-surface",

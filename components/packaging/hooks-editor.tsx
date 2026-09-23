@@ -127,9 +127,8 @@ export function HooksEditor({
       </div>
 
       <p className="text-xs text-muted">
-        Write three openings and pick the strongest. The chosen one is what gets
-        spliced into the script template at {scriptingName}, and it is what the
-        gate counts.
+        The chosen one is what the gate counts, and what is spliced into the
+        script at {scriptingName}.
       </p>
 
       <form
@@ -238,7 +237,7 @@ export function HooksEditor({
                 }
                 onClick={() => onToggleChosen(hook.id)}
                 className={[
-                  "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent",
+                  "shrink-0 rounded-button border px-2 py-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11",
                   hook.chosen
                     ? "border-ready/60 bg-ready/10"
                     : "border-border hover:bg-surface",

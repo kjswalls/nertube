@@ -123,12 +123,19 @@ function Row({
         </span>
       </label>
 
+      {/* A custom item has no estimate of its own: a dash, not the ten the
+          quick filter reads it as — the mono face is for measured numbers
+          (M9 review). */}
       <span
         data-testid="checklist-minutes"
         className="shrink-0 pt-0.5 font-mono text-[11px] text-muted"
-        title={`About ${estMinutesOf(item)} minutes`}
+        title={
+          item.estMinutes === null
+            ? "No estimate — counted as ten minutes by the 10-minute filter"
+            : `About ${estMinutesOf(item)} minutes`
+        }
       >
-        {estMinutesOf(item)}m
+        {item.estMinutes === null ? "—" : `${estMinutesOf(item)}m`}
       </span>
 
       {evidence ? (

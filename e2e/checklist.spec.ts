@@ -384,9 +384,12 @@ test('a custom item lands at the top and becomes the next action', async ({
   expect(stored[0].text).toBe(custom);
   // `min(position) - 1`: the seeded rows start at 1, so the custom row is 0.
   expect(stored[0].position).toBe(0);
-  // No estimate was typed, and NULL is what the app reads as ten minutes.
+  // No estimate was typed, and NULL is what the app reads as ten minutes —
+  // for the quick filter. It prints no minutes: the mono face is for a
+  // measured number, and nobody measured this one (M9 review).
   expect(stored[0].est_minutes).toBeNull();
-  await expect(page.getByTestId('checklist-next-minutes')).toHaveText('10m');
+  await expect(page.getByTestId('checklist-next-minutes')).toHaveCount(0);
+  await expect(page.getByTestId('checklist-minutes').first()).toHaveText('—');
 
   // A second one goes above the first, not beside it.
   const second = 'Re-shoot the desk clip with the lamp on';

@@ -476,6 +476,10 @@ test('the menu is reachable, trapped and dismissible from the keyboard', async (
   await expect(sheet(page)).toBeVisible();
   await page.mouse.click(PHONE.width - 10, PHONE.height / 2);
   await expect(sheet(page)).toHaveCount(0);
+  // …and focus goes back to the button, as it does for Escape. It fell to
+  // <body> until the M9 review: the backdrop closed the modal inside the
+  // mousedown, and the mousedown's default then moved focus off the opener.
+  await expect(menuButton(page)).toBeFocused();
 
   // Choosing a link closes it and goes there.
   await menuButton(page).click();
@@ -486,6 +490,9 @@ test('the menu is reachable, trapped and dismissible from the keyboard', async (
   await expect(sheet(page)).toHaveCount(0);
   await page.waitForURL('**/calendar');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // The page that arrives has its own bar; its menu button takes focus, which
+  // is where the one that was used would have been (M9 review).
+  await expect(menuButton(page)).toBeFocused();
 
   // Widening the window past the breakpoint takes the sheet away: the desktop
   // sidebar is back, with the same links, and there is one "Main" navigation.

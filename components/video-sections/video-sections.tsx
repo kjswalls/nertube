@@ -161,12 +161,21 @@ export function VideoSections({
     width for the whole page, and the rail column is simply empty for the four
     sections that do not fill it.
 
-    Side by side only above 1480px, and the number is not a taste: the rail
+    Side by side only on a wide window, and the numbers are not a taste: the rail
     holds the YouTube preview, whose frames are YouTube's own pixel sizes, and
     a 360px feed card shrunk to fit a narrow rail would answer "does this
     read?" wrongly — the one thing that component must never do. 224 sidebar +
     32 gutter + 672 measure + 32 gap + 452 rail + 32 gutter is 1444, so the
-    breakpoint sits just above it. Below it the rail's content is not dropped;
+    full 42rem measure waits for 1480.
+
+    And one step below that, at 1440 — the laptop the product is used on, and
+    the size the M9 week walk calls "laptop". The 1480 rule missed it by four
+    pixels, so at 1440×900 the preview stacked under Filing, two screens down,
+    with the right 40% of the window empty (M9 review). From 1440 the measure
+    gives up two rems instead (640 + 32 + 452 = 1124, inside 1440 − 224 − 80);
+    the rail, which is YouTube's own pixels, gives up nothing.
+
+    Below 1440 the rail's content is not dropped;
     the grid is one column and it stacks under the panels at full size, which
     is exactly where the preview sat before the rail existed.
   */
@@ -177,12 +186,14 @@ export function VideoSections({
     Every class below is written out in full rather than composed from a
     shared constant, because Tailwind finds the classes it must generate by
     scanning this file as text: a template hole is a class that never gets a
-    rule. The breakpoint therefore appears literally, five times, and the
-    comment above is the one place it is explained.
+    rule. The breakpoints therefore appear literally, and the comment above is
+    the one place they are explained.
   */
-  const column = hasRail ? "max-w-2xl min-[1480px]:max-w-[1156px]" : "max-w-2xl";
+  const column = hasRail
+    ? "max-w-2xl min-[1440px]:max-w-[1124px] min-[1480px]:max-w-[1156px]"
+    : "max-w-2xl";
   const split = hasRail
-    ? "grid grid-cols-1 items-start gap-8 min-[1480px]:grid-cols-[minmax(0,42rem)_var(--spacing-rail-max)]"
+    ? "grid grid-cols-1 items-start gap-8 min-[1440px]:grid-cols-[minmax(0,40rem)_var(--spacing-rail-max)] min-[1480px]:grid-cols-[minmax(0,42rem)_var(--spacing-rail-max)]"
     : "flex flex-col";
 
   return (
@@ -248,7 +259,7 @@ export function VideoSections({
                   // on a full-width block is a stripe down the page. `sticky`
                   // keeps the preview in view while the packaging block below
                   // it is scrolled through.
-                  className="min-w-0 min-[1480px]:sticky min-[1480px]:top-gutter min-[1480px]:border-l min-[1480px]:border-border min-[1480px]:pl-gutter"
+                  className="min-w-0 min-[1440px]:sticky min-[1440px]:top-gutter min-[1440px]:border-l min-[1440px]:border-border min-[1440px]:pl-gutter"
                 >
                   {rail}
                 </aside>

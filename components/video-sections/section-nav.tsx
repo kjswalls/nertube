@@ -104,7 +104,7 @@ export function SectionNav({
                   onSelect(section.id);
                 }}
                 className={[
-                  "relative inline-flex items-center gap-2 rounded-t-input px-3 py-2 text-sm outline-none",
+                  "relative inline-flex items-center gap-2 rounded-t-input px-3 py-2 text-sm outline-none thumb:min-h-11",
                   "focus-visible:ring-2 focus-visible:ring-accent",
                   current
                     ? "bg-surface font-medium text-foreground"

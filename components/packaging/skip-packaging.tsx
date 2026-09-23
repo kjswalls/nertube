@@ -236,9 +236,8 @@ export function SkipPackaging({
           className="flex flex-col gap-2 rounded-input border border-border bg-surface px-3 py-2"
         >
           <p className="text-xs text-muted">
-            Skipping lets this video move past Packaging with the three fields
-            unfinished. It is recorded with the date and your reason, shows as a
-            badge on the card, and stays visible until you undo it.
+            The video moves on with the fields unfinished. Your reason is
+            recorded, and a badge stays on the card until you undo it.
           </p>
 
           <label htmlFor={anchorId} className="text-xs font-medium text-muted">

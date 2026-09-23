@@ -371,17 +371,26 @@ test('the target date can be set and cleared, and the card follows', async ({
     the save never happens. M8 widened that window again by giving the page
     three assist panels, which is how this surfaced — see `e2e/hydration.ts`,
     which is explicit that the retry is the faithful assertion and not a
-    workaround. Filling the same date twice is idempotent.
+    workaround.
+
+    Cleared first on every attempt, so each one is a change (M9 review): a
+    fill swallowed before hydration leaves 2026-11-20 in the box and React's
+    draft empty, and filling the same value again is not a change, so the
+    retry never saved — this spec failed a full run that way. The week spec
+    already did this.
   */
   await untilTaken(
     async () => {
+      await field.fill('');
       await field.fill('2026-11-20');
       await field.blur();
     },
     () => expect(status).toHaveText('Saved', { timeout: 4_000 }),
   );
 
-  expect((await row('Date target'))?.target_publish_date).toBe('2026-11-20');
+  await expect
+    .poll(async () => (await row('Date target'))?.target_publish_date)
+    .toBe('2026-11-20');
 
   // A reload agrees, so the column was written rather than the field
   // remembering.

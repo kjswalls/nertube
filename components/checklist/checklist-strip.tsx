@@ -125,7 +125,8 @@ export function ChecklistStrip({
           )}
         </p>
 
-        {next ? (
+        {/* Only a measured estimate is printed; a custom item has none. */}
+        {next && next.estMinutes !== null ? (
           <span
             data-testid="checklist-next-minutes"
             title={`About ${estMinutesOf(next)} minutes`}
@@ -141,7 +142,7 @@ export function ChecklistStrip({
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen((current) => !current)}
-          className="shrink-0 rounded-button border border-border px-2 py-0.5 text-[12px] font-medium outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
+          className="shrink-0 rounded-button border border-border px-2 py-0.5 text-[12px] font-medium outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
         >
           {open ? "Hide list" : total > 0 ? `Show list (${total})` : "Show list"}
         </button>

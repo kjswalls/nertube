@@ -50,10 +50,9 @@ export function ThumbnailConcept({
       </label>
 
       <p id={helpId} className="text-xs text-muted">
-        Describe the picture in words — subject, expression, framing, the two or
-        three words on it. <strong className="font-medium">This is the field
-        the gate reads.</strong> The concept sketch you upload is a reference
-        image and does not satisfy it.
+        The picture in words: subject, expression, framing, the words on it.{" "}
+        <strong className="font-medium">This is what the gate reads</strong> —
+        the sketch is only a reference.
       </p>
 
       <textarea

@@ -51,7 +51,7 @@ const EVERYWHERE: Sheet = {
 const SHEETS: Record<'board' | 'now' | 'ideas' | 'plain', Sheet> = {
   board: {
     ...EVERYWHERE,
-    'On the board': ['j / k', '[ / ]', 'Enter', 'Escape'],
+    'On the board': ['j / k', '[ / ]', 'p', 'Enter', 'Escape'],
   },
   now: {
     ...EVERYWHERE,

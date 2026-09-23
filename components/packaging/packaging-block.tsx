@@ -814,10 +814,9 @@ export function PackagingBlock({
           Packaging — the gate
         </h2>
         <p className="text-xs text-muted">
-          Title, thumbnail concept and hook — decided here, before a word of
-          script is written. About a fifth of the work, and most of the result.
-          Nothing leaves {stageNames.packaging} until these three are filled in
-          or the gate is deliberately skipped.
+          Title, thumbnail concept and hook, decided before the script. Nothing
+          leaves {stageNames.packaging} until all three are filled in or the gate
+          is deliberately skipped.
         </p>
       </div>
 

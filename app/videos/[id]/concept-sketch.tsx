@@ -47,11 +47,8 @@ export function ConceptSketch({
   title,
   url,
   hasSketch,
-  packagingName,
 }: {
   videoId: string;
-  /** The channel's label for its packaging stage — the column the gate guards. */
-  packagingName: string;
   /** The signed-in user's id: the first segment of every path they may write. */
   userId: string;
   /** Only used for the image's alt text. */
@@ -162,11 +159,7 @@ export function ConceptSketch({
         the gate wants, and it is the box immediately beside this one.
       */}
       <p className="text-xs text-muted">
-        A reference image for the concept — a sketch, a frame, a photo. It is
-        here to look at while writing the concept next to it. It is{" "}
-        <strong className="font-medium">not</strong> the field the gate reads:
-        that is the written concept, and a video with a sketch and no written
-        concept is still refused at {packagingName}.
+        A sketch, a frame or a photo to look at while you write the concept.
       </p>
 
       {/*

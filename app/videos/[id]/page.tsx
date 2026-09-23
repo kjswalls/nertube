@@ -649,7 +649,6 @@ export default async function VideoDetailPage({
                       <ConceptSketch
                         key="concept-sketch"
                         videoId={video.id}
-                        packagingName={nameOf("packaging")}
                         userId={user.id}
                         title={video.title}
                         url={sketchUrl}

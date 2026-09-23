@@ -607,6 +607,18 @@ test('the preview is a right rail when there is room, and stacks when there is n
   expect(tabsAfter.y).toBe(tabsBefore.y);
   expect(tabsAfter.width).toBe(tabsBefore.width);
 
+  // At 1440, the laptop the product is designed for, it is still beside the
+  // block: the measure narrows by two rems rather than the rail stacking two
+  // screens down (M9 review).
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/videos/${videoId}`);
+  await expect(preview).toBeVisible();
+  const laptopRail = (await page.getByTestId('video-rail').boundingBox())!;
+  const laptopBlock = (await block.boundingBox())!;
+  expect(laptopRail.x).toBeGreaterThanOrEqual(laptopBlock.x + laptopBlock.width);
+  expect(laptopRail.y).toBeLessThan(900);
+  expect(await overflows()).toBe(false);
+
   // Narrow: the rail's content is not dropped, it goes underneath — and it is
   // still drawn at full size rather than squeezed.
   await page.setViewportSize({ width: 1280, height: 1000 });
