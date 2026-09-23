@@ -297,6 +297,7 @@ export function ScriptEditor({
   const structureId = useId();
   const endScreenId = useId();
   const statusId = useId();
+  const detailsId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const initialDraft: Draft = {
@@ -437,6 +438,10 @@ export function ScriptEditor({
   const [reading, setReading] = useState(false);
   const [confirming, setConfirming] = useState<ReadyReset | null>(null);
   const [notice, setNotice] = useState<ResetNotice | null>(null);
+  // Below `md` the two fields fold into one line, so a phone arrives on the
+  // script rather than on its settings (M10 review, W6). Folded, they stay
+  // mounted: a draft in them keeps saving the same way.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const resetButton = useRef<HTMLButtonElement>(null);
 
   /** Typing in the script: save after a pause, not per keystroke. */
@@ -553,6 +558,16 @@ export function ScriptEditor({
     queue.state.kind === "error" && queue.state.conflict === true
       ? { ...queue.state, message: SCRIPT_CONFLICT }
       : queue.state;
+
+  const endScreenTooLong = draft.endScreenTarget.length > MAX_END_SCREEN_TARGET_LENGTH;
+  const detailsShown = detailsOpen || endScreenTooLong;
+  const detailsSummary =
+    [
+      draft.structure ? SCRIPT_STRUCTURE_LABEL[draft.structure] : null,
+      draft.endScreenTarget.trim() ? `\u2192 ${draft.endScreenTarget.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "not set";
 
   const copyMine = (
     <CopyButton
@@ -715,7 +730,38 @@ export function ScriptEditor({
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+      {/*
+        Below `md`: one line that says what is set and opens the two fields.
+        A too-long end screen keeps them open, since its sentence is inside.
+      */}
+      <button
+        type="button"
+        data-testid="script-details-toggle"
+        aria-expanded={detailsShown}
+        aria-controls={detailsId}
+        onClick={() => setDetailsOpen((open) => !open)}
+        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-input border border-border bg-surface px-3 text-left text-sm md:hidden"
+      >
+        <span className="min-w-0 truncate">
+          <span className="font-medium">Structure and end screen</span>
+          <span className="text-muted">
+            {" "}
+            · {detailsSummary}
+          </span>
+        </span>
+        <span aria-hidden="true" className="shrink-0 text-muted">
+          {detailsShown ? "▴" : "▾"}
+        </span>
+      </button>
+
+      <div
+        id={detailsId}
+        data-testid="script-details"
+        className={[
+          "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]",
+          detailsShown ? "" : "max-md:hidden",
+        ].join(" ")}
+      >
         <div className="flex flex-col gap-1">
           <label htmlFor={structureId} className="text-xs font-medium text-muted">
             Structure

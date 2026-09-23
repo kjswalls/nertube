@@ -588,11 +588,11 @@ found.
   the video page's Packaging tab is long — a list of more than five title
   candidates shows five (and the chosen one) until "Show all", and four links
   at its top jump to the concept, the hooks, Filing and the YouTube preview;
-  its five section tabs wrap to two lines. On the Script tab the script
-  itself starts about 630px down, under the checklist strip, Structure and
-  "End screen points at": at 390×844 the first two or three lines show on
-  arrival, at 320×568 and in landscape none do, and the phone scrolls to
-  reach it. A new bullet in the Body is written by tapping between the
+  its five section tabs wrap to two lines. On the Script tab, Structure and "End
+  screen points at" fold into one line below 768px. The line shows what is
+  set, and a tap opens the two fields. The script starts about 540px down,
+  under the checklist strip. At 390×844 about six lines show on arrival; at
+  320×568 and in landscape the phone scrolls to reach it. A new bullet in the Body is written by tapping between the
   template's empty `-` lines, which is fiddly by thumb (the M10 week walk).
   On a 320×568 phone the menu's "Keyboard shortcuts" entry sits half under
   the screen's edge until the menu is scrolled. Nothing scrolls the page

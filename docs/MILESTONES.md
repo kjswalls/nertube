@@ -10312,3 +10312,17 @@ A full run before the focus fix (above) had 343 passed and 1 failed
 (`m2-review.spec.ts:669`); it is reported here and is not one of the two.
 The one migration file is `supabase/migrations/0010_time_zone.sql`, which
 this pass extended with `move_video_versioned`.
+
+### After the review: W6, decided by the user
+
+W6 above (the phone arrives about 630px above the script) was left for the user
+to decide. They chose to fold the two fields. Below `md`, Structure and "End
+screen points at" collapse into one 44px line. The line reads "Structure and
+end screen · <what is set>", or "· not set", and a tap opens the fields. They
+stay mounted while folded, so a draft in them saves the same way. A too-long
+end screen keeps them open, because its sentence is inside. At 390×844 the
+script now starts about 540px down, and about six lines show on arrival.
+`e2e/script-editor.spec.ts`'s phone case asserts the fold, the line's 44px,
+the summary before and after a choice, and the fields' 16px and 44px once
+open.
+

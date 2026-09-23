@@ -564,6 +564,18 @@ test.describe('on a phone', () => {
     await openScript(page, videoId);
 
     const editor = page.getByTestId('script-editor');
+    // The two fields arrive folded into one line, so the script is what a
+    // phone opens on; the line says what is set and opens them.
+    const toggle = page.getByTestId('script-details-toggle');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('not set');
+    await expect(page.getByTestId('script-structure')).toBeHidden();
+    expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await editor.boundingBox())!.y).toBeLessThan(844);
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('script-structure')).toBeVisible();
+
     // 16px, or iOS zooms the page when the field takes focus.
     for (const testId of ['script-editor', 'script-structure', 'script-end-screen']) {
       expect(
@@ -626,6 +638,7 @@ test.describe('on a phone', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByTestId('script-structure').selectOption('story_arc');
     await expect.poll(async () => (await readRow(videoId)).script_structure).toBe('story_arc');
+    await expect(toggle).toContainText('Story arc');
     await page.getByTestId('script-reset').tap();
     await expect(page.getByTestId('script-reset-dialog')).toBeVisible();
     await page.getByTestId('script-reset-confirm').tap();
