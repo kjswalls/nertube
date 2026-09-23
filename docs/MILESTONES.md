@@ -10290,3 +10290,25 @@ findings were reproduced first by the specs that now pin them.
 - PLAN.md's `move_video` is the one move function; `move_video_versioned` is
   a wrapper that calls it, adds nothing to the gate, and exists only so the
   video page can tell whether its version is current.
+
+### Gates
+
+Run on the final tree, in this session, with no `ANTHROPIC_API_KEY`; the
+two full browser runs came after the last code change and the static gates
+after them.
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` and `-p tsconfig.harness.json` | clean |
+| `npm run lint` | clean |
+| `npm run build` | clean |
+| `./scripts/verify-db.sh m10_final` | OK — 0001–0010 applied, 18 SQL test files passed (`40_move_video` gains the versioned move; the contract counts nine functions) |
+| `npx vitest run` | 35 files, 598 tests passed |
+| `E2E_REUSE=0 npm run e2e`, run 1 | **344 passed, 0 failed, 1 skipped** (`session-refresh`, which runs only under `e2e:refresh`), 16.3 min |
+| `E2E_REUSE=0 npm run e2e`, run 2 | **344 passed, 0 failed, 1 skipped**, 16.2 min |
+| Findings 1 and 2 under hostile zones | `PGOPTIONS="-c timezone=Pacific/Kiritimati"` (database `current_date` 2026-09-24 while UTC was 2026-09-23): `post-publish`, `now`, `responsive` 27 passed. `TZ=Pacific/Auckland` runner: `m2-review` 13 passed |
+
+A full run before the focus fix (above) had 343 passed and 1 failed
+(`m2-review.spec.ts:669`); it is reported here and is not one of the two.
+The one migration file is `supabase/migrations/0010_time_zone.sql`, which
+this pass extended with `move_video_versioned`.
