@@ -465,3 +465,61 @@ section, where every decision also names the alternative that was not taken.
 - The preview rail's 1440 step narrows the measure, not the rail.
 
 _166 decisions in all._
+
+## M10, after the review: time zone, script editor, phone (23 September)
+
+You asked for three things after reading the list above: "today" in your own
+time zone, the script editable in the app with a reset from the template, and
+mobile web that works properly. M10 built all three. It ran the same way as
+M5–M9: three build streams, an integration pass, four adversarial reviewers
+(two of them working only on the phone), and a fix pass. Its agents used 2.96M
+tokens. The reviewers raised 31 findings. The fix pass fixed 30, including both
+blockers; the 31st it judged acceptable and recorded in the README. Both
+blockers were ways to lose script text:
+
+- moving a video back to Packaging just after typing lost the text;
+- a stale second tab could overwrite the script after a stage move.
+
+**Verified by me on the final tree, cold:**
+
+| Gate | Result |
+|---|---|
+| Typecheck, lint, build | clean |
+| Unit | 598 passed, 35 files |
+| SQL suite (`m10_verify`) | 18 files passed |
+| Browser, run 1 | 344 passed, 0 failed, 1 skipped, 15.9 min, exit 0 |
+| Browser, run 2 | 344 passed, 0 failed, 1 skipped, 15.4 min, exit 0 |
+
+I also ran my own probe on a touch device at 390×844:
+
+- **Script editor:** 358px wide, 16px text, no sideways scroll. What I typed was
+  still there after a reload. With the keyboard up (a 390×440 viewport), the
+  line being typed stayed in view and the save line stayed pinned above it.
+- **Time zone setting** (`/settings/account`): shows today's date in the chosen
+  zone, with a 44px select at 16px.
+- **Every route at 390 and 360:** unchanged from M9, with no sideways scroll.
+
+**Migration 0010 is on the hosted database**, applied through Supabase's
+management API. It adds the `profiles` table, `set_time_zone()` and
+`move_video_versioned()`. I read it back afterwards:
+
+- RLS is on, and a signed-in user can only SELECT their own row;
+- anon has no grant on the table or on either function;
+- all six test zones exist in the hosted tz database.
+
+The one-time re-dating of old "Confirm live" dates had nothing to re-date,
+because the hosted database has no videos yet.
+
+**No new runtime dependency.**
+
+**One thing for you to decide.** On a phone, the script starts about 630px down
+the Script tab, below the checklist strip and the Structure and End-screen
+fields, so you see only its first two or three lines when you arrive. The agents
+left it alone because either fix changes the tab's design:
+
+- move the two fields below the script;
+- fold them into one line.
+
+The README says what a phone shows today.
+
+M10's decisions are in `docs/MILESTONES.md`, under its five M10 sections.
