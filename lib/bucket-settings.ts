@@ -148,7 +148,8 @@ export function axisStanding(axis: BucketAxis, count: number): AxisStanding {
 
 /**
  * The line beside an axis's heading: how many there are, and whether that is
- * the shape the brief describes. One sentence, so a person adding their third
+ * the shape BRIEF.md describes — said as advice, because the person using
+ * the app has never read BRIEF.md (M9 review). One sentence, so a person adding their third
  * pillar sees it become "within" without reading a paragraph.
  */
 export function axisCountSentence(axis: BucketAxis, count: number): string {
@@ -157,13 +158,13 @@ export function axisCountSentence(axis: BucketAxis, count: number): string {
   const noun = count === 1 ? AXIS_LABEL[axis].toLowerCase() : plural;
   switch (axisStanding(axis, count)) {
     case "none":
-      return `No ${plural} yet — the brief suggests ${min}–${max}.`;
+      return `No ${plural} yet — most channels do well with ${min}–${max}.`;
     case "under":
-      return `${count} ${noun} — the brief suggests ${min}–${max}.`;
+      return `${count} ${noun} — most channels do well with ${min}–${max}.`;
     case "within":
-      return `${count} ${noun} — within the ${min}–${max} the brief suggests.`;
+      return `${count} ${noun} — within the ${min}–${max} most channels do well with.`;
     case "over":
-      return `${count} ${noun} — more than the ${min}–${max} the brief suggests; a wider matrix is a thinner one.`;
+      return `${count} ${noun} — more than the ${min}–${max} most channels do well with; a wider matrix is a thinner one.`;
   }
 }
 

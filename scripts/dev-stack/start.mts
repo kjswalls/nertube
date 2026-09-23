@@ -21,7 +21,7 @@
  * Supabase behaviours it does not reproduce.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Server } from 'node:http';
@@ -236,8 +236,27 @@ function envBlock(): string {
   ].join('\n');
 }
 
+/**
+ * PostgREST is the one binary this harness needs that npm cannot install.
+ * Checked first, before the SQL suite and the seed (a minute of work): without
+ * it the run used to get all the way to "starting postgrest" and then die on
+ * an unhandled `spawn postgrest ENOENT` stack trace (M9 review).
+ */
+function assertPostgrestInstalled(): void {
+  const probe = spawnSync('postgrest', ['--version'], { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0) {
+    throw new Error(
+      'PostgREST is not on PATH. Install the 12.2 release binary for your platform ' +
+        '(https://github.com/PostgREST/postgrest/releases/tag/v12.2.12), put `postgrest` on PATH, ' +
+        'and run `npm run dev:stack` again.',
+    );
+  }
+  log(`found ${probe.stdout.trim()}`);
+}
+
 async function main(): Promise<void> {
   log('NerTube local dev stack — a TEST harness that approximates Supabase.');
+  assertPostgrestInstalled();
 
   await fs.mkdir(STATE_DIR, { recursive: true });
   await assertNoLiveStackOnSameDatabase();

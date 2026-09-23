@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition, type KeyboardEvent } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
 import { useVideoVersion } from "@/components/video-version";
@@ -48,6 +48,19 @@ export interface FlowStage {
  * A refused move leaves the control showing the stage the video is actually in.
  * A `<select>` that keeps displaying the option the database rejected is the
  * same bug as a card left sitting in a column it never reached.
+ *
+ * ## An arrow key browses; it does not move (M9 review)
+ *
+ * On Windows and Linux an arrow key on a closed `<select>` changes its value
+ * and fires `change`. This used to move the video on that `change`, so one
+ * ArrowDown ran the gate, seeded a checklist and toasted — and the select,
+ * disabled while the move was in flight, dropped focus to <body>, so the
+ * second arrow did nothing (WCAG 3.2.2). Now a value reached from the keyboard
+ * is only a choice: the status line says it is not moved yet, and Enter or the
+ * Move button beside the select makes the move; Escape puts the choice back.
+ * A pick with the pointer from the open list is a decision and moves at once,
+ * as it always did. The select is never `disabled` while a move is in flight,
+ * so it keeps focus; a second move waits for the first.
  */
 export function StageSelect({
   videoId,
@@ -83,6 +96,11 @@ export function StageSelect({
   >({ kind: "idle" });
   const [pending, startTransition] = useTransition();
   const version = useVideoVersion();
+  /** The option showing in the select, when it is not yet the stage. */
+  const [choice, setChoice] = useState<string | null>(null);
+  /** The last change came from a key, not a pick from the open list. */
+  const keyed = useRef(false);
+  const selectRef = useRef<HTMLSelectElement>(null);
 
   /**
    * A video can sit in a stage that has since been disabled — settings refuses
@@ -94,7 +112,10 @@ export function StageSelect({
   const knowsCurrent = stages.some((stage) => stage.id === current.id);
 
   function move(stageId: string): void {
+    // In flight already: the select stays focusable, so this is the guard.
+    if (pending) return;
     const target = stages.find((stage) => stage.id === stageId);
+    setChoice(null);
     if (!target || target.id === current.id) return;
 
     const from = current;
@@ -131,30 +152,88 @@ export function StageSelect({
     });
   }
 
+  function onKeyDown(event: KeyboardEvent<HTMLSelectElement>): void {
+    if (event.key === "Enter") {
+      if (choice !== null) {
+        event.preventDefault();
+        move(choice);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      if (choice !== null) {
+        // Consumed: putting the choice back is all Escape means here.
+        event.preventDefault();
+        setChoice(null);
+      }
+      return;
+    }
+    if (event.key === "Tab" || event.key === " " || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    // Arrows, Home/End, Page keys and type-ahead letters all change a closed
+    // select's value from the keyboard.
+    keyed.current = true;
+  }
+
+  const target = choice === null ? null : stages.find((stage) => stage.id === choice) ?? null;
+
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={selectId} className="text-xs font-medium text-muted">
         Stage
       </label>
 
-      <select
-        id={selectId}
-        name="stage"
-        data-testid="stage-select"
-        value={current.id}
-        disabled={pending}
-        onChange={(event) => move(event.target.value)}
-        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
-      >
-        {knowsCurrent ? null : (
-          <option value={current.id}>{current.name} (turned off)</option>
-        )}
-        {stages.map((stage) => (
-          <option key={stage.id} value={stage.id}>
-            {stage.name}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-2">
+        <select
+          ref={selectRef}
+          id={selectId}
+          name="stage"
+          data-testid="stage-select"
+          value={choice ?? current.id}
+          aria-busy={pending || undefined}
+          aria-describedby={`${selectId}-status`}
+          onPointerDown={() => {
+            keyed.current = false;
+          }}
+          onKeyDown={onKeyDown}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (keyed.current) {
+              keyed.current = false;
+              setChoice(value === current.id ? null : value);
+              return;
+            }
+            move(value);
+          }}
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent aria-busy:opacity-60"
+        >
+          {knowsCurrent ? null : (
+            <option value={current.id}>{current.name} (turned off)</option>
+          )}
+          {stages.map((stage) => (
+            <option key={stage.id} value={stage.id}>
+              {stage.name}
+            </option>
+          ))}
+        </select>
+        {target !== null ? (
+          <button
+            type="button"
+            data-testid="stage-select-move"
+            aria-disabled={pending || undefined}
+            onClick={() => {
+              // The button goes once the choice is made; focus goes back to
+              // the select rather than to <body> with it.
+              selectRef.current?.focus();
+              move(target.id);
+            }}
+            className="shrink-0 rounded-button border border-accent px-3 py-2 text-sm font-medium outline-none hover:bg-accent/10 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+          >
+            Move<span className="sr-only"> to {target.name}</span>
+          </button>
+        ) : null}
+      </div>
 
       {/*
         The live region carries what the move did, and the standing hint sits
@@ -162,8 +241,9 @@ export function StageSelect({
         is a sentence that gets announced again every time the region settles.
       */}
       <p
+        id={`${selectId}-status`}
         data-testid="stage-select-status"
-        data-state={pending ? "moving" : status.kind}
+        data-state={pending ? "moving" : target !== null ? "chosen" : status.kind}
         className={[
           "min-h-4 text-xs",
           status.kind === "error" ||
@@ -175,13 +255,15 @@ export function StageSelect({
         <span role={status.kind === "error" ? "alert" : "status"}>
           {pending
             ? "Moving…"
-            : status.kind === "moved"
+            : target !== null
+              ? `Not moved yet. Enter or Move takes it to ${target.name}; Escape puts it back.`
+              : status.kind === "moved"
               ? `Moved to ${status.name}.${status.notice ? ` ${status.notice}` : ""}`
               : status.kind === "error"
                 ? status.message
                 : ""}
         </span>
-        {!pending && status.kind === "idle" ? (
+        {!pending && target === null && status.kind === "idle" ? (
           <span>Moving from here runs the same packaging gate as the board.</span>
         ) : null}
       </p>

@@ -162,7 +162,11 @@ export function BucketRow({
       data-position={index + 1}
       data-quota={bucket.monthlyQuota ?? ""}
       data-filed={filed}
-      className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3"
+      // Below `md` the filed count and Remove drop under the name, and the
+      // name takes its own line above the quota — the treatment the stage row
+      // got. Beside them the name was 47px wide at 390 and 17px at 360, one
+      // glyph a row (M9 review).
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3 max-md:grid-cols-[auto_minmax(0,1fr)] max-md:gap-x-3"
     >
       <div className="flex flex-col gap-1 pt-0.5">
         <MoveButton
@@ -197,7 +201,7 @@ export function BucketRow({
             onBlur={name.commit}
             onKeyDown={onNameKey}
             // The user's word for the bucket: the reading face, like a title.
-            className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
+            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] max-md:basis-full leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
@@ -223,7 +227,7 @@ export function BucketRow({
               onBlur={quota.commit}
               onKeyDown={onQuotaKey}
               title="Monthly quota: how many videos a month should carry this bucket. Empty means no quota."
-              className="w-16 rounded-input border border-border bg-background px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+              className="w-16 rounded-input border border-border bg-background px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
             />
           </div>
         </div>
@@ -233,7 +237,7 @@ export function BucketRow({
         {removeError ? <Refusal testId="bucket-remove-error" message={removeError} /> : null}
       </div>
 
-      <div className="flex flex-col items-end gap-2">
+      <div className="flex flex-col items-end gap-2 max-md:col-start-2 max-md:flex-row max-md:flex-wrap max-md:items-center max-md:gap-x-4">
         <span
           data-testid="bucket-filed"
           data-count={filed}

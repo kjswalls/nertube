@@ -171,9 +171,16 @@ describe("sectionReadiness", () => {
   });
 
   it("counts the thumbnail variants, and ticks only once one is live", () => {
-    // Before Editing there is nothing to decide: the files are made near
-    // publish, so the tab is locked and says so without claiming a ratio.
-    expect(sectionReadiness(FRESH).thumbnails.kind).toBe("locked");
+    // Before Editing, with nothing uploaded, the tab is quiet: the files are
+    // usually made near publish, but the slots are live at every stage, so a
+    // padlock would be a claim the page contradicts (M9 review). An early
+    // upload is counted.
+    expect(sectionReadiness(FRESH).thumbnails.kind).toBe("quiet");
+    expect(sectionReadiness({ ...FRESH, variantsReady: 1 }).thumbnails).toMatchObject({
+      kind: "ratio",
+      done: 1,
+      total: 3,
+    });
 
     const editing = { ...FRESH, stageKind: "editing" } as const;
     expect(sectionReadiness(editing).thumbnails).toMatchObject({

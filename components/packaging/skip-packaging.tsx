@@ -182,7 +182,7 @@ export function SkipPackaging({
             ref={unskipRef}
             data-testid="packaging-unskip"
             onClick={onUnskip}
-            className="rounded-button border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             Un-skip — put the gate back
           </button>
@@ -250,7 +250,7 @@ export function SkipPackaging({
             value={reason}
             rows={2}
             maxLength={MAX_SKIP_REASON_LENGTH}
-            placeholder="Sponsor deadline — packaging was decided in the brief"
+            placeholder="Sponsor deadline — the sponsor fixed the title and thumbnail"
             aria-describedby={noticeId}
             data-testid="skip-reason-input"
             onChange={(event) => {
@@ -303,7 +303,7 @@ export function SkipPackaging({
                 // The control that replaces this one, rather than `<body>`.
                 focusAnchor(openRef.current);
               }}
-              className="rounded-button px-3 py-1.5 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button px-3 py-1.5 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
             >
               Cancel
             </button>

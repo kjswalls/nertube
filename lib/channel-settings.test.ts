@@ -105,6 +105,14 @@ describe("the notes", () => {
     expect(SETTING_NOTES.expectedCtr).toContain(`at least ${MIN_MEDIAN_SAMPLE}`);
     expect(SETTING_NOTES.scriptTemplate).toContain(HOOK_PLACEHOLDER);
     expect(SETTING_NOTES.wipThreshold).toMatch(/Packaging through Scheduled/);
-    expect(SETTING_NOTES.voiceGuide).toMatch(/M8/);
+    expect(SETTING_NOTES.voiceGuide).toMatch(/brainstorm/);
+  });
+
+  it("never name a milestone: the person using the app has never seen one", () => {
+    // M9 review: the voice-guide note said the brainstorm "arrives in M8"
+    // after M8 had shipped it, and this file's test pinned the wording.
+    for (const note of Object.values(settingNotes({ scripting: "Draft" }))) {
+      expect(note).not.toMatch(/\bM\d\b/);
+    }
   });
 });

@@ -63,7 +63,7 @@ export function ConceptBrief({
       )}
 
       <p className="text-xs text-muted">
-        Locked at Packaging.{" "}
+        Decided in Packaging.{" "}
         <Link
           href={conceptHref}
           data-testid="thumbnail-concept-edit-link"

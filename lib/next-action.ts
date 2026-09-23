@@ -237,7 +237,13 @@ export type NowPayload =
       readonly input: "tick";
       readonly itemId: string;
       readonly itemText: string;
-      readonly estMinutes: number;
+      /**
+       * The item's own estimate, or null when it has none — a custom item
+       * added on a video's checklist is written with no estimate and nothing
+       * sets one. The row's `estMinutes` still reads null as ten for the
+       * quick filter; this is what the row may *print* (M9 review).
+       */
+      readonly estMinutes: number | null;
     }
   | {
       readonly input: "text";
@@ -645,7 +651,7 @@ export function nextAction(
         input: "tick",
         itemId: item.id,
         itemText: item.text,
-        estMinutes: estMinutesOf(item),
+        estMinutes: item.estMinutes,
       },
       estMinutesOf(item),
     );

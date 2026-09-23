@@ -91,7 +91,7 @@ export function DayPanel({
         <Link
           href={calendarHref({ month })}
           data-testid="calendar-day-close"
-          className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         >
           Close
         </Link>

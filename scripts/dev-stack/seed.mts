@@ -17,8 +17,9 @@
  *    itself could never have created — for instance a video already sitting
  *    past the packaging gate, which `capture_video` makes impossible.
  *
- * Videos stay minimal on purpose: M1 owns cards, so a couple of captured ideas
- * per channel is enough to prove the board renders and no more.
+ * Videos stay minimal on purpose: a couple of captured ideas per channel. Each
+ * spec builds the videos it needs, through the same functions, so the seed is
+ * the account a person starts with rather than a fixture any test leans on.
  */
 
 import {

@@ -52,7 +52,8 @@ import { useDismiss, useShortcuts } from "@/lib/shortcuts";
  *   board or header keys while it is open. Without it, a key pressed while
  *   focus sat on the dialog's close button would move a card behind the
  *   dialog;
- * - a click on the backdrop closes it, and a click inside never does.
+ * - a click on the backdrop closes it, and a click inside never does; either
+ *   way focus goes back to the opener.
  *
  * The rest of the page is not `inert`: that is one attribute, but it needs the
  * host to own every sibling of the dialog, and this one is mounted inside a
@@ -194,7 +195,14 @@ export function Modal({
           : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]"
       }
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target !== event.currentTarget) return;
+        // First, or focus is lost: React runs this discrete update — and the
+        // unmount's focus return below — synchronously, inside the mousedown,
+        // and the browser's own default for a mousedown on a non-focusable
+        // backdrop then runs after it and moves focus to <body>. A backdrop
+        // click left every dialog's opener unfocused until the M9 review.
+        event.preventDefault();
+        onClose();
       }}
     >
       <div

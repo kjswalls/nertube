@@ -218,7 +218,7 @@ export function AppSidebar({
         */}
         <nav
           aria-label="Main"
-          className="flex min-h-0 flex-1 flex-col gap-5 max-md:hidden"
+          className="flex flex-1 flex-col gap-5 max-md:hidden"
         >
           {lists("sidebar")}
 
@@ -469,27 +469,29 @@ function SidebarLists({
         </ul>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <h2
           id={`${idPrefix}-channels`}
-          className="px-2 text-[11px] font-medium tracking-[0.06em] text-muted uppercase"
+          className="pr-2 pl-3 text-[11px] font-medium tracking-[0.06em] text-muted uppercase"
         >
           Channels
         </h2>
         {/*
         The channel list is the one part of the sidebar that grows without
-        bound, so it is the one part that scrolls.
+        bound. It does not scroll by itself: the whole column does (the sticky
+        inner column above is `overflow-y-auto`), and nothing in it is allowed
+        to shrink below its own content.
 
-        Its parent carries `min-h-0`, which lets this block shrink when the
-        rest of the sidebar plus a long channel list is taller than `h-dvh`.
-        Shrinking without `overflow-y-auto` here is the bug that produced:
-        the `<ul>` kept its natural height, painted straight over the
-        account block below it, and swallowed clicks meant for the theme
-        toggle. Clipping and scrolling is what the shrink was for.
+        Until the M9 review this list was `min-h-0 overflow-y-auto` inside a
+        `min-h-0` nav, from when the nav was the scroller. Once the column
+        took over the scrolling, a short window (844×390, a phone on its side;
+        1024×500) shrank the list to 0px, and the keyboard hints and the theme
+        control were drawn where the channel links were — every channel link
+        unclickable. `e2e/responsive.spec.ts` clicks each one at those sizes.
       */}
         <ul
           aria-labelledby={`${idPrefix}-channels`}
-          className="flex min-h-0 flex-col gap-0.5 overflow-y-auto"
+          className="flex flex-col gap-0.5"
         >
           {channels.map((channel, index) => {
             const isCurrent = channel.slug === currentSlug;
@@ -514,7 +516,9 @@ function SidebarLists({
                     digit === null ? null : (
                       <span
                         aria-hidden="true"
-                        className="font-mono text-[10px] text-muted"
+                        // A thumb has no digit keys: hidden on a coarse
+                        // pointer, as the capture chips' digits are.
+                        className="font-mono text-[10px] text-muted pointer-coarse:hidden"
                       >
                         {digit}
                       </span>
@@ -530,7 +534,7 @@ function SidebarLists({
           <li>
             <Link
               href="/c/new"
-              className="flex items-center rounded-button px-2 py-1.5 text-[13px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:text-[15px]"
+              className="flex items-center rounded-button py-1.5 pr-2 pl-3 text-[13px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:text-[15px]"
             >
               + New channel
             </Link>
@@ -579,7 +583,7 @@ function SidebarDisabled({
       aria-disabled="true"
       title={title}
       data-testid="sidebar-unbuilt"
-      className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-button px-2 py-1.5 text-left text-[13px] text-muted opacity-75 outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:text-[15px]"
+      className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-button py-1.5 pr-2 pl-3 text-left text-[13px] text-muted opacity-75 outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:text-[15px]"
     >
       <span className="min-w-0 truncate">{children}</span>
       {trailing}
@@ -626,6 +630,7 @@ function SidebarLink({
       {current ? (
         <span
           aria-hidden="true"
+          data-current-marker=""
           className="absolute top-1/2 left-0 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-accent"
         />
       ) : null}

@@ -187,7 +187,7 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                 data-testid={`${PREFIX}-ask-again`}
                 onClick={ask}
                 disabled={state.pending}
-                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
               >
                 {state.data === null ? "Ask" : "Ask again"}
               </button>
@@ -195,7 +195,7 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                 type="button"
                 data-testid={`${PREFIX}-close`}
                 onClick={close}
-                className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
               >
                 Close
               </button>
@@ -362,7 +362,7 @@ function Verdicts({
                   onClick={(event) =>
                     onShip(verdict.role, verdict.note, event.currentTarget)
                   }
-                  className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 thumb:min-h-11"
                 >
                   {live
                     ? "Already live"

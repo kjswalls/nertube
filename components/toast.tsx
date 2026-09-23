@@ -6,11 +6,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+
+import { useDismiss } from "@/lib/shortcuts";
 
 /**
  * The one transient-message mechanism.
@@ -41,6 +44,22 @@ import {
  * The region itself is always in the DOM: a live region that is inserted at the
  * same moment as its text is not reliably announced, so the container is
  * rendered empty and only its contents change.
+ *
+ * ## Reaching a toast from the keyboard, and keeping it (M9 review)
+ *
+ * A refused `]` on the board used to put "Fix packaging" and "Skip gate…" at
+ * the end of the tab order, behind every card, on a 12-second clock that never
+ * stopped — so a keyboard user who did reach a link could lose it, and their
+ * focus, to <body> while reading it (WCAG 2.2.1, 2.4.3). Now:
+ *
+ * - the clock **stops** while the pointer is over a toast or focus is inside
+ *   it, and starts again, in full, when both have left;
+ * - a caller whose action came from a key can ask for `focus: true`, and the
+ *   toast's first link takes focus as it appears (the board does, for a
+ *   refused `[`/`]`);
+ * - Escape with focus inside a toast dismisses it — it is a *region* in
+ *   `lib/shortcuts.ts`, like an assist panel — and a toast that goes while
+ *   holding focus gives it back (`returnFocus`, or whatever had it before).
  */
 export type ToastTone = "info" | "error";
 
@@ -55,6 +74,17 @@ export interface ToastInput {
   readonly tone?: ToastTone;
   /** Up to a couple of links out of the message, e.g. "Fix packaging". */
   readonly links?: readonly ToastLink[];
+  /**
+   * Move focus to the first link as the toast appears. For an action that
+   * came from a key, where the links are otherwise the far end of the tab
+   * order.
+   */
+  readonly focus?: boolean;
+  /**
+   * Where focus goes if the toast is dismissed while holding it. Defaults to
+   * the element that had focus when the toast took it.
+   */
+  readonly returnFocus?: () => void;
 }
 
 interface Toast extends ToastInput {
@@ -112,6 +142,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
+  const start = useCallback(
+    (id: number, tone: ToastTone) => {
+      const existing = timers.current.get(id);
+      if (existing) clearTimeout(existing);
+      timers.current.set(
+        id,
+        setTimeout(() => dismiss(id), TIMEOUT_MS[tone]),
+      );
+    },
+    [dismiss],
+  );
+
+  /** Stop the clock: the toast is being read or used. */
+  const hold = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer) clearTimeout(timer);
+    timers.current.delete(id);
+  }, []);
+
   const push = useCallback(
     (input: ToastInput) => {
       nextId.current += 1;
@@ -119,13 +168,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const tone = input.tone ?? "info";
 
       setToasts((current) => [...current, { ...input, id, tone }].slice(-MAX_VISIBLE));
-      timers.current.set(
-        id,
-        setTimeout(() => dismiss(id), TIMEOUT_MS[tone]),
-      );
+      start(id, tone);
       return id;
     },
-    [dismiss],
+    [start],
   );
 
   // A component that unmounts mid-timeout (a navigation) must not leave the
@@ -157,12 +203,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {/* Two regions, always present, each with its own politeness. */}
         <div role="status" aria-live="polite" className="contents">
           {statuses.map((toast) => (
-            <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onDismiss={dismiss}
+              onHold={hold}
+              onRelease={start}
+            />
           ))}
         </div>
         <div role="alert" className="contents">
           {alerts.map((toast) => (
-            <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onDismiss={dismiss}
+              onHold={hold}
+              onRelease={start}
+            />
           ))}
         </div>
       </div>
@@ -173,14 +231,77 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 function ToastItem({
   toast,
   onDismiss,
+  onHold,
+  onRelease,
 }: {
   toast: Toast;
   onDismiss: (id: number) => void;
+  onHold: (id: number) => void;
+  onRelease: (id: number, tone: ToastTone) => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const firstLink = useRef<HTMLAnchorElement>(null);
+  const hovered = useRef(false);
+  const focused = useRef(false);
+  /** Focus has been inside at some point: only then is it ours to give back. */
+  const hadFocus = useRef(false);
+  const { id, tone, focus: takeFocus, returnFocus } = toast;
+
+  useDismiss(() => onDismiss(id), { within: ref });
+
+  function settle(): void {
+    if (hovered.current || focused.current) onHold(id);
+    else onRelease(id, tone);
+  }
+
+  /*
+    Take focus if asked, and give it back on the way out. A layout effect, so
+    the cleanup still sees whether focus was inside while the nodes exist.
+  */
+  const returnRef = useRef(returnFocus);
+  useLayoutEffect(() => {
+    returnRef.current = returnFocus;
+  });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const before = document.activeElement;
+    if (takeFocus) firstLink.current?.focus();
+    return () => {
+      if (element === null) return;
+      const active = document.activeElement;
+      const holding =
+        element.contains(active) || (active === document.body && hadFocus.current);
+      if (!holding) return;
+      if (returnRef.current) returnRef.current();
+      else if (before instanceof HTMLElement && document.contains(before)) before.focus();
+    };
+    // Mount only: one toast, one arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div
+      ref={ref}
       data-testid="toast"
       data-tone={toast.tone}
+      onPointerEnter={() => {
+        hovered.current = true;
+        settle();
+      }}
+      onPointerLeave={() => {
+        hovered.current = false;
+        settle();
+      }}
+      onFocus={() => {
+        focused.current = true;
+        hadFocus.current = true;
+        settle();
+      }}
+      onBlur={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        focused.current = false;
+        settle();
+      }}
       className={[
         "pointer-events-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-card border bg-background px-3 py-2 text-sm shadow-lg",
         toast.tone === "error" ? "border-over-limit/60" : "border-border",
@@ -188,9 +309,10 @@ function ToastItem({
     >
       <p className="min-w-0 flex-1">{toast.message}</p>
 
-      {(toast.links ?? []).map((link) => (
+      {(toast.links ?? []).map((link, index) => (
         <Link
           key={link.href + link.label}
+          ref={index === 0 ? firstLink : undefined}
           href={link.href}
           className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >

@@ -15,9 +15,27 @@ import { apiKey } from './scripts/dev-stack/jwt';
  *
  *   1. `npm run dev:stack` — resets `nertube_dev` from the migrations, seeds it
  *      and serves the Supabase-compatible origin (see scripts/dev-stack).
- *   2. `npm run dev` — the actual application, pointed at that origin with the
- *      anon key the stack mints. Nothing is stubbed on the app's side: the page
- *      under test is the page that ships.
+ *   2. `next build && next start` — the actual application, as a production
+ *      build, pointed at that origin with the anon key the stack mints. Nothing
+ *      is stubbed on the app's side: the page under test is the page that
+ *      ships, compiled the way it ships.
+ *
+ * ## Why a production build and not `next dev` (M9 review)
+ *
+ * For eight milestones the suite ran against `next dev`. Its memory grows by
+ * about 20 MB per authenticated page pair and it restarts itself at its heap
+ * threshold, about two thirds of the way through a full run; the spec that was
+ * mid-navigation then failed a 60-second `page.goto`. No full run in M9 exited
+ * 0 because of it. The production server's memory is flat after warm-up
+ * (`docs/MILESTONES.md`, "M9 — Integration", has the measurement), it compiles
+ * nothing on first request, and it hydrates a page in a fraction of the time,
+ * which is the window `e2e/hydration.ts` exists for. The build takes well under
+ * a minute. The one consequence to know: the build is written to `.next` with
+ * the harness's URL and anon key inlined into the browser bundle (that is what
+ * `NEXT_PUBLIC_` means), so after a run `npm start` would talk to the harness —
+ * run `npm run build` again before serving anything else from this directory.
+ * `npm run dev` is unaffected (it writes to `.next/dev`), and Next 16 lets a
+ * dev server and a build share the directory.
  *
  * ## Why neither server is reused by default
  *
@@ -87,8 +105,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: [['list']],
-  // `next dev` compiles a route the first time it is asked for, so the first
-  // navigation of a run is slow in a way later ones are not.
+  // Generous for a production server; the specs were written and timed
+  // against `next dev`, which compiled each route on its first request.
   timeout: 90_000,
   expect: { timeout: 20_000 },
 
@@ -122,17 +140,16 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      // The preflight first: Next allows one `next dev` per directory, so a
-      // dev server someone left running makes this command exit 1 and the whole
-      // suite fail to launch. `scripts/e2e-preflight.mjs` says so in one
-      // sentence instead of leaving Next's refusal buried in `[WebServer]`
-      // output below a "✓ Ready" line from the server it is refusing to be.
-      command: `node scripts/e2e-preflight.mjs && npm run dev -- --port ${APP_PORT}`,
+      // A production build, then the production server (see the header for
+      // why). The build runs with this entry's `env`, which is what inlines
+      // the harness's URL and anon key into the browser bundle.
+      command: `npm run build && npm run start -- --port ${APP_PORT}`,
       url: `${APP_URL}/login`,
       // Never by default: this entry's `env` block is the only thing aiming the
       // app at the harness, and a reused server never sees it.
       reuseExistingServer: REUSE_APP,
-      timeout: 180_000,
+      // The build (about 15 s warm, under a minute cold) is inside this.
+      timeout: 300_000,
       stdout: 'pipe',
       stderr: 'pipe',
       env: {

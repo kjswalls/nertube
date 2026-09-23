@@ -584,12 +584,16 @@ describe("rule 6 — the next unticked box", () => {
     });
   });
 
-  it("reads a null estimate as ten minutes", () => {
+  it("reads a null estimate as ten minutes, and does not claim it was measured", () => {
     const row = rowFor({
       stageId: "ch1-scripting",
       checklist: checklist([{ estMinutes: null }]),
     });
+    // The quick filter compares ten…
     expect(row?.estMinutes).toBe(DEFAULT_EST_MINUTES);
+    // …but the row has no estimate to print (M9 review: a custom item used to
+    // show "10 min" in the mono face, a measurement nobody made).
+    expect(row?.payload).toMatchObject({ input: "tick", estMinutes: null });
   });
 
   it("picks up an item added at the top, which is the point of adding one", () => {

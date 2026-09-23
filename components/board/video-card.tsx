@@ -217,8 +217,16 @@ export function VideoCard({
         </span>
 
         {card.packagingSkipped ? (
-          <span className="rounded-full bg-attention/15 px-1.5 py-0.5 font-medium text-attention">
-            TTH skipped
+          <span
+            // TTH is BRIEF.md's word; the card is where a person meets it
+            // first, so it is spelled out here (M9 review).
+            title="The packaging gate (title, thumbnail concept, hook) was skipped with a typed reason."
+            className="rounded-full bg-attention/15 px-1.5 py-0.5 font-medium text-attention"
+          >
+            <abbr title="Title, thumbnail concept, hook" className="no-underline">
+              TTH
+            </abbr>{" "}
+            skipped
           </span>
         ) : null}
 

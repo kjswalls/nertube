@@ -295,6 +295,46 @@
     outline-offset: -2px;
   }
 
+  /* Pressed toggles: `/now`'s channel and quick-filter chips, the chosen
+     title candidate and hook, the bank's archived switch. Their pressed state
+     was a fill, which this mode repaints, so pressed and unpressed looked the
+     same (M9 review). */
+  [aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /* The sidebar's current row. Its marker is a 3px bar drawn as a background
+     — "a shape, not a hue", so the page can be found with no colour — and
+     this mode painted it Canvas, leaving weight 500 against 400 as the only
+     difference. `forced-color-adjust: none` lets it keep a system colour. */
+  [data-current-marker] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+  }
+
+  /* A choice drawn as a chip around a visually hidden radio (the capture
+     box's channels). The rule at the top of this block outlines the focused
+     element, which here is the 1×1 clipped input, so the outline was clipped
+     away with it; and the chosen chip differed only by weight. The label
+     carries both instead. */
+  label:has(> input:focus-visible) {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
+  [data-chip]:has(> input:checked) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /* Focus wins over "chosen" on the chip that is both: the more specific
+     selector puts the focus outline back. */
+  [data-chip]:has(> input:checked):has(> input:focus-visible) {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
   /* Meters: the matrix's weight bars and the quota bars.
 
      Both are a track and a fill drawn purely as `background-color` on an empty

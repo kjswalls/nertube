@@ -20,9 +20,15 @@ export function Keys({ keys }: { keys: string }) {
       {either.map((option, index) => (
         <Fragment key={option}>
           {index > 0 ? (
-            <span aria-hidden="true" className="text-[11px] text-muted">
-              /
-            </span>
+            <>
+              {/* Seen as a slash, heard as "or": with the slash hidden and
+                  nothing in its place, "j / k" was read as "j k", like a
+                  sequence (M9 review). */}
+              <span aria-hidden="true" className="text-[11px] text-muted">
+                /
+              </span>
+              <span className="sr-only"> or </span>
+            </>
           ) : null}
           <Option option={option} />
         </Fragment>

@@ -316,7 +316,8 @@ function AddTemplateItem({
       noValidate
       className="flex flex-col gap-1"
     >
-      <div className="flex items-center gap-2">
+      {/* Below `md` the new item's text takes its own line (M9 review). */}
+      <div className="flex items-center gap-2 max-md:flex-wrap">
         <label htmlFor={textId} className="sr-only">
           New item for {stageName}
         </label>
@@ -329,7 +330,7 @@ function AddTemplateItem({
           maxLength={MAX_ITEM_LENGTH}
           onChange={(event) => setText(event.target.value)}
           placeholder="Add an item — it goes at the end"
-          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none placeholder:font-sans placeholder:text-[13px] placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none placeholder:font-sans placeholder:text-[13px] placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base"
         />
         <label htmlFor={minutesId} className="sr-only">
           Minutes for the new {stageName} item
@@ -346,7 +347,7 @@ function AddTemplateItem({
           onChange={(event) => setMinutes(event.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
-          className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
         />
         <span aria-hidden="true" className="font-mono text-[11px] text-muted">
           min
@@ -355,7 +356,7 @@ function AddTemplateItem({
           type="submit"
           data-testid="template-add-submit"
           disabled={cleanLabel(text) === ""}
-          className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none enabled:hover:border-accent/50 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+          className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none enabled:hover:border-accent/50 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-4"
         >
           Add<span className="sr-only"> to {stageName}</span>
         </button>

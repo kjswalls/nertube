@@ -94,7 +94,7 @@ export function NoVerticals({
             "This channel has neither yet."
           ) : verticals.length === 0 ? (
             <>
-              This channel has the eight formats from the brief and no pillars
+              This channel has the eight standard formats and no pillars
               yet — on purpose: formats are a vocabulary anyone can borrow, but
               the three to five topics <em>this</em> channel is about are yours
               to name.

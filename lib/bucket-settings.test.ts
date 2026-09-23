@@ -92,11 +92,21 @@ describe("the shape of an axis", () => {
   });
 
   it("says it in one sentence that changes with the count", () => {
-    expect(axisCountSentence("vertical", 0)).toBe("No topic pillars yet — the brief suggests 3–5.");
-    expect(axisCountSentence("vertical", 1)).toMatch(/^1 topic pillar — the brief suggests 3–5\./);
+    expect(axisCountSentence("vertical", 0)).toBe(
+      "No topic pillars yet — most channels do well with 3–5.",
+    );
+    expect(axisCountSentence("vertical", 1)).toMatch(/^1 topic pillar — most channels do well with 3–5\./);
     expect(axisCountSentence("vertical", 4)).toMatch(/^4 topic pillars — within the 3–5/);
     expect(axisCountSentence("horizontal", 8)).toMatch(/^8 formats — within the 8–12/);
     expect(axisCountSentence("horizontal", 14)).toMatch(/more than the 8–12/);
+  });
+
+  it("never cites the brief, which the person using the app has never seen", () => {
+    for (const axis of ["vertical", "horizontal"] as const) {
+      for (const count of [0, 1, 4, 9, 20]) {
+        expect(axisCountSentence(axis, count)).not.toMatch(/brief/i);
+      }
+    }
   });
 });
 

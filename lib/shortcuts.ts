@@ -254,6 +254,23 @@ function activeRegistrations(): Registration[] {
   return live.sort((a, b) => b.order - a.order);
 }
 
+/**
+ * Every enabled registration, newest first, whether or not an overlay is
+ * silencing it — for the hint bar only.
+ *
+ * The bar is page furniture: it describes the page's keys, and the page is
+ * still there under a dialog. Built from `activeRegistrations()` it went empty
+ * the moment any `Modal` opened, and an empty bar renders nothing — which
+ * unmounted the bar's own "all keys" button, the opener of the `?` sheet, so
+ * closing the sheet gave focus back to a detached element and it landed on
+ * <body> (M9 review). What may *fire* is still `activeRegistrations()`.
+ */
+function enabledRegistrations(): Registration[] {
+  return [...registrations]
+    .filter((entry) => entry.enabled)
+    .sort((a, b) => b.order - a.order);
+}
+
 function disarm(): void {
   if (pendingTimer !== null) clearTimeout(pendingTimer);
   pendingTimer = null;
@@ -395,7 +412,7 @@ function publish(): void {
   const hints: Shortcut[] = [];
   // Oldest first, so the legend reads c · 1–9 · j/k · [ ] · Enter: the sidebar
   // registers before the page underneath it does.
-  for (const entry of [...activeRegistrations()].reverse()) {
+  for (const entry of [...enabledRegistrations()].reverse()) {
     for (const shortcut of entry.shortcuts) {
       if (!shortcut.hint || shortcut.hint.bar === false) continue;
       if (seen.has(shortcut.hint.keys)) continue;

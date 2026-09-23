@@ -40,9 +40,29 @@ import { Modal } from "@/components/modal";
  * `KeyboardShortcuts` (`1`..`9`, `g`, `?`) — stays in the bar, mounted at every width,
  * and is never passed in here.
  */
+/*
+  A link chosen in the sheet, waiting for the page it leads to.
+
+  Every page renders its own `AppShell`, so a navigation mounts a new bar and a
+  new menu button, and the one `Modal` gave focus back to is gone a moment
+  later — focus ended on <body> (M9 review). The chosen link records the time
+  here; the menu button of the page that arrives takes focus if it mounts
+  within a few seconds. A module-level record because it has to outlive the
+  component that wrote it; a timestamp so that a stale one (a link to the page
+  already open, which remounts nothing) cannot steal focus later.
+*/
+const chosenInSheet = { at: 0 };
+const CHOSEN_WINDOW_MS = 10_000;
+
 export function AppSidebarMenu({ drawer }: { drawer: ReactNode }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const at = chosenInSheet.at;
+    chosenInSheet.at = 0;
+    if (at !== 0 && Date.now() - at < CHOSEN_WINDOW_MS) buttonRef.current?.focus();
+  }, []);
 
   /*
     A window widened past the breakpoint while the sheet is open would leave a
@@ -103,13 +123,16 @@ export function AppSidebarMenu({ drawer }: { drawer: ReactNode }) {
             /*
               A link chosen in the sheet is a decision made: close it at once,
               rather than leave it open over a page that is loading. Focus goes
-              back to the menu button, which is where it should be on the page
-              that arrives. Delegated here rather than threaded into every link,
-              because the links are server-rendered and do not know they are in
-              a sheet.
+              back to the menu button — this one at once, and the new page's
+              when it arrives (`chosenInSheet` above). Delegated here rather
+              than threaded into every link, because the links are
+              server-rendered and do not know they are in a sheet.
             */
             onClick={(event) => {
-              if ((event.target as Element).closest("a[href]")) setOpen(false);
+              if ((event.target as Element).closest("a[href]")) {
+                chosenInSheet.at = Date.now();
+                setOpen(false);
+              }
             }}
           >
             {drawer}

@@ -121,7 +121,7 @@ export function TitleCandidates({
         <p data-testid="candidate-count" className="text-xs text-muted">
           <span data-testid="candidate-count-number">{count}</span>
           {count === 1 ? " candidate" : " candidates"}
-          {count < 10 ? " — the brief asks for 10–20, not 3" : " — in the 10–20 band"}
+          {count < 10 ? " — aim for 10–20, not 3" : " — in the 10–20 band"}
         </p>
       </div>
 
@@ -156,7 +156,7 @@ export function TitleCandidates({
         <button
           type="submit"
           data-testid="candidate-add"
-          className="rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         >
           Add
         </button>
@@ -261,7 +261,7 @@ export function TitleCandidates({
                       : "";
                     onRemove(candidate.id);
                   }}
-                  className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+                  className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
                 >
                   Remove
                 </button>

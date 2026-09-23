@@ -363,8 +363,14 @@ test('a section is a URL: pasted, clicked and gone back to', async ({ page }) =>
   await expect(
     page.getByTestId('section-tab-packaging').getByTestId('section-mark'),
   ).toContainText('1/3');
+  // Thumbnails is quiet rather than locked before Editing: its upload slots
+  // work at every stage (M9 review). Script is the locked one — there is
+  // nothing in it until the video reaches Scripting.
   await expect(
     page.getByTestId('section-tab-thumbnails').getByTestId('section-mark'),
+  ).toHaveCount(0);
+  await expect(
+    page.getByTestId('section-tab-script').getByTestId('section-mark'),
   ).toHaveAttribute('data-mark', 'locked');
 });
 

@@ -14,8 +14,14 @@
  * it, so there is no write path to bind a textarea to. Shipping a textarea over
  * a column that cannot be saved would be the worst version of this section: it
  * would accept a whole evening's work and lose it on the next render, silently.
- * So it shows the column and says plainly that it is read-only, and the field
- * plus its save path arrive together rather than the field arriving first.
+ * So it shows the column and says plainly that it is not edited here.
+ *
+ * M9 was the last milestone and built no editor (the README's limits say so,
+ * prominently), so the sentence no longer promises one "for now": it says
+ * where the script is actually written, and that the copy here is written
+ * once — a hook chosen or a template changed afterwards never reaches it,
+ * because `move_video` fills the column only while it is null, and PLAN.md's
+ * "reset script from template" was not built (M9 review).
  *
  * ## Why a `<pre>` and not prose
  *
@@ -58,12 +64,12 @@ export function ScriptSection({
         <h2 id="script-heading" className="text-sm font-semibold">
           Script
         </h2>
-        <p className="text-xs text-muted">
-          Written from the channel&rsquo;s template on the way into {scriptingName},
-          with the chosen hook already spliced in.{" "}
-          <strong className="font-medium">Read-only for now</strong> — the
-          editor and its save path arrive together, so that nothing typed here
-          can be lost.
+        <p data-testid="script-note" className="text-xs text-muted">
+          Your starting draft: the channel&rsquo;s template with the chosen hook
+          spliced in, written once, when this video first moved into {scriptingName}.{" "}
+          <strong className="font-medium">It is not edited here</strong> — write the
+          script in your own editor, starting from this copy. A hook or template
+          changed after that first move does not reach it.
         </p>
       </div>
 

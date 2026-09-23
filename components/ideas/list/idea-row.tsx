@@ -102,6 +102,14 @@ export function IdeaRow({
       */
       tabIndex={-1}
       onClick={onSelect}
+      /*
+        Focus anywhere in the row selects it — the title link, Promote,
+        Archive, or the row itself — as the board's card and `/now`'s row
+        already did. It used to be the link alone, so Shift+Tab onto the
+        previous row's Archive left the selection behind, and `p` promoted a
+        row the focus ring was not on (M9 review). React's `onFocus` bubbles.
+      */
+      onFocus={onSelect}
       className={[
         // The card metrics: 12px/13px padding, 8px radius, a 1px border and no
         // shadow — shadows are for overlays.
@@ -124,7 +132,6 @@ export function IdeaRow({
               href={`/videos/${idea.id}`}
               data-testid="idea-open"
               className="outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-              onFocus={onSelect}
             >
               {title}
             </Link>
@@ -151,7 +158,7 @@ export function IdeaRow({
                 onRestore();
               }}
               className={[
-                "rounded-button border border-border px-2 py-1 text-[12px] text-muted outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                "rounded-button border border-border px-2 py-1 text-[12px] text-muted outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3",
                 inert ? inertClass : "hover:text-foreground",
               ].join(" ")}
             >
@@ -173,7 +180,7 @@ export function IdeaRow({
                   onPromote();
                 }}
                 className={[
-                  "rounded-button border px-2 py-1 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                  "rounded-button border px-2 py-1 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3",
                   inert || promoteRefusal !== null
                     ? `border-border text-muted ${inertClass}`
                     : "border-accent text-foreground hover:bg-accent/10",
@@ -191,7 +198,7 @@ export function IdeaRow({
                   onArchive();
                 }}
                 className={[
-                  "rounded-button border border-border px-2 py-1 text-[12px] text-muted outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                  "rounded-button border border-border px-2 py-1 text-[12px] text-muted outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3",
                   inert ? inertClass : "hover:text-foreground",
                 ].join(" ")}
               >

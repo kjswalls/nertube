@@ -194,7 +194,7 @@ export function settingNotes(names: StageNames) {
   const n = (kind: StageKind) => stageName(names, kind);
   return {
     voiceGuide:
-      "Read verbatim by the brainstorm, as the voice it must write in — never generic-YouTuber. Nothing calls it yet; the brainstorm arrives in M8, and this is where the text it will be handed lives.",
+      "The brainstorm — Generate 20, Draft hooks and Suggest concepts on a video's Packaging tab — is handed this text verbatim and writes in this voice, never a generic YouTuber's.",
     scriptTemplate: `Copied into a video's script the first time it enters ${n("scripting")}, with ${HOOK_PLACEHOLDER} replaced by the chosen hook. It is your own shape: headings, bullets, prose, a single line — whatever you begin from. Videos already past ${n("scripting")} keep the script they have.`,
     wipThreshold: `The board's column count turns red above this number, on the in-flight stages only — ${n("packaging")} through ${n("scheduled")}. ${n("idea")}, ${n("published")} and ${n("repurposed")} never warn.`,
     staleDays:

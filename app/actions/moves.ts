@@ -5,8 +5,10 @@ import { z } from "zod";
 
 import {
   describeThumbnailShortfall,
-  GATE_WORDING,
+  listGateFields,
+  packagingGate,
   readGateField,
+  readHooks,
   type GateField,
 } from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
@@ -174,6 +176,31 @@ export async function moveVideo(
   if (error) {
     const missing = readGateField(error.message);
     if (missing) {
+      /*
+        `move_video` names the first missing field only. The row is read back
+        so the sentence can name every one — a person missing the concept and
+        the hook used to be refused twice, learning about the hook only after
+        fixing the concept (M9 review). `missing` stays the first: it is the
+        field the "Fix packaging" link lands on. If the read fails, or the row
+        changed in between, the database's one field is the sentence.
+      */
+      const { data: row } = await supabase
+        .from("videos")
+        .select("title, thumbnail_concept, hooks, packaging_skipped_at")
+        .eq("id", parsed.data.videoId)
+        .maybeSingle();
+      const status = row
+        ? packagingGate({
+            title: row.title,
+            thumbnailConcept: row.thumbnail_concept,
+            hooks: readHooks(row.hooks),
+            packagingSkippedAt: row.packaging_skipped_at,
+          })
+        : null;
+      const fields =
+        status && !status.ready && status.allMissing.includes(missing)
+          ? status.allMissing
+          : [missing];
       return {
         ok: false,
         missing,
@@ -182,7 +209,7 @@ export async function moveVideo(
         // the toast goes on to say which column the video is still in, and
         // "Packaging still needs … It is still in Grue" is two names for one
         // column (M7's review).
-        message: `${await packagingName(supabase, parsed.data.stageId)} still needs ${GATE_WORDING[missing]}.`,
+        message: `${await packagingName(supabase, parsed.data.stageId)} still needs ${listGateFields(fields)}.`,
       };
     }
 

@@ -16,14 +16,14 @@ export function supabaseEnv(): { url: string; anonKey: string } {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    const missing = [
+    const names = [
       url ? null : "NEXT_PUBLIC_SUPABASE_URL",
       anonKey ? null : "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    ]
-      .filter(Boolean)
-      .join(" and ");
+    ].filter((name): name is string => name !== null);
     throw new Error(
-      `${missing} is not set. Copy .env.example to .env.local and fill it in.`,
+      `${names.join(" and ")} ${names.length === 1 ? "is" : "are"} not set. ` +
+        "Copy .env.example to .env.local and fill it in — `npm run dev:stack` prints both " +
+        "values, and so does `supabase start` on the Docker path.",
     );
   }
 

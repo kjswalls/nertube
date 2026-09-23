@@ -143,7 +143,7 @@ export function AxisEditor({
           {axisCountSentence(axis, list.length)}{" "}
           {axis === "vertical"
             ? "A pillar is a topic this channel keeps coming back to — the three to five things it is about."
-            : "A format is the shape a video takes: tutorial, review, vlog. The eight a new channel starts with are the brief's list; rename or remove any of them."}
+            : "A format is the shape a video takes: tutorial, review, vlog. A new channel starts with eight common ones; rename or remove any of them."}
         </p>
       </div>
 
@@ -164,9 +164,9 @@ export function AxisEditor({
             </>
           ) : (
             <>
-              No formats, so the matrix has no columns. Add one below — the brief&rsquo;s
-              list is tutorial, listicle, review, self-experiment, vlog, reaction, case
-              study and interview.
+              No formats, so the matrix has no columns. Add one below — the eight a new
+              channel starts with are tutorial, listicle, review, self-experiment, vlog,
+              reaction, case study and interview.
             </>
           )}
         </p>
@@ -355,7 +355,9 @@ function AddBucketForm({
             setError(null);
           }}
           placeholder={axis === "vertical" ? "e.g. productivity" : "e.g. tier list"}
-          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+          // A real basis, and the whole line below `md`: beside the quota
+          // and the button it was 29px wide at 390 (M9 review).
+          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base"
         />
         <div className="flex items-center gap-1.5">
           <label htmlFor={quotaId} className="text-[12px] text-muted">
@@ -377,7 +379,7 @@ function AddBucketForm({
               setQuota(event.target.value);
               setError(null);
             }}
-            className="w-16 rounded-input border border-border bg-background px-2 py-2 text-right font-mono text-[12px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+            className="w-16 rounded-input border border-border bg-background px-2 py-2 text-right font-mono text-[12px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
           />
           <span className="text-[12px] text-muted">a month</span>
         </div>
@@ -388,7 +390,7 @@ function AddBucketForm({
           // that disables itself under the cursor drops focus on <body>.
           aria-busy={busy ? true : undefined}
           disabled={trimmed === "" || duplicate}
-          className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
         >
           {busy ? "Adding…" : `Add ${label}`}
         </button>

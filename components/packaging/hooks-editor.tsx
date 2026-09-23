@@ -122,7 +122,7 @@ export function HooksEditor({
         <p data-testid="hook-count" className="text-xs text-muted">
           <span data-testid="hook-count-number">{hooks.length}</span>/{MAX_HOOKS} written
           {chosen === 1 ? " · one chosen" : chosen === 0 ? " · none chosen" : ` · ${chosen} chosen`}
-          {short ? " — the brief asks for three, then pick the strongest" : ""}
+          {short ? " — write three, then choose the strongest" : ""}
         </p>
       </div>
 
@@ -172,7 +172,7 @@ export function HooksEditor({
         <button
           type="submit"
           data-testid="hook-add"
-          className="h-fit shrink-0 rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className="h-fit shrink-0 rounded-button border border-border px-3 py-2 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         >
           Add
         </button>
@@ -258,7 +258,7 @@ export function HooksEditor({
                     : "";
                   onRemove(hook.id);
                 }}
-                className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+                className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
               >
                 Remove
               </button>

@@ -29,7 +29,7 @@ export function NewChannelForm() {
           autoComplete="off"
           placeholder="Main channel"
           aria-describedby="name-hint"
-          className="rounded-input border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-input border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
         />
         <p id="name-hint" className="text-xs text-muted">
           Its board lives at <code>/c/&lt;name-as-a-slug&gt;/board</code>. The
@@ -50,7 +50,7 @@ export function NewChannelForm() {
       <button
         type="submit"
         disabled={pending}
-        className="self-start rounded-button bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+        className="self-start rounded-button bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 thumb:min-h-11 thumb:px-4"
       >
         {pending ? "Creating…" : "Create channel"}
       </button>

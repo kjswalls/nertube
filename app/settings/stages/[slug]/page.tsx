@@ -8,6 +8,7 @@ import type { SettingsStage } from "@/components/settings/stages/types";
 import { isStageKind } from "@/lib/defaults";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
+import { channelPageTitle } from "@/lib/page-title";
 
 export async function generateMetadata({
   params,
@@ -15,7 +16,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  return { title: `${slug} · stages · NerTube` };
+  return { title: await channelPageTitle(slug, "stages") };
 }
 
 /**

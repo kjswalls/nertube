@@ -177,7 +177,9 @@ const SETTINGS_COLUMNS =
  * - `script_template` is read by `move_video` at the moment a video first
  *   enters Scripting — a database read, nothing cached, so no page needs
  *   revalidating for it; videos already past Scripting keep their script.
- * - `voice_guide` is read by nothing yet. M8's brainstorm will read it.
+ * - `voice_guide` is read by the brainstorm (`app/actions/assist.ts`, which
+ *   hands it to the prompt in `lib/assist/prompts.ts`) on every request, so
+ *   no page needs revalidating for it either.
  *
  * The channel is read through RLS first; another user's id reads as no row,
  * and a row that is not there is answered in words rather than with a PATCH

@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -109,7 +110,7 @@ export function AssistPending({
         type="button"
         data-testid={`${prefix}-cancel`}
         onClick={onCancel}
-        className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent"
+        className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
       >
         Cancel
       </button>
@@ -170,7 +171,7 @@ export function AssistFailure({
           data-testid={`${prefix}-retry`}
           onClick={onRetry}
           disabled={disabled}
-          className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
         >
           {failure.retryable ? "Try again" : "Try anyway"}
         </button>
@@ -216,7 +217,7 @@ export function AssistNoticeLine({
           type="button"
           data-testid={`${prefix}-undo`}
           onClick={notice.undo}
-          className="rounded-button border border-border px-2 py-0.5 text-xs text-foreground outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-2 py-0.5 text-xs text-foreground outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         >
           {notice.undoLabel ?? "Undo"}
         </button>
@@ -521,6 +522,30 @@ export function AssistPanel({
   const panelRef = useRef<HTMLElement>(null);
   useDismiss(onClose, { within: panelRef });
 
+  /*
+    Focus goes back to whatever opened the panel — the pill — when the panel
+    closes with focus inside it: Escape, its own Close, a promote that ends
+    it. Only `Modal` did this until the M9 review; a panel just unmounted and
+    focus fell to <body>, silently for a screen reader.
+
+    A layout effect, so the opener is read before any passive effect in the
+    panel (its heading's `useFocusOnChange`) has moved focus in; and its
+    cleanup runs while the panel's nodes are still in the document, so it can
+    still see that focus was inside.
+  */
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    const opener = document.activeElement;
+    return () => {
+      if (panel === null || !(opener instanceof HTMLElement)) return;
+      const active = document.activeElement;
+      const focusWasInside = panel.contains(active) || active === document.body;
+      if (focusWasInside && opener !== document.body && document.contains(opener)) {
+        opener.focus();
+      }
+    };
+  }, []);
+
   return (
     <section
       ref={panelRef}
@@ -588,7 +613,7 @@ export function AssistPillButton({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+      className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent thumb:min-h-11"
     >
       <span>{label ?? verb}</span>
       {badge ? (

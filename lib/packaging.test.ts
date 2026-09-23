@@ -418,9 +418,25 @@ describe("packagingGate", () => {
   });
 
   it("names the title first, the way the elsif chain does", () => {
-    const status = packagingGate({ ...ready, title: "", thumbnailConcept: null, hooks: [] });
+    const status = packagingGate({ ...ready, title: "" });
     expect(status.missing).toBe("title");
     expect(describeGate(status)).toBe(`Packaging: needs ${GATE_WORDING.title}`);
+  });
+
+  it("lists every missing field in the sentence, so nobody is refused twice", () => {
+    // M9 review: a video missing the concept and the hook was told about the
+    // concept, fixed it, and only then learned about the hook.
+    const status = packagingGate({ ...ready, title: "", thumbnailConcept: null, hooks: [] });
+    expect(status.missing).toBe("title");
+    expect(status.ready ? [] : status.allMissing).toEqual(["title", "thumbnail_concept", "hook"]);
+    expect(describeGate(status)).toBe(
+      `Packaging: needs ${GATE_WORDING.title}, ${GATE_WORDING.thumbnail_concept} and ${GATE_WORDING.hook} — none is chosen yet`,
+    );
+    expect(
+      describeGate(packagingGate({ ...ready, thumbnailConcept: "", hooks: [] })),
+    ).toBe(
+      `Packaging: needs ${GATE_WORDING.thumbnail_concept} and ${GATE_WORDING.hook} — none is chosen yet`,
+    );
   });
 
   it("treats a null title as missing, like coalesce(title, '')", () => {

@@ -11,6 +11,7 @@ import {
 import { formatDateColumn, isDateColumn } from "@/lib/calendar-dates";
 import { readFilmingDay } from "@/lib/filming-data";
 import { requireUser } from "@/lib/supabase/require-user";
+import { cleanProse } from "@/lib/text";
 
 /**
  * Filming days: the write path behind BRIEF.md principle 4.
@@ -83,7 +84,11 @@ const NotesSchema = z
     MAX_FILMING_NOTES_LENGTH,
     `Keep the shoot notes under ${MAX_FILMING_NOTES_LENGTH} characters.`,
   )
-  .transform((value) => value.trim())
+  // `cleanProse`: a pasted NUL byte is dropped here rather than reaching
+  // Postgres, whose refusal ("unsupported Unicode escape sequence") was the
+  // sentence the person saw. The video page's fields had this since M9; the
+  // shoot notes are the one free-text writer it missed (M9 review).
+  .transform((value) => cleanProse(value).trim())
   .transform((value) => (value === "" ? null : value));
 
 /**

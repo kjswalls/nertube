@@ -377,6 +377,7 @@ export function Board({
       videoId: string | null,
       missing: GateField | null,
       title?: string,
+      keyboard?: { returnFocus: () => void },
     ) => {
       const links: ToastLink[] = [];
 
@@ -400,7 +401,17 @@ export function Board({
         tone: "error",
         message,
         links: links.length > 0 ? links : undefined,
+        /*
+          A refusal that came from `[`/`]` puts focus on its first link, so the
+          choice between fixing and skipping is one Enter or one Tab away rather
+          than behind every card on the board; Escape (or the toast going) puts
+          focus back on the card (M9 review). A drag or a click on an arrow
+          leaves focus where the person put it.
+        */
+        focus: keyboard !== undefined && links.length > 0,
+        returnFocus: keyboard?.returnFocus,
       });
+      return keyboard !== undefined && links.length > 0;
     },
     [toast],
   );
@@ -425,8 +436,11 @@ export function Board({
   );
 
   const requestMove = useCallback(
-    async (card: BoardCard, target: BoardStage) => {
+    async (card: BoardCard, target: BoardStage, fromKey = false) => {
       if (card.stageId === target.id) return;
+      // Set when a keyboard refusal's toast has taken focus: the card must not
+      // take it back after the snap-back below.
+      let toastTookFocus = false;
 
       const from = stageById.get(card.stageId);
       const title = card.title.trim() === "" ? "Untitled" : card.title;
@@ -510,11 +524,14 @@ export function Board({
           // Snap back. The card returns to the column it was in; nothing is
           // left sitting where the database refused to put it.
           setOverrides((current) => ({ ...current, [card.id]: before }));
-          showToast(
+          toastTookFocus = showToast(
             `Could not move “${title}” to ${target.name}. ${result.message}${where}`,
             card.id,
             result.missing,
             title,
+            fromKey
+              ? { returnFocus: () => cardRefs.current.get(card.id)?.focus() }
+              : undefined,
           );
           setAnnouncement(`“${title}” was not moved. ${result.message}`);
         }
@@ -541,7 +558,7 @@ export function Board({
         // column this move ended in. The role is the one the move started
         // with: a click on "→ Move forward" ends with that button focused on
         // the card in its new column, not with focus on the document.
-        refocus.current = focusRole;
+        refocus.current = toastTookFocus ? null : focusRole;
       }
     },
     [channelSlug, focusRoleFor, showToast, stageById, toast],
@@ -573,7 +590,7 @@ export function Board({
   });
 
   const moveBy = useCallback(
-    (card: BoardCard, direction: -1 | 1) => {
+    (card: BoardCard, direction: -1 | 1, fromKey = false) => {
       const stage = stageById.get(card.stageId);
       const { back, forward } = neighbours(card.stageId);
       const target = direction === -1 ? back : forward;
@@ -596,7 +613,7 @@ export function Board({
         return;
       }
 
-      void requestMove(card, target);
+      void requestMove(card, target, fromKey);
     },
     [neighbours, requestMove, showToast, stageById],
   );
@@ -675,7 +692,7 @@ export function Board({
         // A held key is one move, not four: `repeat` is the OS saying the key
         // never came up, and nobody means to send a card four stages back.
         if (event.repeat) return;
-        if (selectedCard) moveBy(selectedCard, -1);
+        if (selectedCard) moveBy(selectedCard, -1, true);
       },
     },
     {
@@ -689,7 +706,40 @@ export function Board({
       run: (event) => {
         event.preventDefault();
         if (event.repeat) return;
-        if (selectedCard) moveBy(selectedCard, 1);
+        if (selectedCard) moveBy(selectedCard, 1, true);
+      },
+    },
+    {
+      /*
+        PLAN.md's "Promote = `p` on a card": the idea bank has had it since M5;
+        the board did not until the M9 review found it missing. It is the same
+        call `]` makes on an Idea card and the bank's Promote makes — a move to
+        the channel's Packaging stage through `move_video` — so it runs the
+        same checks and says the same things. On any other card it does
+        nothing: there is nothing to promote.
+      */
+      key: "p",
+      description: "Promote the selected idea to Packaging",
+      hint: {
+        keys: "p",
+        text: "promote it",
+        label: "Promote the selected idea to Packaging",
+        bar: false,
+      },
+      run: (event) => {
+        if (!selectedCard || event.repeat) return;
+        if (stageById.get(selectedCard.stageId)?.kind !== "idea") return;
+        event.preventDefault();
+        const packaging = stages.find((stage) => stage.kind === "packaging");
+        if (!packaging) {
+          showToast(
+            "This channel's Packaging stage is switched off, so there is nowhere to promote to. Switch it on under Settings › Stages.",
+            null,
+            null,
+          );
+          return;
+        }
+        void requestMove(selectedCard, packaging, true);
       },
     },
     {

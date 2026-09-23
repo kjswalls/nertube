@@ -457,7 +457,10 @@ export type GateStatus =
   | {
       readonly ready: false;
       readonly skipped: false;
+      /** The first missing field, the one `move_video` names. */
       readonly missing: GateField;
+      /** Every missing field, in the same order — for the sentence. */
+      readonly allMissing: readonly GateField[];
       readonly chosenHooks: number;
     };
 
@@ -473,10 +476,13 @@ export type GateStatus =
  *   elsif v_chosen_hooks <> 1                           then v_missing := 'hook';
  * ```
  *
- * The `elsif` chain matters: the function stops at the *first* missing field, so
- * an indicator that listed all three would disagree with the refusal the board
- * shows for the same video. It names one field, the same one, for the same
- * reason.
+ * The `elsif` chain matters: the function stops at the *first* missing field,
+ * and `missing` is that field — the one the refusal's deep link targets. The
+ * *sentence*, though, names every missing field (`allMissing`): naming only
+ * the first meant a person missing two was refused twice, learning about the
+ * second only after fixing the first (M9 review). The board's refusal lists
+ * them the same way (`app/actions/moves.ts` reads the row after a gate
+ * refusal), so the two still agree.
  *
  * The skip check is first here as it is there: a skipped video passes the gate
  * with every field empty, and saying "needs a title" about one would be a
@@ -488,16 +494,21 @@ export function packagingGate(snapshot: PackagingSnapshot): GateStatus {
   if (snapshot.packagingSkippedAt !== null) {
     return { ready: true, skipped: true, missing: null, chosenHooks };
   }
-  if ((snapshot.title ?? "") === "") {
-    return { ready: false, skipped: false, missing: "title", chosenHooks };
-  }
-  if ((snapshot.thumbnailConcept ?? "") === "") {
-    return { ready: false, skipped: false, missing: "thumbnail_concept", chosenHooks };
-  }
-  if (chosenHooks !== 1) {
-    return { ready: false, skipped: false, missing: "hook", chosenHooks };
+  const allMissing: GateField[] = [];
+  if ((snapshot.title ?? "") === "") allMissing.push("title");
+  if ((snapshot.thumbnailConcept ?? "") === "") allMissing.push("thumbnail_concept");
+  if (chosenHooks !== 1) allMissing.push("hook");
+  if (allMissing.length > 0) {
+    return { ready: false, skipped: false, missing: allMissing[0], allMissing, chosenHooks };
   }
   return { ready: true, skipped: false, missing: null, chosenHooks };
+}
+
+/** "a, b and c", in the gate's wording. */
+export function listGateFields(fields: readonly GateField[]): string {
+  const words = fields.map((field) => GATE_WORDING[field]);
+  if (words.length <= 1) return words.join("");
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
 /**
@@ -523,16 +534,17 @@ export function describeGate(status: GateStatus): string {
   if (status.ready) {
     return status.skipped ? "Packaging: skipped" : "Packaging: ready";
   }
-  if (status.missing === "hook") {
+  const needs = `Packaging: needs ${listGateFields(status.allMissing)}`;
+  if (status.allMissing.includes("hook")) {
     // The count is the actionable half. The editor makes two chosen hooks
     // unreachable, but a row written before this editor existed can hold them.
     const detail =
       status.chosenHooks === 0
         ? "none is chosen yet"
         : `${status.chosenHooks} are chosen`;
-    return `Packaging: needs ${GATE_WORDING.hook} — ${detail}`;
+    return `${needs} — ${detail}`;
   }
-  return `Packaging: needs ${GATE_WORDING[status.missing]}`;
+  return needs;
 }
 /**
  * `move_video` raises `gate:title`, `gate:thumbnail_concept` or `gate:hook`.

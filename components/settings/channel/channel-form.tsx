@@ -183,7 +183,7 @@ function VoiceGuideField({
       <SaveStatus
         state={field.state}
         testId="voice-guide-status"
-        idle={field.value === "" ? "Empty. Without one the brainstorm will have only the channel's past titles to go on." : "Saved on blur. Kept exactly as written, paragraphs and all."}
+        idle={field.value === "" ? "Empty. Without one the brainstorm goes on the channel's past titles alone, and says so." : "Saved on blur. Kept exactly as written, paragraphs and all."}
       />
     </section>
   );

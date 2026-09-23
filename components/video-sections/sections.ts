@@ -194,11 +194,19 @@ export function sectionReadiness(
     nobody knows which one is on YouTube. Three filled slots with nothing
     shipped therefore reads 3/3 without a tick, and the tooltip says why.
   */
+  /*
+    Before Editing the tab is quiet, not locked (M9 review). The upload slots
+    work at every stage — nothing refuses an early image — so a padlock over
+    them was the contradiction this file's publish branch exists to remove,
+    and a new user reading it would not try to upload. Once any slot holds an
+    image the count is shown, whatever the stage.
+  */
   const variantsReady = facts.variantsReady ?? 0;
-  const thumbnails: SectionReadiness = !reached(facts.stageKind, "editing")
+  const thumbnails: SectionReadiness =
+    !reached(facts.stageKind, "editing") && variantsReady === 0
     ? {
-        kind: "locked",
-        why: "Not at Editing yet — the three image files are made near publish, not at the gate.",
+        kind: "quiet",
+        why: "The three image files are usually made near publish, not at the gate — but the slots take an image at any stage.",
       }
     : variantsReady === 3 && facts.thumbnailShipped === true
       ? { kind: "done", why: "All three variants ready, and one of them is live." }

@@ -59,13 +59,23 @@ import {
   todayColumn,
 } from "@/lib/calendar-dates";
 import { readLinkableFilmingDays } from "@/lib/filming-data";
+import { videoPageTitle } from "@/lib/page-title";
 import { formatAge } from "@/components/video-detail/age";
 import { PackagingBlock } from "@/components/packaging/packaging-block";
 import { VideoVersionProvider } from "@/components/video-version";
 
 import { ConceptSketch } from "./concept-sketch";
 
-export const metadata = { title: "Video · NerTube" };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  // The video's own title, so two open videos are two different tabs (M9
+  // review). `lib/page-title.ts` falls back to "Video" for anything unread.
+  return { title: await videoPageTitle(id) };
+}
 
 /**
  * PLAN.md: *brainstorm can take 10–40 s — `export const maxDuration = 60` on

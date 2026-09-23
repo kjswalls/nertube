@@ -174,17 +174,19 @@ export function NowRowItem({
               needs a block
             </span>
           )
-        ) : row.payload.input === "tick" ? (
+        ) : row.payload.input === "tick" && row.payload.estMinutes !== null ? (
           /*
             The mono face is for *measured* values, and only a checklist row has
             one: `checklist_items.est_minutes`, seeded per row. Every other rule
             is built with `DEFAULT_EST_MINUTES` so the quick filter has a number
             to compare, and printing that here — "10 min" beside "Goes live
             1 Dec" — was the tool asserting a measurement it never made, in the
-            one face that is supposed to guarantee it did.
+            one face that is supposed to guarantee it did. The same holds for a
+            checklist row with no estimate of its own (a custom item): the
+            filter still reads it as ten, but nothing is printed (M9 review).
           */
           <span data-testid="now-est" className="font-mono">
-            {row.estMinutes} min
+            {row.payload.estMinutes} min
           </span>
         ) : null}
       </div>

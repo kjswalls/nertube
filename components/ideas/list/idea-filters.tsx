@@ -83,8 +83,10 @@ export function IdeaFilterBar({
   const verticalId = `${ids}-vertical`;
   const horizontalId = `${ids}-horizontal`;
 
+  // 16px and 44px under a thumb: anything smaller than 16px makes iOS Safari
+  // zoom the page when the field is tapped (M9 review).
   const selectClass =
-    "rounded-input border border-border bg-surface px-2 py-1 text-[12px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    "rounded-input border border-border bg-surface px-2 py-1 text-[12px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11";
   const labelClass = "flex items-center gap-1.5 text-[11px] text-muted";
 
   return (
@@ -107,7 +109,7 @@ export function IdeaFilterBar({
           onChange={(event) =>
             onChange({ ...filters, search: event.target.value })
           }
-          className="w-56 rounded-input border border-border bg-surface px-2 py-1 text-[12px] text-foreground outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+          className="w-56 rounded-input border border-border bg-surface px-2 py-1 text-[12px] text-foreground outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
         />
       </label>
 

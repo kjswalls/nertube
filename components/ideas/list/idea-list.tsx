@@ -500,6 +500,24 @@ export function IdeaList({
           return;
         }
 
+        /*
+          The row is about to leave the list. If focus or the selection was on
+          it, both move to its neighbour (the next row, or the previous one
+          when it was last) before it goes — otherwise the unmount drops focus
+          on <body> and the next `p` has nothing to act on (M9 review).
+        */
+        const index = visible.findIndex((row) => row.id === idea.id);
+        const neighbour = visible[index + 1] ?? visible[index - 1] ?? null;
+        const rowElement = rowRefs.current.get(idea.id);
+        const focusWasHere =
+          rowElement !== undefined && rowElement.contains(document.activeElement);
+        if (neighbour !== null && (focusWasHere || selectedId === idea.id)) {
+          setSelectedId(neighbour.id);
+          if (focusWasHere) {
+            rowRefs.current.get(neighbour.id)?.focus({ preventScroll: true });
+          }
+        }
+
         setPromoted((previous) => new Set(previous).add(idea.id));
         toast.push({
           message: `Promoted to ${promoteStage.name}.`,
@@ -519,7 +537,7 @@ export function IdeaList({
         setBusyId(null);
       }
     },
-    [busyId, channelSlug, promoteStage, router, toast],
+    [busyId, channelSlug, promoteStage, router, selectedId, toast, visible],
   );
 
   const setArchived = useCallback(

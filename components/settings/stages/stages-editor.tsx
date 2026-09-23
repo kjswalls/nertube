@@ -267,7 +267,7 @@ function AddStageForm({
             setError(null);
           }}
           placeholder="e.g. Sponsor review"
-          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
         />
         <button
           type="submit"
@@ -276,7 +276,7 @@ function AddStageForm({
           // that disables itself under the cursor drops focus on <body>.
           aria-busy={busy ? true : undefined}
           disabled={trimmed === "" || duplicate}
-          className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-[13px] font-medium outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
         >
           {busy ? "Adding…" : "Add stage"}
         </button>

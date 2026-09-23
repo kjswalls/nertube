@@ -61,7 +61,7 @@ export function MonthNav({
           <Link
             href={calendarHref({ month: currentMonth })}
             data-testid="calendar-this-month"
-            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             This month
           </Link>
@@ -99,7 +99,7 @@ function MonthStep({
       data-testid={testId}
       data-month={month}
       aria-label={label}
-      className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+      className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
     >
       {children}
     </Link>

@@ -88,14 +88,16 @@ is missing.
 | `stop.mts` | `npm run dev:stack:stop` — stops stacks from their pid files |
 
 The end-to-end tests live in `e2e/` and are configured by `playwright.config.ts`
-at the repository root. `npm run e2e` always starts the application itself and
-will reuse a stack that is already up; `npm run e2e:refresh` starts its own
+at the repository root. `npm run e2e` always starts the stack and the
+application itself — a production build (`next build && next start`) — and
+refuses to run over a stack that is already up (item 31 below);
+`npm run e2e:refresh` starts its own
 stack, on its own ports and database, with a five-second access token — the only
 way to see `proxy.ts`'s refresh actually fire. If that command ever finds a
 stack minting longer tokens it fails, rather than skipping the one test it
 exists to run.
 
-## Three things it does *not* fake
+## Two things it does *not* fake
 
 **The storage ownership rule is the real policy.** Every read and write of
 `storage.objects` goes through `withClaims()`, which opens a transaction, sets
@@ -109,12 +111,6 @@ answers 403 to an upload at `<someone-else>/x.png`, that 403 is
 
 — refusing in Postgres. Change the policy and this surface changes with it. Only
 the *bytes* are the harness's own business.
-
-**The board columns read `0` even though ideas were seeded.** That is the app,
-not the harness: `app/c/[slug]/board/page.tsx` hard-codes `count={0}` and
-renders no cards, because cards are M1. The rows are there — `npm run
-dev:stack:smoke` counts them, and so does
-`select count(*) from videos` in `nertube_dev`.
 
 **The seed writes the way the app writes.** It calls `create_channel` and
 `capture_video` over an `authenticated` connection, not as a superuser with
@@ -330,12 +326,15 @@ either fix it or add it.
     know what is running. The *application* server is never reused without
     that, because Playwright's `env` block is the only thing aiming the app at
     this origin.
-32. **A `npm run dev` in this directory blocks `npm run e2e` outright.** Next
-    allows one dev server per directory, so the suite's own app server exits
-    with "Another next dev server is already running" and *nothing runs* — not
-    a failed test, a failed launch. `scripts/e2e-preflight.mjs` (run by
-    `playwright.config.ts` before the app server) now says so in one sentence
-    and names the pid to kill; stop the dev server and run the suite again.
+32. **The suite runs a production build, not `next dev`** (since the M9
+    review). `next dev` restarted itself at its memory threshold about two
+    thirds of the way through every full run and failed whichever spec was
+    loading; the production server does not. Two consequences: a `npm run dev`
+    in this directory no longer blocks `npm run e2e` (Next 16 keeps the dev
+    server's output in `.next/dev`, apart from a build's), and after a run
+    `.next` holds a build aimed at this harness — run `npm run build` again
+    before `npm start` serves anything else. (`scripts/e2e-preflight.mjs`,
+    which caught a running `next dev`, is gone with the reason for it.)
 33. **No Studio, no dashboard, no log explorer, no advisors.**
 34. **`supabase gen types` still cannot run** (it shells out to Docker even with
     `--db-url`), so `lib/database.types.ts` remains hand-written and this

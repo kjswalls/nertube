@@ -448,7 +448,7 @@ export function CaptureForm({
               three lines between the field and everything below it. */}
           <span className="pointer-coarse:hidden">
             {" "}
-            Shift+Enter adds a hook, notes, tags and the two buckets.
+            Shift+Enter adds a hook, notes, tags, a topic pillar and a format.
             {channels.length > 1
               ? " Alt+1–9, or the chips below, pick the channel."
               : ""}
@@ -513,6 +513,10 @@ export function CaptureForm({
             return (
               <label
                 key={channel.id}
+                // Forced colors repaints the fill and drops the ring, so
+                // `app/globals.css` marks the chosen chip and the focused one
+                // by this attribute instead (M9 review).
+                data-chip=""
                 className={[
                   "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-sm",
                   "focus-within:ring-2 focus-within:ring-accent",
@@ -562,7 +566,7 @@ export function CaptureForm({
           }}
           aria-expanded={more}
           aria-controls={moreId}
-          className="self-start rounded-button px-1 py-1 text-sm text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          className="self-start rounded-button px-1 py-1 text-sm text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
         >
           {more ? "Less" : "More"}
         </button>

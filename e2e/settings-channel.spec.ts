@@ -348,7 +348,7 @@ test('a new pillar appears on the matrix immediately, and the axis says where it
   const pillars = axisEditor(page, 'vertical');
   await expect(pillars).toHaveAttribute('data-count', '0');
   await expect(pillars.getByTestId('bucket-axis-count')).toContainText(
-    'No topic pillars yet — the brief suggests 3–5.',
+    'No topic pillars yet — most channels do well with 3–5.',
   );
   await expect(pillars.getByTestId('bucket-axis-empty')).toContainText('has no rows');
 
@@ -366,7 +366,7 @@ test('a new pillar appears on the matrix immediately, and the axis says where it
   await expect(rowByName(page, 'money').getByTestId('bucket-filed')).toHaveAttribute('data-count', '0');
   await expect(pillars).toHaveAttribute('data-count', '1');
   await expect(pillars.getByTestId('bucket-axis-count')).toContainText(
-    '1 topic pillar — the brief suggests 3–5.',
+    '1 topic pillar — most channels do well with 3–5.',
   );
   // The add form is ready for the next one: cleared and focused.
   await expect(add.getByTestId('add-bucket-name')).toHaveValue('');
@@ -393,7 +393,7 @@ test('a new pillar appears on the matrix immediately, and the axis says where it
     await expect(rowByName(page, name)).toBeVisible();
   }
   await expect(pillars.getByTestId('bucket-axis-count')).toContainText(
-    '3 topic pillars — within the 3–5 the brief suggests.',
+    '3 topic pillars — within the 3–5 most channels do well with.',
   );
   await expect(pillars).toHaveAttribute('data-standing', 'within');
   expect((await readAxis('vertical')).map((b) => [b.name, b.position])).toEqual([

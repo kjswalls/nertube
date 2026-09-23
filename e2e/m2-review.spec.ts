@@ -761,7 +761,7 @@ test('the hook counter asks for three, the way the candidate counter asks for te
   await page.goto(`/videos/${videoId}`);
 
   const count = page.getByTestId('hook-count');
-  await expect(count).toContainText('the brief asks for three');
+  await expect(count).toContainText('write three, then choose the strongest');
 
   // The gate's other two fields, so "ready" below is about the hook rule alone.
   await page.getByTestId('thumbnail-concept').fill('Two hands, one broken part');
@@ -779,12 +779,12 @@ test('the hook counter asks for three, the way the candidate counter asks for te
   // used to notice one variant is not three.
   await expect(gate(page)).toHaveAttribute('data-gate', 'ready');
   await expect(count).toContainText('1/3 written · one chosen');
-  await expect(count).toContainText('the brief asks for three');
+  await expect(count).toContainText('write three, then choose the strongest');
 
   for (const text of ['A second opening.', 'A third opening.']) {
     await page.getByTestId('hook-input').fill(text);
     await page.getByTestId('hook-input').press('Enter');
     await expectSaved(page);
   }
-  await expect(count).not.toContainText('the brief asks for three');
+  await expect(count).not.toContainText('write three, then choose the strongest');
 });

@@ -209,7 +209,7 @@ export function BrainstormPanel({
             data-testid="brainstorm-ask-again"
             onClick={onAsk}
             disabled={view.pending}
-            className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
           >
             {entry === null ? "Ask" : "Ask again"}
           </button>
@@ -217,7 +217,7 @@ export function BrainstormPanel({
             type="button"
             data-testid="brainstorm-close"
             onClick={onClose}
-            className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             Close
           </button>
@@ -244,7 +244,7 @@ export function BrainstormPanel({
             data-testid={`brainstorm-tab-${which}`}
             onClick={() => onKind(which)}
             className={[
-              "rounded-button border px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent",
+              "rounded-button border px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11",
               kind === which
                 ? "border-accent bg-accent/10 font-medium"
                 : "border-border hover:bg-surface",
@@ -375,7 +375,7 @@ function Suggestions({
             data-testid="brainstorm-add-all"
             onClick={onAddAll}
             disabled={candidateRoom <= 0 || entry.suggestions.length === 0}
-            className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 thumb:min-h-11"
           >
             Add all as candidates
           </button>
@@ -461,7 +461,7 @@ function Suggestions({
                     aria-label={`Add “${suggestion.text}” as a title candidate`}
                     onClick={() => onAddOne(suggestion.text, suggestion.rationale)}
                     disabled={alreadyCandidate || candidateRoom <= 0}
-                    className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 thumb:min-h-11"
                   >
                     {alreadyCandidate ? "Already a candidate" : "Add as candidate"}
                   </button>
@@ -472,7 +472,7 @@ function Suggestions({
                   aria-label={`Use “${suggestion.text}” as a hook`}
                   onClick={() => onUseAsHook(suggestion.text)}
                   disabled={alreadyHook || hookRoom <= 0}
-                  className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 thumb:min-h-11"
                 >
                   {alreadyHook ? "Already a hook" : "Use as hook"}
                 </button>

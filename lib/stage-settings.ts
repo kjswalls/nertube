@@ -148,7 +148,7 @@ export const KIND_NOTES: Readonly<Record<StageKind, string>> = {
   idea: "Where capture lands, so it stays on the board. The board shows the ten most recent; the rest are in Ideas. Never on /now.",
   // move_video's gate compares kind order against 'packaging'.
   packaging:
-    "The TTH gate. Leaving here for any later stage needs a title, a thumbnail concept and one chosen hook — or a typed reason to skip.",
+    "The TTH gate — title, thumbnail concept, hook. Leaving here for any later stage needs a title, a thumbnail concept and one chosen hook — or a typed reason to skip.",
   // move_video fills the script from the channel template on first entry.
   scripting: "On first entry the script is filled from the channel's template, with the chosen hook.",
   // lib/filming-data.ts counts filming-kind stages across every channel.

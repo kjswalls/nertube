@@ -124,7 +124,10 @@ export function TemplateRow({
       data-unsaved={unsaved ? "true" : "false"}
       className="flex flex-col gap-1 border-t border-border py-2 first:border-t-0"
     >
-      <div className="flex items-start gap-2">
+      {/* Below `md` the text takes the whole first line and the minutes, the
+          arrows and Remove wrap under it, aligned with the text: at 390 the
+          field was 118px (and 48px at 320) beside them (M9 review). */}
+      <div className="flex items-start gap-2 max-md:flex-wrap">
         {/* The position, as a measured thing: where in the procedure this is. */}
         <span
           aria-hidden="true"
@@ -149,16 +152,19 @@ export function TemplateRow({
             if (event.key === "Enter") event.currentTarget.blur();
             if (event.key === "Escape") {
               // Consumed: reverting this field is the whole of what Escape
-              // means here (the order is in `lib/shortcuts.ts`).
+              // means here (the order is in `lib/shortcuts.ts`). Focus stays
+              // in the field, as it does on the stage and bucket rows. It used
+              // to blur, and the blur ran `commitText` with the edited draft
+              // still in its closure — so Escape saved the edit it had just
+              // claimed to throw away (M9 review).
               event.preventDefault();
               setTextDraft(item.text);
-              event.currentTarget.blur();
             }
           }}
-          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base"
         />
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 max-md:ml-7">
           <label htmlFor={minutesId} className="sr-only">
             Minutes for item {index + 1}
           </label>
@@ -179,14 +185,14 @@ export function TemplateRow({
             onKeyDown={(event) => {
               if (event.key === "Enter") event.currentTarget.blur();
             }}
-            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent"
+            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
           />
           <span aria-hidden="true" className="font-mono text-[11px] text-muted">
             min
           </span>
         </div>
 
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 max-md:ml-auto">
           <MoveButton
             direction="up"
             subject={`item ${index + 1}`}

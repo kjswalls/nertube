@@ -5,6 +5,7 @@ import { useId, useRef, useState, type KeyboardEvent, type RefObject } from "rea
 import { renameStage, removeStage, setStageEnabled } from "@/app/actions/stages";
 import { SaveStatus, useAutosave, type SaveState } from "@/components/autosave";
 import { MoveButton } from "@/components/settings/move-button";
+import { stageName } from "@/lib/channel-settings";
 import { Refusal } from "@/components/settings/refusal";
 import { RemoveConfirm } from "@/components/settings/remove-confirm";
 import {
@@ -266,7 +267,10 @@ export function StageRow({
               inert ? "border-dashed border-border text-muted" : "border-border text-muted",
             ].join(" ")}
           >
-            {inert ? "added — no behaviour" : `core · ${stage.kind}`}
+            {/* The seed's word for the kind, not the database's enum
+                (`publish_prep`): the chip says which built-in stage this is,
+                whatever it has been renamed to (M9 review). */}
+            {inert ? "added — no behaviour" : `built in · ${stageName({}, stage.kind!)}`}
           </span>
         </div>
 

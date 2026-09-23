@@ -167,7 +167,7 @@ export function ConceptAssist({
                 data-testid={`${PREFIX}-ask-again`}
                 onClick={ask}
                 disabled={state.pending}
-                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
               >
                 {entry === null ? "Ask" : "Ask again"}
               </button>
@@ -175,7 +175,7 @@ export function ConceptAssist({
                 type="button"
                 data-testid={`${PREFIX}-close`}
                 onClick={close}
-                className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
               >
                 Close
               </button>
@@ -334,7 +334,7 @@ function ConceptProposals({
                   }
                   disabled={same}
                   onClick={() => onTake(suggestion.text)}
-                  className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-button border border-border bg-background px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 thumb:min-h-11"
                 >
                   {same
                     ? "Already the concept"
