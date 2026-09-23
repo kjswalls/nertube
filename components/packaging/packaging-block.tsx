@@ -428,7 +428,13 @@ export function PackagingBlock({
    * owns the ordering and the status line, and this owns what to do with the
    * answer.
    */
-  const { state: saveState, send, touch, peekPending } = useSaveQueue<Patch>({
+  const {
+    state: saveState,
+    send,
+    touch,
+    peekPending,
+    settled,
+  } = useSaveQueue<Patch>({
     save: async (patch) => {
       // The draft as it was when this save left, so the answer is only allowed
       // to overwrite the editor if the editor has not moved on since.
@@ -521,6 +527,11 @@ export function PackagingBlock({
   );
 
   /** Apply an edit and save whatever it changed, in one go. */
+  // A stage move from this page waits for these saves to land (M10 review):
+  // the gate reads the row, and a move that overtook the concept typed just
+  // before it would be refused, or would leave this save to be refused.
+  useEffect(() => version.register(settled), [settled, version]);
+
   const commit = useCallback((next: Draft) => push(next), [push]);
 
   /** A keystroke: update what is on screen, save nothing, clear a stale line. */
@@ -918,7 +929,19 @@ export function PackagingBlock({
 
       <AssistRow>{assist?.hooks}</AssistRow>
 
-      <SaveStatus state={saveState} testId="packaging-save-status" onRetry={send} />
+      {/*
+        One line for the whole block, after the hooks — on a phone a screen or
+        more below the concept being typed. Below `md`, while a save is on the
+        wire or has failed, the line is pinned to the bottom of the screen
+        (while the block is in view), so "Saving…" and a failure with its Retry
+        are where the thumb is (M10 review). At rest it goes back to its place.
+      */}
+      <div
+        data-testid="packaging-save-dock"
+        className="max-md:has-[[data-state=error]]:sticky max-md:has-[[data-state=saving]]:sticky max-md:bottom-0 max-md:z-10 max-md:-mx-1 max-md:bg-background max-md:px-1 max-md:has-[[data-state=error]]:border-t max-md:has-[[data-state=error]]:border-border max-md:has-[[data-state=error]]:py-2"
+      >
+        <SaveStatus state={saveState} testId="packaging-save-status" onRetry={send} />
+      </div>
 
       <SkipPackaging
         anchorId={SKIP_ANCHOR}

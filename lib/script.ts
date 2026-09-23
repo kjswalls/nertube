@@ -164,3 +164,14 @@ export function buildScriptFromTemplate(template: string, hooks: unknown): strin
 export function countWords(text: string): number {
   return text.split(/\s+/u).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;
 }
+
+/**
+ * The toolbar's words for a refused save: short, because the toolbar is pinned
+ * over the script and on a phone with the keyboard up every line of it is a
+ * line of script the person cannot see (M10 review). The long sentence the
+ * rest of the page uses is `CHANGED_ELSEWHERE`; this one also says what Reload
+ * will do to the box, which that one does not need to (a one-line field loses
+ * a line, this box loses an evening).
+ */
+export const SCRIPT_CONFLICT =
+  "Not saved: this video changed in another tab. Reload replaces this text — copy yours first.";

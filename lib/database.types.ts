@@ -584,6 +584,16 @@ export type Database = {
         };
         Returns: VideosRow;
       };
+      /** 0010: `move_video`, plus whether the row was at the caller's version. */
+      move_video_versioned: {
+        Args: {
+          p_video: string;
+          p_stage: string;
+          p_expected_updated_at: string | null;
+          p_published_at?: string | null;
+        };
+        Returns: { video: VideosRow; was_current: boolean };
+      };
       swap_thumbnail: {
         Args: { p_video: string; p_to_role: string; p_reason: string };
         Returns: VideosRow;

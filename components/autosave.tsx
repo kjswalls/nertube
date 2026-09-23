@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 
 import {
   diagnoseWriteFailure,
@@ -163,6 +171,13 @@ export interface SaveQueue<Patch> {
    * nothing renders from it.
    */
   readonly peekPending: () => Patch | null;
+  /**
+   * Resolves once the wire is idle — nothing in flight, nothing queued —
+   * with `true` when the last save landed and `false` when the queue stopped
+   * on a failure. At once when it is already idle (M10 review: the stage
+   * select waits on this so a move never races the save typed just before it).
+   */
+  readonly settled: () => Promise<boolean>;
 }
 
 /** Later values win, key by key — which is exactly right for absolute values. */
@@ -223,6 +238,17 @@ export function useSaveQueue<Patch>({
   /** `send` calling itself, without a self-referencing `useCallback`. */
   const sendRef = useRef<((patch: Patch) => void) | null>(null);
 
+  /** Whether the last settled save failed; read by `settled`. */
+  const failedRef = useRef(false);
+  /** Everyone waiting for the wire to go idle. */
+  const waiters = useRef<((ok: boolean) => void)[]>([]);
+  const release = useCallback((ok: boolean): void => {
+    failedRef.current = !ok;
+    const waiting = waiters.current;
+    waiters.current = [];
+    for (const resolve of waiting) resolve(ok);
+  }, []);
+
   const send = useCallback((patch: Patch) => {
     if (inFlight.current) {
       queued.current = {
@@ -263,6 +289,7 @@ export function useSaveQueue<Patch>({
         const next = queued.current;
         queued.current = null;
         if (next) sendRef.current?.(next.patch);
+        else release(true);
         return;
       }
 
@@ -293,8 +320,9 @@ export function useSaveQueue<Patch>({
         conflict: result.conflict,
         signedOut: result.signedOut,
       });
+      release(false);
     });
-  }, []);
+  }, [release]);
 
   useEffect(() => {
     sendRef.current = send;
@@ -320,6 +348,15 @@ export function useSaveQueue<Patch>({
     return waiting ? waiting.patch : null;
   }, []);
 
+  const settled = useCallback((): Promise<boolean> => {
+    if (!inFlight.current && queued.current === null) {
+      return Promise.resolve(!failedRef.current);
+    }
+    return new Promise<boolean>((resolve) => {
+      waiters.current.push(resolve);
+    });
+  }, []);
+
   return useMemo(
     () => ({
       state,
@@ -327,8 +364,9 @@ export function useSaveQueue<Patch>({
       send,
       touch,
       peekPending,
+      settled,
     }),
-    [peekPending, send, state, touch],
+    [peekPending, send, settled, state, touch],
   );
 }
 
@@ -552,6 +590,7 @@ export function SaveStatus<Payload>({
   idle = "",
   onRetry,
   id,
+  actions,
 }: {
   state: SaveState<Payload>;
   testId: string;
@@ -565,6 +604,11 @@ export function SaveStatus<Payload>({
    * returning to the box.
    */
   id?: string;
+  /**
+   * More ways forward, drawn after the line's own buttons while a save has
+   * failed — the Script tab's "Copy my script" beside Reload (M10 review).
+   */
+  actions?: ReactNode;
 }) {
   const failed = state.kind === "error";
   const conflict = state.kind === "error" && state.conflict === true;
@@ -610,7 +654,7 @@ export function SaveStatus<Payload>({
           type="button"
           data-testid={`${testId}-reload`}
           onClick={() => window.location.reload()}
-          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className={STATUS_BUTTON}
         >
           Reload
         </button>
@@ -624,7 +668,7 @@ export function SaveStatus<Payload>({
           target="_blank"
           rel="noopener"
           data-testid={`${testId}-sign-in`}
-          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className={STATUS_BUTTON}
         >
           Sign in (new tab)
         </a>
@@ -635,11 +679,22 @@ export function SaveStatus<Payload>({
           type="button"
           data-testid={`${testId}-retry`}
           onClick={() => onRetry(state.payload)}
-          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+          className={STATUS_BUTTON}
         >
           Retry
         </button>
       ) : null}
+
+      {state.kind === "error" ? actions : null}
     </p>
   );
 }
+
+/**
+ * The line's buttons: small beside a mouse, 44px under a thumb (the M10
+ * review measured Retry at 48×22 in the Script tab's phone toolbar, where it
+ * is the only way on after a failure). `inline-flex` so the sign-in link
+ * centres its text in the taller box, as a button does.
+ */
+export const STATUS_BUTTON =
+  "inline-flex items-center rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3";

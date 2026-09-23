@@ -70,7 +70,11 @@ export function Matrix({
                 data-bucket={column.bucket.name}
                 className="min-w-[92px] rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-bottom max-md:min-w-[60px] max-md:px-1.5"
               >
-                <span className="block font-display text-[13px] leading-tight font-medium break-words max-md:text-[12px] max-md:[overflow-wrap:anywhere]">
+                {/* Breaks between words (and at a name's own hyphen) and never
+                    inside one: `overflow-wrap: anywhere` read the seeded
+                    "self-experiment" as "self- / experim / ent" (M10 review).
+                    A word longer than the 60px column widens its column. */}
+                <span className="block font-display text-[13px] leading-tight font-medium break-words max-md:text-[12px]">
                   {column.bucket.name}
                 </span>
                 <BucketCount total={column.total} />

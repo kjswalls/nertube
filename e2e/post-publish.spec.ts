@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import pg from 'pg';
 
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { addDays, startOfDay, todayColumn } from '../lib/calendar-dates';
+import {
+  PG,
+  SEED_EMAIL,
+  SEED_PASSWORD,
+  SEED_TIME_ZONE,
+} from '../scripts/dev-stack/shared';
 
 /**
  * The Thursday scenario: the post-publish loop, walked in a browser.
@@ -95,6 +101,17 @@ interface SeedVideo {
   metrics?: { impressions: number; ctr: number };
 }
 
+/**
+ * A target date `days` from today in the seed account's zone, as the
+ * `YYYY-MM-DD` literal the column takes. Not `current_date + n`: that is the
+ * database session's day (its `timezone` setting), which is not the account's
+ * and would make "due today" depend on how the Postgres server was installed.
+ */
+function targetDate(days: number | undefined): string | null {
+  if (days === undefined) return null;
+  return addDays(todayColumn(Date.now(), SEED_TIME_ZONE), days);
+}
+
 async function seedVideo(
   channel: { id: string; user_id: string },
   video: SeedVideo,
@@ -111,7 +128,7 @@ async function seedVideo(
        $1, $2, $3, now() - $4::interval,
        $5, 'A close-up of the thing, mid-failure',
        '[{"id":"h1","text":"The hook, as spoken","chosen":true}]'::jsonb,
-       case when $6::int is null then null else (current_date + $6::int) end,
+       $6::date,
        case when $7::text is null then null else now() - $7::interval end,
        $8, $9,
        case when $8::int is null then null else now() end
@@ -122,7 +139,7 @@ async function seedVideo(
       stageId,
       video.age,
       video.title,
-      video.targetInDays ?? null,
+      targetDate(video.targetInDays),
       video.publishedAgo ?? null,
       video.metrics?.impressions ?? null,
       video.metrics?.ctr ?? null,
@@ -590,17 +607,17 @@ test('confirming live moves the stage and records the URL', async ({ page }) => 
     `published_at` is the **target date**, not the moment the row was ticked.
     PLAN.md ranking rule 5, and the reason it matters: the 24-hour metrics
     prompt counts from here, so stamping "now" would make the whole loop late.
-    The target was today, so the stamp is today at midnight UTC.
+    The target was today, so the stamp is the first instant of today in the
+    account's zone (M10), computed with the app's own helper.
   */
-  const stamped = await db.query<{ same: boolean }>(
-    // Built as an explicit UTC instant rather than casting the `date`, which
-    // would mean midnight in whatever timezone this database happens to be set
-    // to and would make the assertion pass or fail on the container's clock.
-    `select (v.published_at = ((v.target_publish_date::text || 'T00:00:00Z')::timestamptz)) as same
-       from public.videos v where v.id = $1`,
+  const target = await db.query<{ target: string }>(
+    // Read as text: node-pg turns a `date` into the runner's local midnight.
+    `select target_publish_date::text as target from public.videos where id = $1`,
     [ids.scheduled],
   );
-  expect(stamped.rows[0].same).toBe(true);
+  expect(new Date(live.published_at as string).getTime()).toBe(
+    startOfDay(target.rows[0].target, SEED_TIME_ZONE),
+  );
 });
 
 test('a confirm the packaging gate refuses names the missing field, not `gate:`', async ({

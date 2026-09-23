@@ -182,7 +182,8 @@ export function SwapPrompt({
           href={`/videos/${videoId}?section=thumbnails`}
           data-testid="swap-prompt-open"
           className={[
-            "rounded-button border px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+            // 44px under a thumb (M10 review): the next step in the week.
+            "rounded-button border px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:inline-flex thumb:min-h-11 thumb:items-center",
             urgent
               ? "border-over-limit text-over-limit hover:bg-over-limit/10"
               : "border-border hover:border-accent",
@@ -206,7 +207,7 @@ export function SwapPrompt({
             data-testid="swap-prompt-keep"
             disabled={busy}
             onClick={onKeep}
-            className="rounded-button border border-border px-3 py-2 text-sm outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+            className="rounded-button border border-border px-3 py-2 text-sm outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
           >
             Keep it
           </button>
@@ -216,7 +217,7 @@ export function SwapPrompt({
             data-testid="swap-prompt-reopen"
             disabled={busy}
             onClick={onReopen}
-            className="rounded-button px-3 py-2 text-sm text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+            className="rounded-button px-3 py-2 text-sm text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
           >
             Ask me again
           </button>

@@ -240,7 +240,7 @@ function ScriptTemplateField({
         onChange={(event) => field.setValue(event.target.value)}
         onBlur={field.commit}
         // Markdown source, being worked on: the measured face, like the notes box.
-        className={`${TEXTAREA_CLASS} min-h-64 font-mono text-sm`}
+        className={`${TEXTAREA_CLASS} min-h-64 font-mono md:text-sm`}
       />
       {hookMissing ? (
         <p

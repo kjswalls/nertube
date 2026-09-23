@@ -199,7 +199,8 @@ function VideoLine({
           {channel.tag}
         </span>
       ) : null}
-      <span className="min-w-0 flex-1 truncate font-display text-[14px]">
+      {/* Whole below `md`, as the list above it shows them (M10 review). */}
+      <span className="min-w-0 flex-1 truncate font-display text-[14px] max-md:whitespace-normal">
         {title}
       </span>
       {/* Everything the eye gets from the tag, the trailing stage and the tone,

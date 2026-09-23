@@ -275,7 +275,7 @@ export function ScheduleDayDialog({
               required
               value={date}
               onChange={(event) => setDate(event.target.value)}
-              className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
             />
           </div>
 
@@ -373,9 +373,11 @@ export function ScheduleDayDialog({
                           Two lines, not one (M10 integration): at 390px one
                           line held about forty characters, so the week walk's
                           own title read "…a month taugh…" in the list of what
-                          to shoot. Two hold a 55-character title whole.
+                          to shoot. Two hold a 55-character title whole; below
+                          `md` the title is never clamped, because two lines
+                          at 320px still cut an ordinary one (M10 review).
                         */}
-                        <span className="line-clamp-2 font-display text-[14px] leading-snug">
+                        <span className="line-clamp-2 font-display text-[14px] leading-snug max-md:line-clamp-none">
                           {candidate.title}
                         </span>
                         <span className="text-[11px] text-muted">
@@ -437,7 +439,7 @@ export function ScheduleDayDialog({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-button px-2 py-1.5 text-[13px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button px-2 py-1.5 text-[13px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
             >
               Not now
             </button>
@@ -503,7 +505,7 @@ export function ScheduleDayDialog({
               type="button"
               data-testid="schedule-day-done"
               onClick={onClose}
-              className="rounded-button border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button border border-border bg-background px-3 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
             >
               Done
             </button>

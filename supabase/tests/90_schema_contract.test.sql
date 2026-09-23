@@ -1,6 +1,6 @@
 -- The shape PLAN.md's data model promises, asserted against the catalogue:
 -- the table set, the common columns, RLS on everything, unique (id, user_id) on
--- every parent, and the seven SQL functions being security definer with a pinned
+-- every parent, and the nine SQL functions being security definer with a pinned
 -- search_path. Plus the delete cascades.
 
 begin;
@@ -63,7 +63,7 @@ begin
             where ns.nspname = 'public'
               and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel',
                                 'reorder_stages','set_stage_enabled','set_video_archived',
-                                'set_time_zone')
+                                'set_time_zone','move_video_versioned')
   loop
     n := n + 1;
     if not f.prosecdef then raise exception 'FAILED: %() is not security definer', f.proname; end if;
@@ -71,7 +71,7 @@ begin
       raise exception 'FAILED: %() does not pin search_path (%)', f.proname, f.proconfig;
     end if;
   end loop;
-  if n <> 8 then raise exception 'FAILED: expected 8 SQL functions, found %', n; end if;
+  if n <> 9 then raise exception 'FAILED: expected 9 SQL functions, found %', n; end if;
 end $$;
 
 do $$
@@ -105,6 +105,10 @@ begin
     raise exception 'FAILED: anon can execute set_video_archived';
   end if;
   -- profiles (0010): readable by its owner, written only by set_time_zone().
+  if has_function_privilege('anon',
+       'public.move_video_versioned(uuid,uuid,timestamptz,timestamptz)', 'execute') then
+    raise exception 'FAILED: anon can execute move_video_versioned';
+  end if;
   if has_function_privilege('anon', 'public.set_time_zone(text,boolean)', 'execute') then
     raise exception 'FAILED: anon can execute set_time_zone';
   end if;

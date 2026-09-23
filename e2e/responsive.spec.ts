@@ -1,7 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { addDays, todayColumn } from '../lib/calendar-dates';
+import {
+  PG,
+  SEED_EMAIL,
+  SEED_PASSWORD,
+  SEED_TIME_ZONE,
+} from '../scripts/dev-stack/shared';
 
 /**
  * M9 — the responsive pass, measured rather than eyeballed.
@@ -122,6 +128,16 @@ interface SeedVideo {
  * One video, written the way `move_video` would have left it — the same shape
  * `e2e/now.spec.ts` seeds, so the rows are the ranking's rows and not a mock.
  */
+/**
+ * A target date `days` from today in the seed account's zone, as the
+ * `YYYY-MM-DD` literal the column takes. Not `current_date + n`: that is the
+ * database session's day (its `timezone` setting), which is not the account's.
+ */
+function targetDate(days: number | undefined): string | null {
+  if (days === undefined) return null;
+  return addDays(todayColumn(Date.now(), SEED_TIME_ZONE), days);
+}
+
 async function seedVideo(
   channel: { id: string; user_id: string },
   video: SeedVideo,
@@ -150,7 +166,7 @@ async function seedVideo(
        $1, $2, $3, now() - $4::interval,
        $5, $6, $7::jsonb,
        $8, case when $8::text is null then null else now() - $4::interval end,
-       case when $9::int is null then null else (current_date + $9::int) end,
+       $9::date,
        case when $10::text is null then null else now() - $10::interval end
      ) returning id`,
     [
@@ -162,7 +178,7 @@ async function seedVideo(
       packaged || video.unchosenHooks ? 'A close-up of the thing, mid-failure' : null,
       JSON.stringify(hooks),
       video.waitingOn ?? null,
-      video.targetInDays ?? null,
+      targetDate(video.targetInDays),
       video.publishedAgo ?? null,
     ],
   );

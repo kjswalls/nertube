@@ -48,6 +48,12 @@ export type RecordConceptSketchResult =
        * `components/video-version.tsx`.
        */
       updatedAt: string | null;
+      /**
+       * What `updated_at` was when this action read the row, just before its
+       * write: the page adopts `updatedAt` only if this was its own token
+       * (M10 review; `ThumbnailState.previousUpdatedAt` has the reasoning).
+       */
+      previousUpdatedAt: string | null;
     }
   | { ok: false; error: string };
 
@@ -79,7 +85,7 @@ export async function recordConceptSketch(
   // that does not exist — the same 404-shaped answer the detail page gives.
   const { data: video, error: readError } = await supabase
     .from("videos")
-    .select("id, channel_id, thumbnail_concept_path")
+    .select("id, channel_id, thumbnail_concept_path, updated_at")
     .eq("id", videoId)
     .maybeSingle();
 
@@ -136,5 +142,10 @@ export async function recordConceptSketch(
     revalidatePath(`/c/${channel.slug}/board`);
   }
 
-  return { ok: true, path, updatedAt: written?.updated_at ?? null };
+  return {
+    ok: true,
+    path,
+    updatedAt: written?.updated_at ?? null,
+    previousUpdatedAt: video.updated_at,
+  };
 }

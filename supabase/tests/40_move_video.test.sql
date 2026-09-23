@@ -304,4 +304,56 @@ begin
   if v.stage_id is null then raise exception 'FAILED: could not move into an inert stage'; end if;
 end $$;
 
+-- ------------------------------------------ move_video_versioned (0010) ----
+do $$
+declare v_id uuid; r jsonb; v_at timestamptz;
+begin
+  -- A fresh capture has never been written, so "still NULL" is current.
+  select id, updated_at into v_id, v_at from public.capture_video(fx.channel('a-main'));
+  r := public.move_video_versioned(v_id, fx.stage(fx.channel('a-main'), 'packaging'), v_at);
+  if (r->>'was_current')::boolean is not true then
+    raise exception 'FAILED: a move at the expected version reported stale: %', r;
+  end if;
+  if (r->'video'->>'stage_id')::uuid <> fx.stage(fx.channel('a-main'), 'packaging') then
+    raise exception 'FAILED: the versioned move did not move: %', r;
+  end if;
+
+  -- A version the row has moved past: the move still happens, and says so.
+  r := public.move_video_versioned(v_id, fx.stage(fx.channel('a-main'), 'idea'),
+                                   timestamptz '2000-01-01 00:00+00');
+  if (r->>'was_current')::boolean is not false then
+    raise exception 'FAILED: a stale version was reported current: %', r;
+  end if;
+  if (select stage_id from public.videos where id = v_id) <> fx.stage(fx.channel('a-main'), 'idea') then
+    raise exception 'FAILED: a stale caller''s move was not made';
+  end if;
+
+  -- Exactly the version the row holds is current.
+  select updated_at into v_at from public.videos where id = v_id;
+  r := public.move_video_versioned(v_id, fx.stage(fx.channel('a-main'), 'packaging'), v_at);
+  if (r->>'was_current')::boolean is not true then
+    raise exception 'FAILED: the row''s own version was reported stale: %', r;
+  end if;
+
+  -- The gate is move_video's, unchanged.
+  begin
+    perform public.move_video_versioned(v_id, fx.stage(fx.channel('a-main'), 'scripting'), null);
+    raise exception 'FAILED: the versioned move skipped the packaging gate';
+  exception when others then
+    if sqlerrm not like 'gate:%' then raise; end if;
+  end;
+end $$;
+
+-- Another tenant's video is refused, as by move_video.
+select set_config('request.jwt.claims', json_build_object('sub', fx.user_b())::text, true);
+do $$
+begin
+  begin
+    perform public.move_video_versioned(fx.video_a(), fx.stage(fx.channel('a-main'), 'idea'), null);
+    raise exception 'FAILED: user B moved user A''s video';
+  exception when others then
+    if sqlerrm like 'FAILED:%' then raise; end if;
+  end;
+end $$;
+
 rollback;

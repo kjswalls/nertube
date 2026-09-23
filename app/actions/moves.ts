@@ -12,6 +12,7 @@ import {
   type GateField,
 } from "@/lib/packaging";
 import { requireUser } from "@/lib/supabase/require-user";
+import type { VideosRow } from "@/lib/database.types";
 
 /**
  * `moveVideo` — the single client-facing path for changing a video's stage.
@@ -58,6 +59,13 @@ export type MoveVideoResult =
        */
       updatedAt: string | null;
       /**
+       * Whether the row was at `expectedUpdatedAt` just before this move —
+       * present only when the caller sent one (the video page's stage select).
+       * The page adopts `updatedAt` as its version only when this is true;
+       * see `move_video_versioned` in `0010_time_zone.sql`.
+       */
+      wasCurrent?: boolean;
+      /**
        * A non-blocking remark about the move that just happened, or null.
        *
        * Today there is exactly one: PLAN.md's *Publish Prep → Scheduled with
@@ -95,6 +103,14 @@ const MoveInput = z.object({
    * never rewrite a date that is already recorded.
    */
   publishedAt: z.iso.datetime({ offset: true }).optional(),
+  /**
+   * The video page's version token (`components/video-version.tsx`). Not a
+   * precondition — the move is made whatever the row holds — but the answer
+   * says whether the row was at it, so a stale tab does not adopt a version
+   * newer than a write it has never seen (M10 review). `null` is "never
+   * written"; absent is "not asked".
+   */
+  expectedUpdatedAt: z.union([z.string().min(1).max(64), z.null()]).optional(),
   /**
    * Only ever used to revalidate the right board path. It is never trusted as
    * an authorisation input — RLS and `move_video`'s own ownership check decide
@@ -165,13 +181,42 @@ export async function moveVideo(
 
   const { supabase } = await requireUser();
 
-  const { data, error } = await supabase.rpc("move_video", {
-    p_video: parsed.data.videoId,
-    p_stage: parsed.data.stageId,
-    ...(parsed.data.publishedAt === undefined
+  const publishedAt =
+    parsed.data.publishedAt === undefined
       ? {}
-      : { p_published_at: parsed.data.publishedAt }),
-  });
+      : { p_published_at: parsed.data.publishedAt };
+  const expected = parsed.data.expectedUpdatedAt;
+  let wasCurrent: boolean | undefined;
+  let data: VideosRow | null;
+  let error: { message: string } | null;
+  if (expected === undefined) {
+    ({ data, error } = await supabase.rpc("move_video", {
+      p_video: parsed.data.videoId,
+      p_stage: parsed.data.stageId,
+      ...publishedAt,
+    }));
+  } else {
+    const versioned = await supabase.rpc("move_video_versioned", {
+      p_video: parsed.data.videoId,
+      p_stage: parsed.data.stageId,
+      p_expected_updated_at: expected,
+      ...publishedAt,
+    });
+    if (versioned.error?.code === "PGRST202") {
+      // A database without 0010: the function is not there. Move the plain
+      // way and say nothing about the version, which is the M9 behaviour —
+      // the page adopts the stamp as it used to.
+      ({ data, error } = await supabase.rpc("move_video", {
+        p_video: parsed.data.videoId,
+        p_stage: parsed.data.stageId,
+        ...publishedAt,
+      }));
+    } else {
+      error = versioned.error;
+      data = versioned.data?.video ?? null;
+      wasCurrent = versioned.data?.was_current === true;
+    }
+  }
 
   if (error) {
     const missing = readGateField(error.message);
@@ -265,6 +310,7 @@ export async function moveVideo(
     stageId: data.stage_id,
     stageEnteredAt: data.stage_entered_at,
     updatedAt: data.updated_at,
+    ...(wasCurrent === undefined ? {} : { wasCurrent }),
     notice,
   };
 }

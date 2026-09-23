@@ -289,7 +289,9 @@ function DayNumber({
            the fastest way to follow a date you can see at the edge. */
         <Link
           href={calendarHref({ month: monthOfCell(cell.date) })}
-          className="rounded-button outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          // 44px square under a thumb: the grid is what a phone held sideways
+          // gets, and a 20px number is not a target (M10 review).
+          className="rounded-button outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:inline-flex thumb:size-11 thumb:items-center thumb:justify-center"
           title={`${formatDateColumn(cell.date, "full")} — in ${formatMonthCaption(monthOfCell(cell.date))}`}
         >
           {number}

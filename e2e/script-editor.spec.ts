@@ -8,7 +8,7 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { CHANGED_ELSEWHERE } from '../lib/video-fields';
+import { SCRIPT_CONFLICT } from '../lib/script';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
 
 /**
@@ -327,7 +327,7 @@ test('a second tab is refused with the changed-elsewhere line, and keeps its tex
   await typeAtEnd(second, '\nFrom the second tab.');
   const status = second.getByTestId('script-status');
   await expect(status).toHaveAttribute('data-state', 'error');
-  await expect(status).toContainText(CHANGED_ELSEWHERE);
+  await expect(status).toContainText(SCRIPT_CONFLICT);
   await expect(second.getByTestId('script-status-reload')).toBeVisible();
 
   const row = await readRow(videoId);
@@ -633,4 +633,213 @@ test.describe('on a phone', () => {
     await page.getByTestId('script-reset-undo').tap();
     await expect.poll(async () => (await readRow(videoId)).script).toContain('Phone line 30.');
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8. The M10 review                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Every server-action POST from this page, with a hook to hold one back. */
+function holdFirstSave(page: Page, videoId: string, ms: number) {
+  let held = false;
+  return page.route(`**/videos/${videoId}**`, async (route) => {
+    if (route.request().method() === 'POST' && !held) {
+      held = true;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    await route.continue();
+  });
+}
+
+async function chooseStage(page: Page, name: string): Promise<void> {
+  await page.getByTestId('section-tab-schedule').click();
+  const select = page.getByTestId('stage-select');
+  // The seed's names carry a suffix ("Packaging (TTH)"); match by text.
+  const value = await select.locator('option', { hasText: name }).first().getAttribute('value');
+  await select.selectOption(value!);
+}
+
+test('moving back to Packaging straight after typing waits for the script to save', async ({
+  page,
+}) => {
+  const videoId = await inScripting('Typed then moved back');
+  await signIn(page);
+  await openScript(page, videoId);
+
+  // The save is slow (a long script on a phone's uplink); the move is not.
+  await holdFirstSave(page, videoId, 1500);
+  await typeAtEnd(page, '\nTyped just before moving back.');
+  await chooseStage(page, 'Packaging');
+
+  // The move is made after the save lands, not over it.
+  await expect(page.getByTestId('stage-select-status')).toContainText('Moved to Packaging');
+  const row = await db.query<{ script: string; kind: string }>(
+    `select v.script, s.kind from public.videos v join public.stages s on s.id = v.stage_id
+      where v.id = $1`,
+    [videoId],
+  );
+  expect(row.rows[0].kind).toBe('packaging');
+  expect(row.rows[0].script).toContain('Typed just before moving back.');
+
+  // The tab now shows the kept script, with the line in it.
+  await page.getByTestId('section-tab-script').click();
+  await expect(page.getByTestId('script-text')).toContainText('Typed just before moving back.');
+});
+
+test('a move is refused while the script cannot save, and says why', async ({ page }) => {
+  const videoId = await inScripting('Move while failing');
+  await signIn(page);
+  await openScript(page, videoId);
+
+  const drop = (route: import('@playwright/test').Route) =>
+    route.request().method() === 'POST' ? route.abort() : route.continue();
+  await page.route(`**/videos/${videoId}**`, drop);
+  await typeAtEnd(page, '\nNot saved yet.');
+  await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'error');
+
+  await chooseStage(page, 'Packaging');
+  await expect(page.getByTestId('stage-select-status')).toContainText('has not saved yet');
+  const kind = await db.query<{ kind: string }>(
+    `select s.kind from public.videos v join public.stages s on s.id = v.stage_id where v.id = $1`,
+    [videoId],
+  );
+  expect(kind.rows[0].kind).toBe('scripting');
+  await page.unroute(`**/videos/${videoId}**`, drop);
+});
+
+test('a stale tab that moves the stage is still refused, not written over the other tab', async ({
+  page,
+  context,
+}) => {
+  const videoId = await inScripting('Stale tab moves');
+  await signIn(page);
+  const second = await context.newPage();
+  await openScript(second, videoId);
+  await openScript(page, videoId);
+
+  await typeAtEnd(page, '\nLINE-FROM-TAB-ONE');
+  await expect.poll(async () => (await readRow(videoId)).script).toContain('LINE-FROM-TAB-ONE');
+
+  // Tab two, rendered before that save, moves the video on. The move is made.
+  await chooseStage(second, 'Filming');
+  await expect(second.getByTestId('stage-select-status')).toContainText('Moved to Filming');
+
+  // Its next script save is still computed against the old row: refused.
+  await second.getByTestId('section-tab-script').click();
+  await typeAtEnd(second, '\nLINE-FROM-TAB-TWO');
+  await expect(second.getByTestId('script-status')).toHaveAttribute('data-state', 'error');
+  await expect(second.getByTestId('script-status')).toContainText(SCRIPT_CONFLICT);
+  const row = await readRow(videoId);
+  expect(row.script).toContain('LINE-FROM-TAB-ONE');
+  expect(row.script).not.toContain('LINE-FROM-TAB-TWO');
+});
+
+test('after a conflict, Reload works on the first press and the text comes back after it', async ({
+  page,
+  context,
+}) => {
+  const videoId = await inScripting('Conflict then reload');
+  await signIn(page);
+  const second = await context.newPage();
+  await openScript(second, videoId);
+  await openScript(page, videoId);
+
+  await typeAtEnd(page, '\nFIRST');
+  await expect.poll(async () => (await readRow(videoId)).script).toContain('FIRST');
+
+  await typeAtEnd(second, '\nSECOND');
+  const status = second.getByTestId('script-status');
+  await expect(status).toHaveAttribute('data-state', 'error');
+  // Typing on does not clear the line or re-send the refused save.
+  await second.keyboard.type(' more');
+  await expect(status).toHaveAttribute('data-state', 'error');
+  await expect(second.getByTestId('script-status-copy')).toBeVisible();
+  await expect(second.getByTestId('script-editor')).toBeFocused();
+
+  // One press, from the box: the page reloads (the browser asks first,
+  // because the box holds text the row does not).
+  second.on('dialog', (dialog) => void dialog.accept());
+  const reloaded = second.waitForEvent('load');
+  await second.getByTestId('script-status-reload').click();
+  await reloaded;
+  await expect(second.getByTestId('script-section')).toHaveAttribute('data-live', 'true');
+
+  // The box holds the row; this tab's text is offered back.
+  await expect(second.getByTestId('script-editor')).not.toHaveValue(/SECOND/);
+  await expect(second.getByTestId('script-recover')).toBeVisible();
+  await second.getByTestId('script-recover-use').click();
+  await expect(second.getByTestId('script-editor')).toHaveValue(/SECOND more$/);
+  await expect.poll(async () => (await readRow(videoId)).script).toContain('SECOND more');
+  await expect(second.getByTestId('script-recover')).toHaveCount(0);
+});
+
+test('undo is retired once the box is edited after a reset', async ({ page }) => {
+  const videoId = await inScripting('Undo retires');
+  await signIn(page);
+  await openScript(page, videoId);
+
+  const editor = page.getByTestId('script-editor');
+  await editor.fill('Mine.');
+  await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'saved');
+  await page.getByTestId('script-reset').click();
+  await page.getByTestId('script-reset-confirm').click();
+  await expect(page.getByTestId('script-reset-undo')).toBeVisible();
+
+  await typeAtEnd(page, '\nTwenty minutes of new writing after the reset.');
+  await expect(page.getByTestId('script-reset-undo')).toHaveCount(0);
+  await expect
+    .poll(async () => (await readRow(videoId)).script)
+    .toContain('Twenty minutes of new writing after the reset.');
+});
+
+test('the end-screen field keeps a long paste whole and says it is too long', async ({
+  page,
+}) => {
+  const videoId = await inScripting('Long end screen');
+  await signIn(page);
+  await openScript(page, videoId);
+
+  const field = page.getByTestId('script-end-screen');
+  const long = 'A'.repeat(299) + 'BCDEFG';
+  await field.fill(long);
+  await expect(field).toHaveValue(long);
+  await field.blur();
+  await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'error');
+  await expect(field).toHaveValue(long);
+  expect((await readRow(videoId)).end_screen_target).toBeNull();
+});
+
+test('a lone surrogate saves as what the row stores, not as a false "Saved"', async ({
+  page,
+}) => {
+  const videoId = await inScripting('Lone surrogate');
+  await signIn(page);
+  await openScript(page, videoId);
+
+  await page.getByTestId('script-editor').fill('Lone \uD83D surrogate');
+  await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'saved');
+  expect((await readRow(videoId)).script).toBe('Lone � surrogate');
+  // Nothing left unsaved: the box and the row agree in their stored form.
+  await expect(page.getByTestId('script-status')).not.toContainText('Saves when you pause');
+});
+
+test('the save line’s buttons are 44px by touch', async ({ browser, baseURL }) => {
+  const videoId = await inScripting('Touch retry');
+  const context = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+  const page = await context.newPage();
+  await signIn(page);
+  await openScript(page, videoId);
+  const drop = (route: import('@playwright/test').Route) =>
+    route.request().method() === 'POST' ? route.abort() : route.continue();
+  await page.route(`**/videos/${videoId}**`, drop);
+  await typeAtEnd(page, '\nOn a train.');
+  await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'error');
+  const retry = await page.getByTestId('script-status-retry').boundingBox();
+  expect(retry!.height).toBeGreaterThanOrEqual(44);
+  await context.close();
 });

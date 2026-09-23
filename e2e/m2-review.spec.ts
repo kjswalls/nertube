@@ -150,7 +150,8 @@ interface Row {
   hooks: { id: string; text: string; chosen?: boolean }[];
   packaging_skipped_at: string | null;
   packaging_skip_reason: string | null;
-  target_publish_date: string | Date | null;
+  /** Read as text (`YYYY-MM-DD`): node-pg would turn a `date` into the runner's local midnight. */
+  target_publish_date: string | null;
   youtube_url: string | null;
   published_at: string | null;
 }
@@ -159,7 +160,7 @@ async function readRow(videoId: string): Promise<Row> {
   const result = await db.query<Row>(
     `select title, thumbnail_concept, title_candidates, hooks,
             packaging_skipped_at, packaging_skip_reason,
-            target_publish_date, youtube_url, published_at
+            target_publish_date::text as target_publish_date, youtube_url, published_at
        from public.videos where id = $1`,
     [videoId],
   );
@@ -510,9 +511,8 @@ test('picking a target date saves it without waiting for a blur', async ({ page 
       }),
   );
   expect(await focused(page)).toContain('target-date');
-  // `pg` hands a `date` column back as a Date; the column is what matters.
-  const stored = (await readRow(videoId)).target_publish_date;
-  expect(new Date(stored!).toISOString().slice(0, 10)).toBe('2026-12-01');
+  // Compared as the column's own text, so the runner's zone cannot move it.
+  expect((await readRow(videoId)).target_publish_date).toBe('2026-12-01');
 });
 
 /* -------------------------------------------------------------------------- */

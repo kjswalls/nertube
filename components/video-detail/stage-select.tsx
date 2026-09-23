@@ -123,14 +123,40 @@ export function StageSelect({
 
     startTransition(async () => {
       try {
-        const result = await moveVideo({ videoId, stageId, slug: channelSlug });
+        /*
+          Everything typed on this page is sent, and landed, first (M10
+          review). A move back to Packaging that reached the server before the
+          script save typed just before it made that save refused, and the
+          refresh after the move took the editor — and the text — away. If a
+          save fails, the move is not made: the failure's own line says why.
+        */
+        const saved = await version.settle();
+        if (!saved) {
+          setCurrent(from);
+          setStatus({
+            kind: "error",
+            message: `Not moved to ${target.name}: something on this page has not saved yet — its own line says why. It is still in ${from.name}.`,
+          });
+          return;
+        }
+
+        const expected = version.peek();
+        const result = await moveVideo({
+          videoId,
+          stageId,
+          slug: channelSlug,
+          ...(expected === undefined ? {} : { expectedUpdatedAt: expected }),
+        });
 
         if (result.ok) {
           // `move_video` stamps `updated_at` like any other write, so the
           // page's shared version token has to hear about it — otherwise the
           // next packaging save on this page would report a conflict with a
-          // move the user made themselves.
-          version.adopt(result.updatedAt);
+          // move the user made themselves. Only when the row was at this
+          // page's version before the move, though: otherwise this tab has
+          // not seen a write another tab made, and adopting the move's stamp
+          // would let its next save overwrite that write (M10 review).
+          if (result.wasCurrent !== false) version.adopt(result.updatedAt);
           setCurrent({ id: result.stageId, name: target.name });
           setStatus({ kind: "moved", name: target.name, notice: result.notice });
           onMoved(result.stageId);

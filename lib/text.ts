@@ -57,12 +57,23 @@ export function isBlank(value: string): boolean {
 }
 
 /**
- * Prose as it should be stored: NUL removed (Postgres refuses it), everything
- * else exactly as written. Blankness is a separate question — `isBlank`.
+ * Prose as it should be stored: NUL removed (Postgres refuses it), a lone
+ * surrogate replaced by U+FFFD (what the database would store anyway),
+ * everything else exactly as written. Blankness is a separate question — `isBlank`.
  */
 export function cleanProse(value: string): string {
-  return value.replace(/\u0000/g, "");
+  return value.replace(/\u0000/g, "").replace(LONE_SURROGATE, "\uFFFD");
 }
+
+/**
+ * Half of a UTF-16 pair with no other half. It cannot be sent as UTF-8, so
+ * the database stored U+FFFD in its place while the page compared the
+ * original and said "Saved" about a text the row did not hold (M10 review).
+ * Replaced here, on both sides, so what is compared is what is stored.
+ * (`String.prototype.toWellFormed` does the same, but not in every browser
+ * this app supports.)
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 /**
  * Two labels are the same label when they read the same: invisible

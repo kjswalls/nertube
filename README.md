@@ -386,9 +386,13 @@ found.
   at a time, through Supabase's management API (the MCP connector), and each
   was read back afterwards. **`0010_time_zone.sql` (M10) has not been applied
   there.** Until it is, a deployed M10 build runs as M9 did as far as dates
-  go: every page reads no zone, draws in UTC and says so, and saving a zone in
-  Settings is refused with a sentence. But no test in this repository has run
-  against either one:
+  go: every page reads no zone, draws in UTC and says so ("your time zone
+  could not be read"), and saving a zone in Settings is refused with a
+  sentence. It sends nothing on its own: the browser's zone is only recorded
+  when the read works and finds no row. The video page's stage select uses
+  0010's `move_video_versioned` and, without it, falls back to M9's plain
+  move (and M9's unconditional version adoption — see "Two tabs do not
+  merge"). But no test in this repository has run against either one:
   - no spec has signed in to the live site;
   - no upload has gone to a hosted bucket (M1's one unfinished acceptance
     item);
@@ -425,9 +429,10 @@ found.
   way (M10), and the rest of the suite uses a mouse. The
   on-screen keyboard is simulated by a short viewport; iOS Safari's own
   behaviour (the visual viewport, zoom on focus) has not been seen on a device
-  (M9). Every text field the M9 review found under 16px — the bank's search
-  and filters, the settings rows and add forms, the new-channel name — is 16px
-  below 768px now, which is what should stop that zoom. The Script tab's
+  (M9). Every text field, select and text box on the twenty measured routes is
+  16px or more below 768px and under a coarse pointer, which is what should
+  stop that zoom; `e2e/phone.spec.ts` checks the computed size on every route
+  (the M10 review found the channel's script template at 14px). The Script tab's
   editor was measured the same way (M10): at 390×420, standing in for the
   keyboard, the line being typed and the sticky save line both stay on
   screen. iOS Safari pans the visual viewport under its keyboard instead of
@@ -461,7 +466,11 @@ found.
   Sign-in records the browser's zone, so a new sign-in never sees it; a session
   that was already open when M10 was deployed has no zone yet, so its first page
   is in UTC and says so ("Dates here follow UTC until your time zone is set"),
-  records the browser's zone, and redraws once (M10).
+  records the browser's zone, and redraws once (M10). The recording is tried
+  once per tab (kept in the tab's `sessionStorage`), and only when the account
+  has no zone at all: a stored zone this server's `Intl` cannot read, or a
+  read that failed, is said as such on the calendar and `/now` and is not
+  retried on every load (M10 review).
 - **Pre-M10 "Confirm live" dates are re-read once.** Before M10 a confirmed
   video's `published_at` was its target date at midnight UTC. The first time
   your zone is recorded, every such stamp (exactly a UTC midnight) is moved to
@@ -483,10 +492,12 @@ found.
   deliberate way to script early. A video moved back to Packaging keeps its
   script, read-only, until it comes forward (M10). A video in a stage you
   added yourself (which has no place in the order) can be scripted.
-- **Reset's Undo lasts as long as the page.** The text it replaced is held in
-  the page, not stored; leave or reload and Reset cannot be undone. A reset
-  is also only as current as the save behind it: in two tabs, the second
-  tab's reset is refused like any other stale save (M10).
+- **Reset's Undo lasts until you type.** The text it replaced is held in
+  the page, not stored; leave or reload and Reset cannot be undone, and once
+  anything is typed after the reset the Undo goes, because putting the old
+  text back would throw that writing away (M10 review). A reset is also only
+  as current as the save behind it: in two tabs, the second tab's reset is
+  refused like any other stale save (M10).
 - **A script save is a whole-page refresh.** The script saves after a
   1.2-second pause in typing, through the same action as every other field,
   and that action refreshes the video page on the server, so a long evening
@@ -497,7 +508,20 @@ found.
 - **Two tabs do not merge.** Every save carries the version it was made
   against; a stale tab is refused with "this video changed somewhere else" and a
   Reload, rather than overwriting. Nothing is lost silently, but the second
-  person retypes (M2).
+  person retypes (M2). The Script tab keeps the refused text: "Copy mine" puts
+  it on the clipboard, and the tab keeps it through the Reload (in its
+  `sessionStorage`) and offers it back — "Use mine" saves it over what the
+  other tab wrote, by choice (M10 review). A stage move, a thumbnail and the
+  concept sketch carry no version check (they must not be refused because a
+  title changed elsewhere); they report whether the row was at this tab's
+  version, and a stale tab stays stale, so its next save is still refused.
+  For the move that check is exact (one transaction); for a thumbnail or the
+  sketch it is a read then a write, and a write from another tab landing in
+  the milliseconds between them would not be noticed.
+- **A stage move from the video page waits for the page's saves.** The
+  script and packaging saves on the wire land first; if one has failed, the
+  move is not made and says why. The flow fields beside the select (target
+  date, waiting on, the URL) are not waited for (M10 review).
 - **Videos cannot be deleted, only archived; channels cannot be removed at
   all** (PLAN.md gives them no delete policy). Smaller things can be deleted:
   a filming day, a video's checklist item, a template item, a bucket and a
@@ -520,6 +544,18 @@ found.
   An empty day is not listed, so opening one takes "Schedule a filming day" or
   the `?day=` address; the grid, and the weekday columns, are the desktop's
   (M10).
+- **A phone held sideways gets the desktop layout.** The phone layouts —
+  the top bar and menu, the calendar's day list, the one-column board — are
+  decided by width (below 768px), and most phones are wider than that in
+  landscape (844–932px). Turned sideways, a phone gets the sidebar, the
+  seven-column month and 216px board columns, with titles cut in the grid
+  and on the cards. What does follow the pointer is size: under a coarse
+  pointer every control on the measured routes is 44px (chips, date links,
+  toasts, the wordmark) and every field 16px, and an assist panel opens at
+  the top of the screen; `e2e/phone.spec.ts` measures all twenty routes at
+  844×390. Moving the layouts themselves to a pointer-and-height query would
+  change every `md:` rule in the app, which was not done in a review pass
+  and could not be seen on a device here (M10 review).
 - **An existing idea is filed on its own page, not in the matrix.** The
   matrix's empty cells capture a *new* idea straight into that cell; an idea
   captured without its pillar and format is filed from the Packaging tab of its
@@ -548,23 +584,31 @@ found.
 - **On a phone, a few things are still a scroll away.** Every route was walked
   at 390×844 by touch in M10. What remains: the matrix shows four of its eight
   formats at a time (the pillar column stays put while they scroll sideways
-  inside the grid); the video page's Packaging tab is long, with two links at
-  its top to Filing and the YouTube preview; its five section tabs wrap to two
-  lines; a checklist template item in Settings is a one-line field, so a long
-  one scrolls inside its box. On the Script tab the script itself starts about
-  630px down, under the checklist strip, Structure and "End screen points
-  at", so the first thing a phone shows of a script is its first two lines;
-  and a new bullet in the Body is written by tapping between the template's
-  empty `-` lines, which is fiddly by thumb (the M10 week walk). Nothing
-  scrolls the page sideways at 320, 360 or 390.
+  inside the grid, and a format name longer than its 60px column widens it);
+  the video page's Packaging tab is long — a list of more than five title
+  candidates shows five (and the chosen one) until "Show all", and four links
+  at its top jump to the concept, the hooks, Filing and the YouTube preview;
+  its five section tabs wrap to two lines. On the Script tab the script
+  itself starts about 630px down, under the checklist strip, Structure and
+  "End screen points at": at 390×844 the first two or three lines show on
+  arrival, at 320×568 and in landscape none do, and the phone scrolls to
+  reach it. A new bullet in the Body is written by tapping between the
+  template's empty `-` lines, which is fiddly by thumb (the M10 week walk).
+  On a 320×568 phone the menu's "Keyboard shortcuts" entry sits half under
+  the screen's edge until the menu is scrolled. Nothing scrolls the page
+  sideways at 320, 360 or 390.
 - **Tap targets are 44px under a thumb, with two exceptions.** On a
   phone-width screen or a coarse pointer, every control on the page of every
   route and in the open menu — the buttons, links, tabs, fields and checkbox
   labels `e2e/phone.spec.ts` measures on twenty routes, the Script tab and
-  Settings → Time zone among them — is at least 44px tall (M10). Of the
-  dialogs, the week walk measures the script reset's two buttons; the others
-  (schedule a filming day, swap a thumbnail, the keyboard sheet's contents)
-  were not measured, apart from the sheet's Close.
+  Settings → Time zone among them — is at least 44px tall (M10), in portrait
+  and at 844×390 in landscape (M10 review). So are a toast's links and
+  dismiss (the gate's refusal on the board, a promote), the swap prompt's
+  two actions and the script's save line (Retry, Reload, Sign in). Of the
+  dialogs, the week walk measures the script reset's two buttons, and the
+  schedule-a-filming-day dialog's fields and buttons carry the same 44px
+  rule but are not measured; the swap dialog and the keyboard sheet's
+  contents were not measured, apart from the sheet's Close.
   The exceptions are M9's: `/now`'s
   links from a row to somewhere else (the video, the channel) are 24px, WCAG
   2.5.8's floor for a target that is not the row's own control, and a link

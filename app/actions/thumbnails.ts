@@ -114,6 +114,16 @@ export interface ThumbnailState {
    * else's write — see `components/video-version.tsx`.
    */
   readonly updatedAt: string | null;
+  /**
+   * The `updated_at` the row held when this action read it, just before its
+   * write. None of these writes carries the page's precondition (an upload
+   * must not be refused because a title changed in another tab), so the page
+   * adopts `updatedAt` only when this equals its own token — otherwise it
+   * would take a version newer than a write it has never seen (M10 review).
+   * The read and the write are two requests; a write from another tab landing
+   * between them, milliseconds apart, would not be noticed.
+   */
+  readonly previousUpdatedAt: string | null;
 }
 
 export type ThumbnailResult =
@@ -130,8 +140,9 @@ type VideoRow = {
   thumb_safe_path: string | null;
 };
 
-function stateOf(row: VideoRow): ThumbnailState {
+function stateOf(row: VideoRow, previous: VideoRow): ThumbnailState {
   return {
+    previousUpdatedAt: previous.updated_at,
     paths: {
       wild_card: row.thumb_wild_card_path,
       moderate: row.thumb_moderate_path,
@@ -250,7 +261,7 @@ export async function recordThumbnailVariant(
 
   await revalidateForVideo(supabase, videoId, written.channel_id);
 
-  return { ok: true, ...stateOf(written) };
+  return { ok: true, ...stateOf(written, video) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -294,7 +305,7 @@ export async function removeThumbnailVariant(
   if (previous === null) {
     // Already empty. Not an error — two clicks on a slow connection is the
     // usual way this happens — so the answer is the current state.
-    return { ok: true, ...stateOf(video) };
+    return { ok: true, ...stateOf(video, video) };
   }
 
   const { data: written, error: updateError } = await supabase
@@ -319,7 +330,7 @@ export async function removeThumbnailVariant(
 
   await revalidateForVideo(supabase, videoId, written.channel_id);
 
-  return { ok: true, ...stateOf(written) };
+  return { ok: true, ...stateOf(written, video) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -448,7 +459,7 @@ export async function shipThumbnail(
 
   await revalidateForVideo(supabase, videoId, data.channel_id);
 
-  return { ok: true, ...stateOf(data as VideoRow) };
+  return { ok: true, ...stateOf(data as VideoRow, video) };
 }
 
 /**

@@ -174,7 +174,11 @@ export function ThumbnailsSection({
    * would be refused as a conflict that never happened.
    */
   function adopt(state: ThumbnailState) {
-    version.adopt(state.updatedAt);
+    // Only when the row was at this page's version before the write: these
+    // writes carry no precondition, and a stale tab must stay stale so its
+    // next save is refused rather than written over another tab's (M10
+    // review; `advance` in `video-version.tsx`).
+    version.advance(state.previousUpdatedAt, state.updatedAt);
     router.refresh();
   }
 

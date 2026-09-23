@@ -9701,6 +9701,17 @@ Seven specs derived a date from the machine's UTC day (`calendar`,
 `filming-days`, `m4-acceptance`, `m6-acceptance`, `m9-week`, `matrix`,
 `settings-channel`).
 
+*Corrected in the M10 review:* the inventory missed three more.
+`post-publish`, `now` and `responsive` seeded `target_publish_date` from
+Postgres' `current_date`, which is the database session's day (its
+`timezone` setting, taken from the machine by `initdb`), and `post-publish`
+compared `published_at` with the target at UTC midnight. They passed because
+the harness's Postgres runs in `Etc/UTC`. They now compute the date with
+`todayColumn(Date.now(), SEED_TIME_ZONE)` and compare with
+`startOfDay(target, SEED_TIME_ZONE)`. `m2-review` read a `date` column
+through node-pg (the runner's local midnight); it reads the column as text
+now.
+
 ### What was built
 
 - **`public.profiles`** (migration `0010_time_zone.sql`): one row per user —
@@ -9778,6 +9789,8 @@ Seven specs derived a date from the machine's UTC day (`calendar`,
    (`SEED_TIME_ZONE`), and the suite pins `timezoneId: 'UTC'`. Every other
    spec's "today" is computed in `SEED_TIME_ZONE`, so it is right by
    construction rather than because the machine happens to be in UTC.
+   *(As first written this was not yet true of three specs; see the
+   correction under the inventory above. It is since the M10 review.)*
 
 ### Deviations from PLAN.md, stated plainly
 
@@ -9803,10 +9816,8 @@ Seven specs derived a date from the machine's UTC day (`calendar`,
   from a page still streaming (calendar, buckets, brainstorm, board specs as
   well as this one). No spec fails on it; whether it predates M10 was not
   checked against the M9 build.
-- `e2e/m2-review.spec.ts:515` still reads a `date` column through `pg`, which
-  parses it to *the test runner's* local midnight, then prints it in UTC; east
-  of UTC that assertion would fail. It is about the runner's zone, not the
-  app's, and was left alone.
+- ~~`e2e/m2-review.spec.ts:515` still reads a `date` column through `pg`~~ —
+  fixed in the M10 review: it reads the column as text.
 
 ### Gates
 

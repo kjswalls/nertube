@@ -82,6 +82,9 @@ export function EventChip({
           "flex items-center gap-1 rounded-button border border-dashed px-1.5 py-0.5 text-[11px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-accent",
           // The phone's day list (see `MonthGrid`): a full-width row, 44px.
           "max-md:min-h-11 max-md:gap-2 max-md:px-3 max-md:text-[14px] max-md:leading-5",
+          // 44px under a thumb at any width: a phone held sideways is wider
+          // than `md` and gets the grid, with a finger (M10 review).
+          "thumb:min-h-11",
           missed
             ? "border-attention/50 bg-attention/10 font-medium text-attention hover:bg-attention/20"
             : "border-border bg-background hover:bg-surface",
@@ -139,6 +142,8 @@ export function EventChip({
         // The phone's day list (see `MonthGrid`): a full-width row, 44px,
         // with the whole title — wrapped, never cut — on the page's ground.
         "max-md:min-h-11 max-md:gap-2 max-md:bg-background max-md:py-1.5 max-md:pr-3 max-md:pl-2.5 max-md:text-[15px] max-md:leading-5",
+        // 44px under a thumb at any width (M10 review: landscape phones).
+        "thumb:min-h-11",
         channel ? stripeClass(channel.stripe) : "border-l-2 border-l-border",
       ].join(" ")}
     >

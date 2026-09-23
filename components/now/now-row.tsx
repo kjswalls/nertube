@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { MetricsPair } from "@/components/post-publish/metrics-pair";
 import type { NowIntent } from "@/components/now/intent";
@@ -127,7 +127,7 @@ export function NowRowItem({
         <Link
           href={`/videos/${row.videoId}`}
           data-testid="now-video-link"
-          className="min-w-0 truncate font-display text-[13px] text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent max-md:line-clamp-2 max-md:basis-full max-md:py-0.5 max-md:text-[15px] max-md:leading-snug max-md:whitespace-normal"
+          className="min-w-0 truncate font-display text-[13px] text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent max-md:line-clamp-2 max-md:basis-full max-md:py-0.5 max-md:text-[15px] max-md:leading-snug max-md:whitespace-normal thumb:py-1"
         >
           {row.videoTitle}
         </Link>
@@ -136,7 +136,7 @@ export function NowRowItem({
         </span>
         <Link
           href={`/c/${row.channelSlug}/board`}
-          className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 thumb:px-2 thumb:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
         >
           {row.channelName}
         </Link>
@@ -160,7 +160,7 @@ export function NowRowItem({
               data-testid="needs-a-block"
               data-stage-kind={row.stageKind}
               title="Filming needs a real block of time, not ten spare minutes. Book a batch day on the calendar."
-              className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 thumb:px-2 thumb:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               needs a block
             </Link>
@@ -266,6 +266,9 @@ function RowControl({
               : "What the thumbnail shows. In words."
           }
           label={payload.field === "title" ? "Working title" : "Thumbnail concept"}
+          // A concept is a sentence or two: it wraps, so it can be read back
+          // before Save (M10 review; `thumbnail-concept.tsx` has the reason).
+          multiline={payload.field === "thumbnail_concept"}
           onSubmit={(value) => onIntent({ kind: "text", value })}
         />
       );
@@ -470,6 +473,7 @@ function SingleLine({
   placeholder,
   submitLabel = "Save",
   type = "text",
+  multiline = false,
   onSubmit,
 }: {
   busy: boolean;
@@ -478,6 +482,13 @@ function SingleLine({
   placeholder?: string;
   submitLabel?: string;
   type?: "text" | "url";
+  /**
+   * A one-row textarea that grows with its text instead of scrolling
+   * sideways inside a one-line box. Still one line of meaning: Enter saves,
+   * and a pasted line break becomes a space. Below `md` it takes the row and
+   * Save goes under it.
+   */
+  multiline?: boolean;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initial);
@@ -495,25 +506,45 @@ function SingleLine({
 
   const empty = value.trim() === "";
 
+  const fieldClass =
+    "min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-2 py-1 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11 thumb:text-base";
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (event.key === "Enter") {
+      // Never a line break, in either field.
+      event.preventDefault();
+      if (!empty) onSubmit(value);
+    }
+  };
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <input
-        type={type}
-        data-testid="now-text"
-        data-now-primary
-        aria-label={label}
-        placeholder={placeholder}
-        value={value}
-        disabled={busy}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !empty) {
-            event.preventDefault();
-            onSubmit(value);
-          }
-        }}
-        className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-2 py-1 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
-      />
+      {multiline ? (
+        <textarea
+          rows={1}
+          data-testid="now-text"
+          data-now-primary
+          aria-label={label}
+          placeholder={placeholder}
+          value={value}
+          disabled={busy}
+          onChange={(event) => setValue(event.target.value.replace(/[\r\n]+/g, " "))}
+          onKeyDown={onKeyDown}
+          className={`${fieldClass} resize-none leading-snug field-sizing-content max-md:basis-full`}
+        />
+      ) : (
+        <input
+          type={type}
+          data-testid="now-text"
+          data-now-primary
+          aria-label={label}
+          placeholder={placeholder}
+          value={value}
+          disabled={busy}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={onKeyDown}
+          className={fieldClass}
+        />
+      )}
       <button
         type="button"
         data-testid="now-text-save"

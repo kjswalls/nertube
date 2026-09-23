@@ -320,11 +320,19 @@ export function FilmingDayPanel({
                 className="flex items-start justify-between gap-3 rounded-input border border-border bg-background px-2.5 py-2"
               >
                 <div className="flex min-w-0 flex-col gap-0.5">
+                  {/*
+                    The truncation is on the inner span, not the link: once
+                    the link is a flex box under a thumb, `text-overflow` on it
+                    stops drawing the ellipsis and the title just stops (M10
+                    review). Below `md` the title wraps whole, as the chips do.
+                  */}
                   <Link
                     href={`/videos/${video.id}`}
-                    className="truncate font-display text-[14px] leading-snug outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center"
+                    className="min-w-0 font-display text-[14px] leading-snug outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center"
                   >
-                    {video.title}
+                    <span className="block min-w-0 truncate max-md:whitespace-normal">
+                      {video.title}
+                    </span>
                   </Link>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted">
                     <span>{video.channelName}</span>

@@ -149,3 +149,64 @@ $$;
 
 revoke all on function public.set_time_zone(text, boolean) from public, anon;
 grant execute on function public.set_time_zone(text, boolean) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- move_video_versioned — a move that says whether the row was where the
+-- caller thought (M10 review).
+--
+-- Not about time zones: it is here because each milestone ships one
+-- migration and M10's is this file.
+--
+-- The video page keeps one version token (`updated_at`) and sends it as the
+-- precondition of every field save, so a stale tab's save is refused rather
+-- than written over another tab's. A stage move carries no precondition — it
+-- must not be refused because a title changed elsewhere — but it stamps
+-- `updated_at`, and the page used to adopt that stamp unconditionally. A tab
+-- rendered before another tab's script save could then move the stage, take a
+-- token newer than a write it had never seen, and overwrite that script on its
+-- next save with the precondition satisfied.
+--
+-- So this does exactly what `move_video` does, and also reports whether the
+-- row was at `p_expected_updated_at` just before the move. The page adopts the
+-- move's stamp only when it was; otherwise it keeps the stale token and the
+-- next save is refused as "changed somewhere else". The row is locked before
+-- it is read, so nothing can land between the check and the move.
+--
+-- Security definer with a pinned search_path like every writer; the lock and
+-- the read are scoped to the caller's own row, and `move_video` does its own
+-- ownership check and every gate.
+-- ---------------------------------------------------------------------------
+create or replace function public.move_video_versioned(
+  p_video uuid,
+  p_stage uuid,
+  p_expected_updated_at timestamptz,
+  p_published_at timestamptz default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before timestamptz;
+  v_found  boolean;
+  v_row    public.videos;
+begin
+  select v.updated_at, true into v_before, v_found
+    from public.videos v
+   where v.id = p_video and v.user_id = auth.uid()
+     for update;
+
+  v_row := public.move_video(p_video, p_stage, p_published_at);
+
+  return jsonb_build_object(
+    'video', to_jsonb(v_row),
+    'was_current', coalesce(v_found, false)
+                   and v_before is not distinct from p_expected_updated_at
+  );
+end;
+$$;
+
+revoke all on function public.move_video_versioned(uuid, uuid, timestamptz, timestamptz)
+  from public, anon;
+grant execute on function public.move_video_versioned(uuid, uuid, timestamptz, timestamptz)
+  to authenticated, service_role;

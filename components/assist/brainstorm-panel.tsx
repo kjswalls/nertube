@@ -330,6 +330,22 @@ export function BrainstormPanel({
           onUseAsHook={asHook}
         />
       )}
+
+      {/*
+        A second way out at the foot of a long list (M10 review): twenty
+        proposals are 4,000px on a phone, and the only Close was at the top.
+        Its own test id, so the header's stays unique.
+      */}
+      {entry !== null && entry.suggestions.length > 3 ? (
+        <button
+          type="button"
+          data-testid="brainstorm-close-foot"
+          onClick={onClose}
+          className="self-end rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
+        >
+          Close
+        </button>
+      ) : null}
     </AssistPanel>
   );
 }

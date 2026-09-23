@@ -121,6 +121,11 @@ export interface SectionFacts {
   /** `videos.published_at`. */
   readonly published: boolean;
   /**
+   * What this channel calls its scripting-kind stage (stage names are live
+   * since M7), for the Script tab's lock. "Scripting" when not given.
+   */
+  readonly scriptingName?: string;
+  /**
    * `videos.metrics_logged_at`, and whether the thumbnail question that follows
    * it has been answered — by "keep it" (`swap_dismissed_at`) or by a swap
    * logged since.
@@ -189,7 +194,7 @@ export function sectionReadiness(
   const script: SectionReadiness = !reached(facts.stageKind, "scripting")
     ? {
         kind: "locked",
-        why: "Written from Scripting on — title, thumbnail concept and hook come first. It starts from the channel's template on the way in.",
+        why: `Written from ${facts.scriptingName ?? "Scripting"} on — title, thumbnail concept and hook come first. It starts from the channel's template on the way in.`,
       }
     : facts.scriptFilled
       ? { kind: "done", why: "The script has something in it." }

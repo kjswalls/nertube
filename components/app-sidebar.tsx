@@ -208,7 +208,7 @@ export function AppSidebar({
 
           <Link
             href="/"
-            className="rounded-button px-1 font-display text-[17px] leading-none font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:flex max-md:min-h-11 max-md:items-center"
+            className="rounded-button px-1 font-display text-[17px] leading-none font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:flex max-md:min-h-11 max-md:items-center thumb:flex thumb:min-h-11 thumb:items-center"
           >
             NerTube
           </Link>

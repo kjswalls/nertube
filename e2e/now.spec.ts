@@ -1,7 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { addDays, todayColumn } from '../lib/calendar-dates';
+import {
+  PG,
+  SEED_EMAIL,
+  SEED_PASSWORD,
+  SEED_TIME_ZONE,
+} from '../scripts/dev-stack/shared';
 
 /**
  * `/now` — the Monday scenario, walked in a browser.
@@ -118,6 +124,16 @@ interface SeedVideo {
  * what makes "the first unticked item" a real question here rather than a
  * fixture-shaped one.
  */
+/**
+ * A target date `days` from today in the seed account's zone, as the
+ * `YYYY-MM-DD` literal the column takes. Not `current_date + n`: that is the
+ * database session's day (its `timezone` setting), which is not the account's.
+ */
+function targetDate(days: number | undefined): string | null {
+  if (days === undefined) return null;
+  return addDays(todayColumn(Date.now(), SEED_TIME_ZONE), days);
+}
+
 async function seedVideo(
   channel: { id: string; user_id: string },
   video: SeedVideo,
@@ -134,7 +150,7 @@ async function seedVideo(
        $1, $2, $3, now() - $4::interval,
        $5, $6, $7::jsonb,
        $8, case when $8::text is null then null else now() - $4::interval end,
-       case when $9::int is null then null else (current_date + $9::int) end,
+       $9::date,
        case when $10::text is null then null else now() - $10::interval end
      ) returning id`,
     [
@@ -148,7 +164,7 @@ async function seedVideo(
         ? JSON.stringify([{ id: 'h1', text: 'The hook, as spoken', chosen: true }])
         : '[]',
       video.waitingOn ?? null,
-      video.targetInDays ?? null,
+      targetDate(video.targetInDays),
       video.publishedAgo ?? null,
     ],
   );

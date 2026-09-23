@@ -460,3 +460,51 @@ test('a session with no zone yet says UTC, then records the browser’s once and
   expect(auckland.hydrationErrors).toEqual([]);
   await auckland.context.close();
 });
+
+test('a stored zone this server cannot read is said plainly, and nothing is sent on every load', async ({
+  browser,
+  baseURL,
+}) => {
+  const auckland = await device(browser, baseURL!, AUCKLAND);
+  const { page } = auckland;
+  await signIn(page);
+
+  // A name the table's CHECK accepts and `Intl` does not know: what a tzdata
+  // newer on the database than in Node would look like.
+  await db.query(`update public.profiles set time_zone = 'Mars/Olympus_Mons' where user_id = $1`, [
+    userId,
+  ]);
+
+  // Every server-action POST from here on. A detected zone would be refused
+  // ("detected never overwrites"), so sending one per load is a write for
+  // nothing and a second render after it.
+  let actionPosts = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.headers()['next-action']) actionPosts += 1;
+  });
+
+  for (const path of ['/calendar', '/now', '/calendar']) {
+    await page.goto(path);
+    await expect(page.getByTestId('time-zone-notice')).toHaveAttribute(
+      'data-missing',
+      'unreadable',
+    );
+  }
+  await expect(page.getByTestId('time-zone-notice')).toContainText(
+    'the time zone saved for you is not one this server can read',
+  );
+  // Long enough for an effect's POST to have been sent.
+  await page.waitForLoadState('networkidle');
+  expect(actionPosts).toBe(0);
+  expect(await storedZone()).toEqual({
+    time_zone: 'Mars/Olympus_Mons',
+    time_zone_source: 'detected',
+  });
+
+  await db.query(`update public.profiles set time_zone = $2 where user_id = $1`, [
+    userId,
+    AUCKLAND,
+  ]);
+  expect(auckland.hydrationErrors).toEqual([]);
+  await auckland.context.close();
+});

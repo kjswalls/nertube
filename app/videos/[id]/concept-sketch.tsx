@@ -137,7 +137,8 @@ export function ConceptSketch({
     // Recording a sketch writes the row, so it stamps `updated_at` — and the
     // page's shared version token has to hear about it, or the next packaging
     // save would look like somebody else's write. See `video-version.tsx`.
-    version.adopt(result.updatedAt);
+    // Only if the row was at this page's version first (M10 review).
+    version.advance(result.previousUpdatedAt, result.updatedAt);
     // The action revalidated this route; this is what re-reads it, so the
     // <img> below comes back with a freshly signed URL for the new object.
     router.refresh();

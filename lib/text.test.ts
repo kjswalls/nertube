@@ -40,6 +40,11 @@ describe("lib/text", () => {
     const guide = "Warm.‍\n\n  - short sentences­\n";
     expect(cleanProse(guide)).toBe(guide);
     expect(cleanProse("vo\u0000ice")).toBe("voice");
+    // A lone surrogate becomes U+FFFD, which is what the database stores for
+    // it; a real pair is untouched (M10 review).
+    expect(cleanProse("Lone \uD83D surrogate")).toBe("Lone \uFFFD surrogate");
+    expect(cleanProse("tail \uDE00")).toBe("tail \uFFFD");
+    expect(cleanProse("pair \uD83D\uDE00 ok")).toBe("pair \uD83D\uDE00 ok");
   });
 });
 

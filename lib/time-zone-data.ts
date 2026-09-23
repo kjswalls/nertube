@@ -17,9 +17,22 @@ export interface UserTimeZone {
   readonly known: boolean;
   /** Who decided: the browser (`detected`) or the person (`chosen`). */
   readonly source: "detected" | "chosen" | null;
+  /**
+   * Why `known` is false, when it is:
+   * - `none` — the read worked and there is no row: the one case the browser's
+   *   zone may be recorded for the user (`TimeZoneDetector`);
+   * - `unreadable` — a row holds a name this runtime's `Intl` cannot use, so a
+   *   detected zone would be refused as "already set" and must not be sent;
+   * - `failed` — the read itself failed (for instance, a database without
+   *   migration 0010), so nothing is known and nothing should be written.
+   * `null` when the zone is known.
+   */
+  readonly missing: "none" | "unreadable" | "failed" | null;
 }
 
-const UNKNOWN: UserTimeZone = { zone: UTC, known: false, source: null };
+const NO_ROW: UserTimeZone = { zone: UTC, known: false, source: null, missing: "none" };
+const UNREADABLE: UserTimeZone = { zone: UTC, known: false, source: null, missing: "unreadable" };
+const FAILED: UserTimeZone = { zone: UTC, known: false, source: null, missing: "failed" };
 
 /**
  * Read once per request, like the clock.
@@ -46,12 +59,13 @@ export const readTimeZone = cache(async (): Promise<UserTimeZone> => {
       .from("profiles")
       .select("time_zone, time_zone_source")
       .maybeSingle();
-    if (error || !data) return UNKNOWN;
+    if (error) return FAILED;
+    if (!data) return NO_ROW;
     const zone = canonicalTimeZone(data.time_zone);
-    if (zone === null) return UNKNOWN;
-    return { zone, known: true, source: data.time_zone_source };
+    if (zone === null) return UNREADABLE;
+    return { zone, known: true, source: data.time_zone_source, missing: null };
   } catch {
-    return UNKNOWN;
+    return FAILED;
   }
 });
 

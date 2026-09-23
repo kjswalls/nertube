@@ -62,12 +62,59 @@ export interface VideoVersion {
   readonly peek: () => string | null | undefined;
   /** Record the `updated_at` a write on this page just produced. */
   readonly adopt: (updatedAt: string | null) => void;
+  /**
+   * Record it only if the row was at this page's version just before that
+   * write (`previous`), and say whether it was.
+   *
+   * For the writes that carry **no** precondition — a stage move, a thumbnail,
+   * the concept sketch — which land whatever the row holds. Adopting their
+   * answer unconditionally would hand a stale tab a token newer than a write
+   * it has never seen, and its next script or packaging save would overwrite
+   * that write under a "Saved" line (M10 review). Left stale instead, the next
+   * save is refused as "changed somewhere else", which is the truth.
+   */
+  readonly advance: (previous: string | null, next: string | null) => boolean;
+  /**
+   * An editor on the page that can be asked to send what it holds and report
+   * when its saves have settled. Returns the unregister function.
+   */
+  readonly register: (settle: () => Promise<boolean>) => () => void;
+  /**
+   * Ask every registered editor to send what it holds, and wait for all of
+   * them: `true` when every save landed. The stage select waits on this before
+   * moving, so a move never races the save typed just before it (M10 review:
+   * a move back to Packaging that landed first made the script save refused,
+   * and the editor unmounted with the text in it).
+   */
+  readonly settle: () => Promise<boolean>;
 }
 
 const NO_VERSION: VideoVersion = {
   peek: () => undefined,
   adopt: () => {},
+  advance: () => true,
+  register: () => () => {},
+  settle: () => Promise.resolve(true),
 };
+
+/**
+ * Two `updated_at` renderings name the same instant — compared to the
+ * microsecond, so a difference in how the offset is spelled (`Z` or
+ * `+00:00`) or in trailing zeros does not read as a different version.
+ */
+export function sameVersion(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a === b) return true;
+  return micros(a) === micros(b);
+}
+
+function micros(value: string): number | null {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return null;
+  const fraction = /\.(\d+)/.exec(value)?.[1] ?? "";
+  const extra = Number((fraction + "000000").slice(3, 6));
+  return ms * 1000 + extra;
+}
 
 const VideoVersionContext = createContext<VideoVersion>(NO_VERSION);
 
@@ -80,12 +127,30 @@ export function VideoVersionProvider({
   children: ReactNode;
 }) {
   const seen = useRef<string | null>(updatedAt);
+  const settlers = useRef(new Set<() => Promise<boolean>>());
 
   const value = useMemo<VideoVersion>(
     () => ({
       peek: () => seen.current,
       adopt: (next) => {
         seen.current = next;
+      },
+      advance: (previous, next) => {
+        if (!sameVersion(previous, seen.current)) return false;
+        seen.current = next;
+        return true;
+      },
+      register: (settle) => {
+        settlers.current.add(settle);
+        return () => {
+          settlers.current.delete(settle);
+        };
+      },
+      settle: async () => {
+        const results = await Promise.all(
+          [...settlers.current].map((settle) => settle().catch(() => false)),
+        );
+        return results.every(Boolean);
       },
     }),
     [],

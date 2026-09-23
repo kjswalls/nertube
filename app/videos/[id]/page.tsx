@@ -588,7 +588,7 @@ export default async function VideoDetailPage({
           <VideoSections
             pathname={`/videos/${video.id}`}
             initial={section}
-            facts={sectionFacts}
+            facts={{ ...sectionFacts, scriptingName: nameOf("scripting") }}
             /* The channel/stage line and the page heading. They live above the
                tabs but inside this component, because it is what decides how
                wide the page column is — see its `header` prop. */
@@ -651,6 +651,22 @@ export default async function VideoDetailPage({
                     data-testid="packaging-jump"
                     className="flex flex-wrap gap-2 md:hidden"
                   >
+                    {/* The gate's next fields (M10 review): with twenty
+                        candidates the concept was five screens below the
+                        Generate button. Their own anchors, which the gate
+                        refusal's links already land on. */}
+                    <a
+                      href={`#${GATE_ANCHOR.thumbnail_concept}`}
+                      className="flex min-h-11 items-center rounded-button border border-border px-3 text-[14px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      Concept ↓
+                    </a>
+                    <a
+                      href={`#${GATE_ANCHOR.hook}`}
+                      className="flex min-h-11 items-center rounded-button border border-border px-3 text-[14px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      Hooks ↓
+                    </a>
                     <a
                       href="#video-filing"
                       className="flex min-h-11 items-center rounded-button border border-border px-3 text-[14px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"

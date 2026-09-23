@@ -178,7 +178,11 @@ export async function AppShell({
       A column below `md` — the sidebar is a bar across the top there, see
       `AppSidebar` — and a row from `md` up, which is the layout M3 signed off.
     */
-    <TimeZoneProvider zone={timeZone.zone} known={timeZone.known}>
+    <TimeZoneProvider
+      zone={timeZone.zone}
+      known={timeZone.known}
+      missing={timeZone.missing}
+    >
       <div className="flex min-h-dvh w-full flex-col overflow-x-clip md:flex-row">
         {/*
           The bypass block (WCAG 2.4.1). The sidebar is ten tab stops on a

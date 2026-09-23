@@ -172,7 +172,9 @@ function Mark({ state }: { state: SectionReadiness }) {
   if (state.kind === "locked") {
     return (
       <span data-testid="section-mark" data-mark="locked" className="text-muted">
-        <span className="sr-only">, locked</span>
+        {/* The reason, not only a `title` a thumb never sees (M10 review):
+            read with the tab's name, and shown in the tab's own panel. */}
+        <span className="sr-only">, locked. {state.why}</span>
         <svg
           aria-hidden="true"
           viewBox="0 0 12 12"

@@ -331,6 +331,30 @@ async function smallControls(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * Every visible field whose text is under 16px, as "what size". Below 768px
+ * iOS Safari zooms the whole page when a field under 16px takes focus, which
+ * is what the design's "16px below 768px" rule is for (M10 review: the script
+ * template was 14px while the README said every field was 16).
+ */
+async function smallFonts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const out: string[] = [];
+    const selector =
+      'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]), textarea, select';
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      if (size < 16) {
+        const name = el.dataset.testid ?? el.getAttribute('aria-label') ?? el.getAttribute('name') ?? el.tagName;
+        out.push(`${el.tagName.toLowerCase()}[${name}] ${size}px`);
+      }
+    }
+    return out;
+  });
+}
+
 async function box(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
   const found = await locator.boundingBox();
   if (!found) throw new Error('no box');
@@ -408,6 +432,7 @@ test('every control is at least 44px tall under a thumb, on every route', async 
     await page.goto(route);
     await page.waitForLoadState('networkidle');
     for (const small of await smallControls(page)) failures.push(`${route}: ${small}`);
+    for (const small of await smallFonts(page)) failures.push(`${route}: font ${small}`);
   }
   // The open menu, too: it is the way to every other page.
   await page.goto('/now');
@@ -696,6 +721,149 @@ test('the matrix shows four formats at once with the pillar column pinned', asyn
   });
   const after = await box(pillar);
   expect(Math.round(after.x)).toBe(Math.round(before.x));
+});
+
+/* -------------------------------------------------------------------------- */
+/* 9. The M10 review                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** The toast's controls and its box, measured. */
+async function toastMeasure(page: Page) {
+  const toast = page.getByTestId('toast').last();
+  await expect(toast).toBeVisible();
+  const controls = await toast.evaluate((el) =>
+    Array.from(el.querySelectorAll<HTMLElement>('a[href], button')).map((control) => {
+      const rect = control.getBoundingClientRect();
+      return `${(control.innerText || control.getAttribute('aria-label') || '').trim()} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    }),
+  );
+  const small = controls.filter((c) => Number(c.split('x').pop()) < 44);
+  const outer = await box(toast);
+  const message = await box(toast.locator('p').first());
+  return { small, outer, message };
+}
+
+test('a toast is usable by thumb: its sentence has a line, its controls are 44px', async ({
+  page,
+}) => {
+  await signIn(page);
+  const channel = await ensureChannel(page);
+  const seeded = await seed(channel);
+
+  for (const size of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(size);
+
+    // The gate's refusal on the board: the one toast that is the only way on.
+    await seed(channel);
+    await page.goto(`/c/${CHANNEL.slug}/board`);
+    await expect(page.getByTestId('board')).toHaveAttribute('data-ready', 'true');
+    await page.locator('[data-testid="stage-jump-button"][data-stage-name^="Packaging"]').tap();
+    const card = page
+      .getByTestId('board-card')
+      .filter({ hasText: 'nine hours a night for a month changed one thing' });
+    await card.locator('[data-move="forward"]').tap();
+    const refusal = await toastMeasure(page);
+    expect(refusal.small, `refusal toast at ${size.width}`).toEqual([]);
+    expect(refusal.outer.y + refusal.outer.height).toBeLessThanOrEqual(size.height);
+    // The sentence is not squeezed beside the links: it has the toast's width.
+    expect(refusal.message.width).toBeGreaterThan(refusal.outer.width - 40);
+    await page.getByTestId('toast-dismiss').last().tap();
+
+    // A confirmation: promoting an idea from the bank.
+    await page.goto(`/c/${CHANNEL.slug}/ideas`);
+    await page.getByTestId('idea-promote').first().tap();
+    const promoted = await toastMeasure(page);
+    expect(promoted.small, `promote toast at ${size.width}`).toEqual([]);
+  }
+  expect(seeded.idea).toBeTruthy();
+});
+
+test('the swap prompt’s actions are 44px by touch', async ({ page }) => {
+  await signIn(page);
+  const channel = await ensureChannel(page);
+  const seeded = await seed(channel);
+  await db.query(
+    `update public.videos
+        set first24_impressions = 8200, first24_ctr = 2.4, first24_views = 190,
+            metrics_logged_at = now()
+      where id = $1`,
+    [seeded.published],
+  );
+  for (const size of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto(`/videos/${seeded.published}?section=publish`);
+    for (const id of ['swap-prompt-open', 'swap-prompt-keep']) {
+      const found = await box(page.getByTestId(id));
+      expect(found.height, `${id} at ${size.width}`).toBeGreaterThanOrEqual(44);
+    }
+  }
+});
+
+test('twenty candidates fold on a phone, and the concept is one tap away', async ({ page }) => {
+  await signIn(page);
+  const channel = await ensureChannel(page);
+  const seeded = await seed(channel);
+  const twenty = Array.from({ length: 20 }, (_, i) => ({
+    id: `c${i}`,
+    text: `Candidate ${i + 1}: a title long enough to wrap onto a second line here`,
+    note: 'Widens past the topic, so it reaches people who have never heard of the idea',
+    chosen: false,
+    source: 'manual',
+  }));
+  await db.query('update public.videos set title_candidates = $2::jsonb where id = $1', [
+    seeded.packaging,
+    JSON.stringify(twenty),
+  ]);
+
+  await page.goto(`/videos/${seeded.packaging}`);
+  const rows = page.getByTestId('candidate-row');
+  await expect(rows).toHaveCount(20);
+  await expect(page.locator('[data-testid="candidate-row"]:visible')).toHaveCount(5);
+
+  // The note reads whole: it wraps rather than scrolling inside one line.
+  const note = page.getByTestId('candidate-note').first();
+  const cut = await notCut(note);
+  expect(cut.cutX).toBe(false);
+
+  // The concept is under the folded list, not five screens down, and a tap
+  // on the jump row reaches it.
+  const concept = await box(page.getByTestId('thumbnail-concept'));
+  const list = await box(page.getByTestId('candidate-list'));
+  expect(concept.y - list.y).toBeLessThan(2000);
+  await page.getByRole('link', { name: 'Concept ↓' }).tap();
+  await expect(page.getByTestId('thumbnail-concept')).toBeInViewport();
+
+  // Every row is still one tap away.
+  await page.getByTestId('candidate-show-all').tap();
+  await expect(page.locator('[data-testid="candidate-row"]:visible')).toHaveCount(20);
+});
+
+test.describe('a phone held sideways', () => {
+  test.use({ viewport: { width: 844, height: 390 } });
+
+  test('every control is 44px and every field 16px under a thumb in landscape', async ({ page }) => {
+    test.setTimeout(300_000);
+    await signIn(page);
+    const channel = await ensureChannel(page);
+    const seeded = await seed(channel);
+    const { month, other } = calendarDays();
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+
+    const failures: string[] = [];
+    for (const route of routes(seeded, month, other)) {
+      await page.goto(route);
+      await page.waitForLoadState('networkidle');
+      for (const small of await smallControls(page)) failures.push(`${route}: ${small}`);
+      for (const small of await smallFonts(page)) failures.push(`${route}: font ${small}`);
+    }
+    expect(failures, 'controls under 44px, or fields under 16px, in landscape').toEqual([]);
+  });
 });
 
 /* -------------------------------------------------------------------------- */

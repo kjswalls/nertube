@@ -139,17 +139,26 @@ export function TemplateRow({
         <label htmlFor={textId} className="sr-only">
           Text of item {index + 1}
         </label>
-        <input
+        {/*
+          A one-row textarea that grows with its text (M10 review), the title
+          candidates' pattern: a long item scrolled sideways inside a one-line
+          box, a quarter of it on screen at 320px. Still one line of meaning —
+          Enter commits, and a pasted line break becomes a space.
+        */}
+        <textarea
           id={textId}
           data-testid="template-text"
-          type="text"
+          rows={1}
           value={textDraft}
           maxLength={MAX_ITEM_LENGTH}
           disabled={unsaved}
-          onChange={(event) => setTextDraft(event.target.value)}
+          onChange={(event) => setTextDraft(event.target.value.replace(/[\r\n]+/g, " "))}
           onBlur={commitText}
           onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
             if (event.key === "Escape") {
               // Consumed: reverting this field is the whole of what Escape
               // means here (the order is in `lib/shortcuts.ts`). Focus stays
@@ -161,7 +170,7 @@ export function TemplateRow({
               setTextDraft(item.text);
             }
           }}
-          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base thumb:min-h-11"
+          className="min-w-0 flex-1 resize-none rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none field-sizing-content disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base thumb:min-h-11"
         />
 
         <div className="flex shrink-0 items-center gap-1 max-md:ml-7">

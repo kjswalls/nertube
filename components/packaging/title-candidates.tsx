@@ -65,6 +65,14 @@ export function TitleCandidates({
   const addRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * Below `md`, a long list shows its first rows (and the chosen one) until
+   * asked for the rest (M10 review): twenty wrapped candidates were 3,700px
+   * on a phone, and the concept and hooks — the gate's next fields — sat five
+   * screens under them. The rows stay in the page, only not drawn, so nothing
+   * typed in one is lost by folding it away. From `md` up every row shows.
+   */
+  const [expanded, setExpanded] = useState(false);
 
   /*
     Where the caret goes after a row is removed.
@@ -91,6 +99,7 @@ export function TitleCandidates({
 
   const count = candidates.length;
   const atLimit = count >= MAX_CANDIDATES;
+  const folds = !expanded && count > PHONE_ROWS;
 
   function add() {
     const text = draft.trim();
@@ -192,9 +201,13 @@ export function TitleCandidates({
               key={candidate.id}
               data-testid="candidate-row"
               data-chosen={candidate.chosen ? "true" : "false"}
+              data-folded={
+                folds && index >= PHONE_ROWS && !candidate.chosen ? "true" : undefined
+              }
               className={[
                 "flex flex-col gap-1 rounded-input border px-2 py-2",
                 candidate.chosen ? "border-ready/60 bg-ready/[0.07]" : "border-border",
+                folds && index >= PHONE_ROWS && !candidate.chosen ? "max-md:hidden" : "",
               ].join(" ")}
             >
               <div className="flex items-center gap-2 max-md:flex-wrap max-md:justify-end">
@@ -286,14 +299,23 @@ export function TitleCandidates({
               <label className="sr-only" htmlFor={`${addId}-note-${candidate.id}`}>
                 Note on candidate {index + 1}
               </label>
-              <input
+              {/*
+                A one-row textarea that grows, like the candidate above it
+                (M10 review): after "Add all" every row carries a rationale of
+                60–90 characters, and a one-line input showed its first half.
+                Enter commits and a pasted line break becomes a space, because
+                a note is one line.
+              */}
+              <textarea
                 id={`${addId}-note-${candidate.id}`}
-                type="text"
+                rows={1}
                 value={candidate.note ?? ""}
                 placeholder="Why this one (optional)"
                 maxLength={MAX_CANDIDATE_NOTE_LENGTH}
                 data-testid="candidate-note"
-                onChange={(event) => onEditNote(candidate.id, event.target.value)}
+                onChange={(event) =>
+                  onEditNote(candidate.id, event.target.value.replace(/[\r\n]+/g, " "))
+                }
                 onBlur={onCommit}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
@@ -304,7 +326,7 @@ export function TitleCandidates({
                 // 16px, like every other field on the page: iOS Safari zooms
                 // the whole page when a field under 16px takes focus, and this
                 // is the one you reach for on a phone to say why this title.
-                className="w-full rounded-input border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+                className="w-full resize-none rounded-input border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none field-sizing-content hover:border-border focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
               />
 
               {issue && issue.id === candidate.id ? (
@@ -321,6 +343,20 @@ export function TitleCandidates({
           ))}
         </ul>
       )}
+
+      {folds ? (
+        <button
+          type="button"
+          data-testid="candidate-show-all"
+          onClick={() => setExpanded(true)}
+          className="self-start rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 md:hidden"
+        >
+          Show all {count} candidates
+        </button>
+      ) : null}
     </section>
   );
 }
+
+/** How many candidates a phone shows before "Show all". */
+const PHONE_ROWS = 5;

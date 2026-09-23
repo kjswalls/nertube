@@ -491,11 +491,15 @@ export function useAssistFocus<T extends HTMLElement>(
       after a tap — so the heading showed and the first proposal was under the
       fold (y 873 of 844 for Generate 20). Below `md` the panel's heading goes
       to the top of the screen instead, under the pinned bar
-      (`scroll-padding-top`), so what was asked for is what is in view. From
-      `md` up it is "nearest", as it always was.
+      (`scroll-padding-top`), so what was asked for is what is in view — and so
+      does it under a coarse pointer at any width. With a mouse from `md` up it
+      is "nearest", as it always was.
     */
     heading.focus({ preventScroll: true });
-    const phone = window.matchMedia("(width < 48rem)").matches;
+    // The `thumb:` query, not width alone: a phone held sideways is wider
+    // than `md` and 390px tall, and "nearest" left each panel below the fold
+    // there (M10 review).
+    const phone = window.matchMedia("(width < 48rem), (pointer: coarse)").matches;
     heading.scrollIntoView({ block: phone ? "start" : "nearest" });
   }, [nonce]);
   return ref;

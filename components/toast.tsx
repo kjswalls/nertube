@@ -303,18 +303,26 @@ function ToastItem({
         settle();
       }}
       className={[
-        "pointer-events-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-card border bg-background px-3 py-2 text-sm shadow-lg",
+        // Below `md` the toast is pinned under the bar, so it is capped to the
+        // screen under it and scrolls inside itself rather than running off
+        // the bottom (M10 review: 598px tall on a 568px phone).
+        "pointer-events-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-card border bg-background px-3 py-2 text-sm shadow-lg max-md:max-h-[calc(100svh-5.25rem)] max-md:overflow-y-auto",
         toast.tone === "error" ? "border-over-limit/60" : "border-border",
       ].join(" ")}
     >
-      <p className="min-w-0 flex-1">{toast.message}</p>
+      {/*
+        Below `md` the sentence has its own full-width line and the links sit
+        on a row under it. Beside them, `flex-1` squeezed it to a word per
+        line on a 320px phone (M10 review).
+      */}
+      <p className="min-w-0 flex-1 max-md:basis-full">{toast.message}</p>
 
       {(toast.links ?? []).map((link, index) => (
         <Link
           key={link.href + link.label}
           ref={index === 0 ? firstLink : undefined}
           href={link.href}
-          className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:inline-flex thumb:min-h-11 thumb:items-center thumb:px-1"
         >
           {link.label}
         </Link>
@@ -323,7 +331,8 @@ function ToastItem({
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
-        className="shrink-0 rounded-button px-1 text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+        data-testid="toast-dismiss"
+        className="shrink-0 rounded-button px-1 text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:ml-auto thumb:inline-flex thumb:size-11 thumb:items-center thumb:justify-center thumb:px-0 thumb:text-base"
       >
         <span aria-hidden="true">×</span>
         <span className="sr-only">Dismiss</span>

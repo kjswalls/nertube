@@ -1,4 +1,4 @@
-import { ScriptEditor } from "@/components/script/script-editor";
+import { ScriptEditor, ScriptHold } from "@/components/script/script-editor";
 import type { ScriptStructure } from "@/lib/script";
 import { SCRIPT_STRUCTURE_LABEL } from "@/lib/script";
 
@@ -55,22 +55,10 @@ export function ScriptSection({
   /** What this channel calls its scripting-kind stage. */
   scriptingName: string;
 }) {
-  if (editable) {
-    return (
-      <ScriptEditor
-        videoId={videoId}
-        initialScript={script}
-        initialStructure={structure}
-        initialEndScreenTarget={endScreenTarget}
-        scriptingName={scriptingName}
-      />
-    );
-  }
-
   const text = script ?? "";
   const hasText = text.trim() !== "";
 
-  return (
+  const readOnly = (
     <section
       data-testid="script-section"
       data-editable="false"
@@ -117,5 +105,23 @@ export function ScriptSection({
         </p>
       )}
     </section>
+  );
+
+  /*
+    The editor is rendered inside `ScriptHold` whatever the stage: the hold
+    shows it while it is editable, and keeps it — read-only, saying why — if
+    the video leaves Scripting's side of the order while it holds unsaved
+    text (M10 review). Otherwise the hold shows the read-only view above.
+  */
+  return (
+    <ScriptHold editable={editable} stageName={stageName} readOnly={readOnly}>
+      <ScriptEditor
+        videoId={videoId}
+        initialScript={script}
+        initialStructure={structure}
+        initialEndScreenTarget={endScreenTarget}
+        scriptingName={scriptingName}
+      />
+    </ScriptHold>
   );
 }
