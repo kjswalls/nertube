@@ -481,8 +481,8 @@ test('the matrix renders, an empty cell prefills capture, and promote lands in P
   await expect(dialog).toBeVisible();
 
   const captured = 'The interview I keep not asking for';
-  await dialog.getByLabel('Idea').fill(captured);
-  await dialog.getByLabel('Idea').press('Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(captured);
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
 
   // The row it wrote really carries both buckets, and it is in the Idea stage:
   // `capture_video` is the only path a client has to create a video at all.

@@ -463,8 +463,8 @@ test('an empty cell opens capture with both buckets already chosen', async ({ pa
   await expect(dialog.getByTestId('capture-prefill')).toContainText('interview');
 
   const title = 'The interview I keep not asking for';
-  await dialog.getByLabel('Idea').fill(title);
-  await dialog.getByLabel('Idea').press('Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(title);
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
 
   // The row really carries both buckets, and it landed in the Idea stage —
   // `capture_video` is the only path a client has to create a video at all.
@@ -630,10 +630,10 @@ test('a prefilled capture keeps both buckets even with the pickers still loading
   await expect(dialog).toBeVisible();
 
   const title = 'Filed while the pickers were still loading';
-  await dialog.getByLabel('Idea').fill(title);
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(title);
   // Shift+Enter opens the disclosure, which is what mounts the pickers and
   // sends them off to fetch this channel's buckets.
-  await dialog.getByLabel('Idea').press('Shift+Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Shift+Enter');
 
   // Proof that the window is open: the status line says loading and the
   // vertical picker is disabled, so it will post nothing.
@@ -645,7 +645,7 @@ test('a prefilled capture keeps both buckets even with the pickers still loading
   // And the form is still claiming, on screen, that it is filing the idea.
   await expect(dialog.getByTestId('capture-prefill')).toContainText('focus');
 
-  await dialog.getByLabel('Idea').press('Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
 
   const vertical = await bucketId(channel.id, 'vertical', 'focus');
   const horizontal = await bucketId(channel.id, 'horizontal', 'interview');
@@ -685,8 +685,8 @@ test('capturing into a cell leaves focus on the cell that replaced it', async ({
 
   const dialog = page.getByTestId('matrix-capture');
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Idea').fill('Keyboard capture probe');
-  await dialog.getByLabel('Idea').press('Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill('Keyboard capture probe');
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
 
   await expect(dialog).toHaveCount(0);
   // The same intersection, now populated — and holding the reading position.

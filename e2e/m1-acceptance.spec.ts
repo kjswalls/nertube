@@ -730,7 +730,7 @@ test('the keyboard set is one set, and it only claims the keys that work', async
   // …but never while typing. A digit in the capture field is a digit, and the
   // board keys behind the dialog are inert while it is open.
   await pressCapture(page);
-  const field = page.getByRole('dialog').getByLabel('Idea');
+  const field = page.getByRole('dialog').getByRole('textbox', { name: 'Idea' });
   await field.fill('Ten');
   await page.keyboard.type('10 things');
   await expect(field).toHaveValue('Ten10 things');

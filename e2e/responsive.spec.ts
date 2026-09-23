@@ -683,7 +683,7 @@ test('/capture saves with the keyboard open, in one gesture', async ({ page }) =
   await page.setViewportSize(PHONE_WITH_KEYBOARD);
   await page.goto('/capture');
 
-  const field = page.getByLabel('Idea');
+  const field = page.getByRole('textbox', { name: 'Idea' });
   await expect(field).toBeFocused();
 
   // One Capture button at this width — the one on the field's own line — and
@@ -729,14 +729,14 @@ test('the capture dialog from the phone bar also saves with the keyboard open', 
   await page.locator('button[aria-keyshortcuts="c"]').click();
 
   const dialog = page.getByRole('dialog', { name: 'Capture an idea' });
-  await expect(dialog.getByLabel('Idea')).toBeFocused();
+  await expect(dialog.getByRole('textbox', { name: 'Idea' })).toBeFocused();
   const save = dialog.getByRole('button', { name: 'Capture', exact: true });
   await expect(save).toHaveCount(1);
   const box = await save.boundingBox();
   expect(box!.y + box!.height).toBeLessThanOrEqual(PHONE_WITH_KEYBOARD.height);
 
   const title = `${PREFIX} from the bar ${Date.now().toString(36)}`;
-  await dialog.getByLabel('Idea').fill(title);
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(title);
   await save.click();
   await expect(dialog).toHaveCount(0);
   expect(await capturedCount(title)).toBe(1);

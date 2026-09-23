@@ -52,13 +52,14 @@ decision taken without the user.
   core order, switch off, add your own), checklist templates with minute
   estimates, buckets and quotas, the voice guide, the script template, the WIP
   and stale thresholds, and the CTR the swap prompt measures against.
-- **The assists** — title and hook suggestions, thumbnail concepts, and a
-  critique of the three variants at feed size, conditioned on the channel's
+- **The brainstorm** — one feature with four buttons on the video page:
+  *Generate 20* (titles), *Draft hooks*, *Suggest concepts* and *Critique at
+  tile size* (the three variants at feed size), conditioned on the channel's
   voice guide and past titles. Proposals, never edits: nothing lands in a field
-  until it is accepted.
+  until it is accepted. (The code calls each button an "assist".)
 - **Keys** — `?` on any page with the sidebar lists what works there. `g` then a letter goes
   places, `j`/`k`/`Enter`/`Escape` work every list, `[`/`]` move a card, `x`
-  does a `/now` row, `p` promotes an idea.
+  does a `/now` row, `p` promotes an idea (in the bank and on the board).
 
 ## The principles, and why the data model looks like this
 
@@ -139,6 +140,19 @@ npm run dev:stack             # needs PostgreSQL 16 on 127.0.0.1:5432 and `postg
 npm run dev                   # in a second terminal
 ```
 
+Two things npm cannot install for you:
+
+- **PostgreSQL 16** on `127.0.0.1:5432`, with a role that can create and drop
+  databases and roles (the harness resets its databases on every start and
+  creates `authenticator`, `anon` and `authenticated`). A local superuser with
+  trust authentication is what it was built against; `PGUSER` and
+  `PGPASSWORD` pick another.
+- **PostgREST 12.2** as a `postgrest` binary on `PATH`: the release build for
+  your platform from
+  [github.com/PostgREST/postgrest/releases/tag/v12.2.12](https://github.com/PostgREST/postgrest/releases/tag/v12.2.12).
+  It is not an npm package and not in stock apt. `npm run dev:stack` checks for
+  it first and stops with one sentence if it is missing.
+
 `npm run dev:stack` runs the whole SQL test suite against a throwaway database
 and refuses to serve anything unless it passes, then rebuilds `nertube_dev`
 from the migrations alone, seeds one user and two channels **through the real
@@ -171,22 +185,24 @@ anything but a loopback `PGHOST`.
 | `npm run lint` | ESLint. |
 | `npm test` | Vitest: the ranking rules, the date helper, the assist provider against a stubbed transport, the schemas. |
 | `npm run db:verify [dbname]` | The Docker-free database check: drops and recreates a database on local Postgres, applies `supabase/tests/shim.sql` (the Supabase pieces a plain Postgres lacks: the `auth` and `storage` schemas, `auth.uid()`, the roles and default grants), every migration in order, then every `supabase/tests/*.test.sql`. Exits non-zero on the first failure. |
-| `npm run e2e` | Playwright, against the real app and the harness. `e2e/m9-week.spec.ts` is the whole week — capture to thumbnail swap — once with a mouse and keyboard at 1440×900 and once by touch at 390×844, with a screenshot of every step under `test-results/m9-week/`. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. A `next dev` already running in the directory also blocks it (Next allows one per directory), and the suite says so in one sentence. |
+| `npm run e2e` | Playwright, against the real app — a production build (`next build && next start`) — and the harness. `e2e/m9-week.spec.ts` is the whole week — capture to thumbnail swap — once with a mouse and keyboard at 1440×900 and once by touch at 390×844, with a screenshot of every step under `test-results/m9-week/`. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. |
 | `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
 The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
 third party.
 
-**A full run loses about one spec to `next dev` itself.** The development
-server's memory grows by about 20 MB per page pair (the production build's
-does not; `docs/MILESTONES.md`, "M9 — Integration", has the measurement).
-Around two thirds of the way through a full run, Next restarts itself at its
-heap threshold, and the spec that is mid-navigation at that moment fails a
-60-second `page.goto`. The server log says *"Server is approaching the used
-memory threshold, restarting…"* just above it. Re-run that spec. The lasting
-fix is to run the suite against `next build && next start`, which has not been
-done. Playwright is pointed at the Chromium in `/opt/pw-browsers`
-through `executablePath`; do not run `playwright install` in that environment.
+**The suite runs against a production build.** Until the M9 review it ran
+against `next dev`, whose memory grows by about 20 MB per page pair; around two
+thirds of the way through a full run Next restarted itself at its heap
+threshold and the spec loading at that moment failed, so no full run in M9's
+integration pass exited 0. The production server's memory is flat
+(`docs/MILESTONES.md`, "M9 — Integration", has the measurement). A full run
+takes about twelve minutes. The build lands in `.next` with the harness's URL
+and anon key inlined into the browser bundle, so after a run, `npm run build`
+again before `npm start` serves anything else. `npm run dev` is unaffected: it
+writes to `.next/dev`. Playwright is pointed at the Chromium in
+`/opt/pw-browsers` through `executablePath`; do not run `playwright install` in
+that environment.
 
 Other scripts: `npm run seed:demo` (see [Deploying](#deploying)),
 `npm run db:types` (regenerates `lib/database.types.ts`; the Supabase CLI
@@ -350,13 +366,20 @@ found.
 - **`supabase start` has never run** (no Docker), and `supabase/config.toml` was
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
+- **Postgres 17 has never run these migrations.** `supabase/config.toml`
+  pins `major_version = 17`, and new hosted Supabase projects run 17, but the
+  migrations and all of `supabase/tests/` have only ever been run on
+  PostgreSQL 16 (16.15, the harness's). Nothing in them is known to differ on
+  17; nothing has checked.
 - **No real phone and no touchscreen.** Every phone measurement is Chromium at a
   phone-sized viewport. `e2e/m9-week.spec.ts` walks the whole week at 390×844
   as an emulated touch device (`hasTouch`, `isMobile`, so `pointer: coarse` is
   true and every press is a tap), and the rest of the suite uses a mouse. The
   on-screen keyboard is simulated by a short viewport; iOS Safari's own
   behaviour (the visual viewport, zoom on focus) has not been seen on a device
-  (M9).
+  (M9). Every text field the M9 review found under 16px — the bank's search
+  and filters, the settings rows and add forms, the new-channel name — is 16px
+  below 768px now, which is what should stop that zoom.
 - **The error page's "You're offline" sentence and `app/global-error.tsx`**
   are exercised by no spec; `app/error.tsx` is proved with an induced read
   failure, not a dropped connection (M9).
@@ -370,12 +393,19 @@ found.
 
 - **The script cannot be edited in the app.** The Script section shows what
   `move_video()` wrote on first entry to Scripting — the channel's template with
-  the chosen hook spliced in — and says it is read-only. `script` has no save
-  path, and a textarea over a column that cannot be saved would lose an
-  evening's work silently (M3, M8). The brief's per-video "chosen structure"
-  and "end-screen target" fields exist as columns (`script_structure`,
-  `end_screen_target`) with no UI at all; the structure is a line in the
-  template instead.
+  the chosen hook spliced in — and says to write the script in your own editor,
+  starting from that copy. `script` has no save path, and a textarea over a
+  column that cannot be saved would lose an evening's work silently (M3, M8).
+  The brief's per-video "chosen structure" and "end-screen target" fields
+  exist as columns (`script_structure`, `end_screen_target`) with no UI at
+  all; the structure is a line in the template instead.
+- **The script is written once, and nothing rewrites it.** `move_video()`
+  fills `script` only while it is empty, on the first entry to Scripting. A
+  hook chosen, or a template edited, after that never reaches it; a video that
+  skipped the gate and entered Scripting with no chosen hook has an empty Hook
+  section for good. PLAN.md's review item 19 promised a "reset script from
+  template" on the video page; it was not built (M9, as a decision: it is a
+  new write path into a column the app otherwise never writes).
 - **The one-line hook is set at capture and never again.** It shows in the bank
   but the video page has no field for it.
 - **Description, chapters, end screen and tags for YouTube are checklist items,
@@ -400,8 +430,10 @@ found.
   against; a stale tab is refused with "this video changed somewhere else" and a
   Reload, rather than overwriting. Nothing is lost silently, but the second
   person retypes (M2).
-- **Nothing can be deleted, only archived.** Channels cannot be removed at all
-  (PLAN.md gives them no delete policy). An archived idea is listed under the
+- **Videos cannot be deleted, only archived; channels cannot be removed at
+  all** (PLAN.md gives them no delete policy). Smaller things can be deleted:
+  a filming day, a video's checklist item, a template item, a bucket and a
+  stage you added yourself. An archived idea is listed under the
   bank's "Show archived"; **an archived video past the Idea stage is on no list
   anywhere** — its page still works by its address, and that is the only way
   back to it. Archive has no undo after a reload other than Restore.
@@ -438,12 +470,33 @@ found.
   videos**, where the stage editor in Settings leaves its switch live and lets
   the database refuse. Same rule, same sentence, two behaviours (M7).
 - **On a phone, some views are usable rather than comfortable.** `/now` and
-  `/capture` were designed for 390px (M9). Elsewhere: the matrix shows two of
-  its eight format columns at a time and scrolls sideways inside itself; the
-  video page's Packaging tab is long, with Filing and the YouTube preview below
-  every packaging field; an assist panel opens below the button that asked for
-  it, partly under the fold; the 24-hour form's "New viewers" field sits below
-  its save button. None of these scrolls the page sideways or hides a control.
+  `/capture` were designed for 390px and walked control by control (M9).
+  Elsewhere: the matrix shows two of its eight format columns at a time and
+  scrolls sideways inside itself; the video page's Packaging tab is long, with
+  Filing and the YouTube preview below every packaging field; an assist panel
+  opens below the button that asked for it, partly under the fold; the 24-hour
+  form's "New viewers" field sits below its save button. None of these scrolls
+  the page sideways.
+- **Tap targets are 44px on `/now`, `/capture` and the main controls, not
+  everywhere.** Under a thumb (a phone-width screen or a coarse pointer), the
+  M9 review raised `/now`, capture, the phone menu, the board's card arrows,
+  the brainstorm's buttons, the packaging block's Choose/Remove/Add, the bank's
+  Promote and Archive and its filters, the section tabs, the checklist
+  expander, the calendar's month buttons, the settings screens' Add buttons,
+  sign-in and sign-out to 44px. Not raised: the calendar's chips (about 20px
+  tall at 390 — the month is a desktop view, and says so), the settings rows'
+  up/down arrows and their "Remove" links (the review measured 24–28px), and
+  links inside sentences. None of it was seen on a real phone.
+- **A checklist item you add to one video has no estimate.** Items added on a
+  video's own checklist are stored with no minutes, and nothing in the app sets
+  them afterwards (M3 left per-item estimates to M7, which built the template
+  editor only). The 10-minute filter on `/now` counts such an item as ten
+  minutes, so it always passes the filter however long the task is. It prints
+  no minutes (a dash on the video page's list), because the mono face is for a
+  measured number.
+- **A quick run through a checklist stacks its toasts.** Nine `x` presses on
+  `/now` make nine "Ticked: …" messages; three show at once and each clears
+  itself after six seconds (M9 week walk).
 - **The first click on a freshly loaded video page can be swallowed** while it
   hydrates — it is the heaviest page, with five sections and three assist
   panels mounted. The remedy on record is to make the sections lighter, not to
@@ -487,14 +540,33 @@ found.
   should stay `disabled`), and nothing in this environment (no screen reader,
   no real keyboard user) could check the result. The harm is real but recoverable: focus drops to the page while
   a save is in flight, and Tab starts again from the top.
+- **The settings screens are wordier than the rest of the tool.** The M9
+  review counted 282–470 words of help on each settings screen, and 639 on a
+  video's Packaging tab, which stated one rule (the sketch is not the concept)
+  four times. The Packaging tab had its repeats and its longest help cut (the
+  rule is now said at the concept field and in the gate line); the four
+  settings screens did not get the same editing pass,
+  and still read more like documentation than a tool.
 - **The add-a-stage and add-a-bucket forms are still two components.** M7's
   review offered to merge them in M9; they differ by a quota box and share a
   dozen lines, and M9 left them as two.
 - **The `?` sheet cannot be opened by touch.** Its button is in the desktop
   sidebar; a phone with a hardware keyboard gets the keys without a visible way
   to learn them other than pressing `?` (M9).
-- **No key moves a video from its own page.** `[`/`]` are the board's; on
-  `/videos/<id>` the stage select is one Tab away (M9). Nothing is remappable.
+- **No key moves a video from its own page.** `[`/`]` are the board's. On
+  `/videos/<id>` the stage select is in the Schedule section: the section tabs,
+  then three Tabs. An arrow key on it chooses a stage and Enter (or the Move
+  button beside it) makes the move; it does not move on the arrow (M9 review).
+  Nothing is remappable.
+- **No keys on the calendar, the matrix or settings** beyond the
+  application's own (`g`, `1`–`9`, `c`, `?`), and `/capture` has none but the
+  form's (M9).
+- **One browser-suite failure from M9 was never explained.**
+  `e2e/board.m1.spec.ts:513` (drag an idea into Packaging) failed once in M9's
+  integration pass: the server answered the move with 200 and the card landed
+  in neither column. Its trace was lost; it did not recur in 52 repeats of
+  that file then, nor in any full run since. It is recorded as unexplained
+  rather than as a flake (`docs/MILESTONES.md`, "M9 — Integration").
 - **Back does not undo a filter change in the bank.** The filters are in the
   address bar with `replaceState`, so a filtered bank can be linked, but six
   keystrokes are not six history entries (M5).

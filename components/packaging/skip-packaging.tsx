@@ -237,7 +237,7 @@ export function SkipPackaging({
         >
           <p className="text-xs text-muted">
             The video moves on with the fields unfinished. Your reason is
-            recorded, and a badge stays on the card until you undo it.
+            recorded, and it shows as a badge on the card until you undo it.
           </p>
 
           <label htmlFor={anchorId} className="text-xs font-medium text-muted">

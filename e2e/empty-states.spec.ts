@@ -178,8 +178,8 @@ test('a first channel lands on a board that says how anything gets onto it', asy
   await empty.getByTestId('board-empty-capture').click();
   const dialog = page.getByRole('dialog', { name: 'Capture an idea' });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Idea').fill(IDEA);
-  await dialog.getByLabel('Idea').press('Enter');
+  await dialog.getByRole('textbox', { name: 'Idea' }).fill(IDEA);
+  await dialog.getByRole('textbox', { name: 'Idea' }).press('Enter');
   await expect(dialog).toHaveCount(0);
   await expect(page.getByTestId('toast')).toContainText(`Captured “${IDEA}” in ${CHANNEL.name}.`);
 

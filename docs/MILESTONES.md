@@ -8901,7 +8901,7 @@ not take them. **Fixed** means fixed in code, by the milestone named.
 | 3 | M1 review 18 | Reconsider the hint bar once the `?` sheet exists | Fixed, M9 keyboard slice: the bar is kept, and its last item opens the sheet |
 | 4 | M1 | The packaging editor and the gate-refusal links | Fixed, M2 |
 | 5 | M1 | The checklist ratio on the card | Fixed, M3 |
-| 6 | M1 | `?`, `g n/b/i/k`, `p`, `x` | Fixed (`p` M5, `x` M3, `g` and `?` M9). `g k` became `g c` (deviation, M9 keyboard) |
+| 6 | M1 | `?`, `g n/b/i/k`, `p`, `x` | Fixed (`p` M5 in the bank only — on a board card only since the M9 review; `x` M3, `g` and `?` M9). `g k` became `g c` (deviation, M9 keyboard) |
 | 7 | M3 | `/` lands on the board, not `/now` | Fixed, M3 integration |
 | 8 | M3 | A Scheduled video with no target date gets no `/now` row | **README** |
 | 9 | M3 | The swap row's second answer (the swap itself) | Fixed, M4 |
@@ -8946,10 +8946,16 @@ not take them. **Fixed** means fixed in code, by the milestone named.
 | 48 | M9 responsive | `pointer: coarse` never true in the suite | Fixed here: `m9-week`'s phone walk runs with it true. README updated |
 | 49 | M9 keyboard | The sheet cannot be reached by touch; no key moves a video from its own page; no remapping; AltGr proved only synthetically | **README** |
 | 50 | M9 states | Signed-out diagnosis in four callers only; the offline branch and `global-error.tsx` are untested | **README** (the second half added here) |
+| 51 | M3 → M7 | Per-item estimates on a video's own checklist ("a template-editor concern … belongs to M7") | *Added by the M9 review, which found it had lapsed.* M7 built the template editor only. **README** ("A checklist item you add to one video has no estimate"); the row now prints no minutes rather than a made-up "10 min" |
+| 52 | PLAN.md review 19 | "Reset script from template" on the video page | *Added by the M9 review, which found it had lapsed.* Not built, as a decision. **README** ("The script is written once, and nothing rewrites it") |
 
-Nothing on this list simply lapsed. Items 8, 12, 33, 37 and 39 are decisions
-not to build or not to change. Each one's reason is in the README, and this
-file says where it was argued.
+*As first written, the line below said nothing on this list had lapsed. The
+M9 review found two that had (rows 51 and 52) and one row that claimed more
+than it had (row 6: `p` on a board card); all three are corrected above.*
+
+Nothing on this list simply lapsed. Items 8, 12, 33, 37, 39 and 52 are
+decisions not to build or not to change. Each one's reason is in the README,
+and this file says where it was argued.
 
 ### No key, and the fake provider
 
@@ -9128,3 +9134,313 @@ on its own run. The command does not
 yet give a clean exit over a full run, because of the development server's
 memory. A fresh session's first job, if it wants a green `npm run e2e`, is to
 run the suite against a production build.
+*(Done by the review pass below: the suite now runs against a production
+build, and both of its full runs exited 0.)*
+
+---
+
+## M9 — Review: the last fix pass
+
+> Forty-one adversarial findings against the finished tree, from four
+> reviewers: the phone, the keyboard and assistive technology, a fresh pair of
+> eyes on a brand-new account, and the debts this file had written down. There
+> is no later milestone, so every finding below is either fixed or written
+> into the README's honest limits in the words quoted here. "Deferred" is not
+> a disposition this section uses.
+
+### Verified before anything changed
+
+Each finding was checked against the tree before it was acted on. All
+forty-one held up in substance; none was rejected as wrong. Two were fixed in
+a different way from the one suggested, and three were answered partly in
+code and partly in the README; those are called out below.
+
+One thing the reviewers did not report, and the first build of this pass
+did: **`npm run build` failed on a tree with a failed e2e run in it.** A failed
+spec's Playwright trace keeps copies of the spec's source under
+`test-results/<spec>/tr/src/*.ts`, `tsconfig.json`'s `**/*.ts` picked them up,
+and their relative imports do not resolve from there. `tsconfig.json` now
+excludes `test-results*`, `playwright-report` and `blob-report`. `npm run
+typecheck` had the same exposure.
+
+### The browser suite, first (findings 31 and 37)
+
+The largest debt was not a line of product code: **no full run of `npm run e2e`
+had exited 0 since M8.** M9's integration pass measured why (`next dev`'s
+memory, and its restart at the threshold two thirds of the way through a run)
+and named the fix it did not make: run the suite against a production build.
+This pass made it first, before touching anything else, so that every later
+run would measure the code rather than the dev server.
+
+- `playwright.config.ts`: the app server's command is `npm run build && npm run
+  start -- --port 3111`, with the same `env` block (which is what inlines the
+  harness's URL and anon key into the browser bundle). The timeout is 300 s,
+  for the build. `scripts/e2e-preflight.mjs` is deleted: it existed to catch a
+  running `next dev`, which no longer blocks the suite (Next 16 keeps dev
+  output in `.next/dev`). `scripts/dev-stack/README.md` item 32 says so.
+- **A baseline full run of the unchanged product tree against the production
+  build: 293 passed, 0 failed, 1 skipped, 11.2 minutes, exit 0.** (M9's three
+  `next dev` runs took 33–35 minutes and each lost one or two specs.)
+- `e2e/flow-fields.spec.ts:352` (finding 37) is the one failure the memory
+  explanation did not cover: a fill swallowed before hydration left
+  `2026-11-20` in the box and React's draft empty, and the retry filled the
+  same value again, which is not a change. Each attempt now clears the field
+  first, as `m9-week.spec.ts` already did, and the database check polls.
+
+### Fixed
+
+**Phone (1, 2, 4, 5, 24, 41).**
+
+- *1 — settings rows at phone width.* `bucket-row.tsx` got the stage row's
+  treatment: below `md` the filed count and Remove drop under the name, and
+  the name takes its own line (`basis-full`) above the quota.
+  `template-row.tsx` wraps below `md`: the text takes the first line, the
+  minutes, arrows and Remove the second, aligned with the text. The add
+  fields (`axis-editor.tsx`, `stage-template-editor.tsx`, `stages-editor.tsx`)
+  have a real basis and take the whole line below `md`.
+  `e2e/m9-review.spec.ts` asserts every bucket rename field, every template
+  text field and both add fields are at least 200px wide at 390 and at 360 —
+  a width check, not only a scroll check.
+- *2 — the sidebar's channel list shrank to 0px on a short window.* `min-h-0`
+  is gone from the `<nav>` and the channels block, and the list is no longer
+  its own scroller: the sticky column scrolls as a whole, and nothing in it
+  shrinks below its content. The spec clicks Personal, Sunday Softworks and
+  "+ New channel" at 844×390 and at 1280×560 with real clicks, which
+  Playwright refuses if anything is drawn over the target.
+- *4 — tap targets.* `thumb:min-h-11` (the responsive slice's own variant) on
+  capture's More, sign-in, Create channel, the bank's Promote, Archive,
+  Restore, search and filter selects, every brainstorm/concept/critique button
+  and pill, the hook and candidate Choose/Remove/Add buttons, the skip
+  controls, the section tabs, the checklist expander, the calendar's month
+  buttons and day-panel close, and the settings add buttons. What was not
+  raised is in the README (below).
+- *5 — fields under 16px.* `max-md:text-base` on the bank's search and
+  selects, every settings row field and add field, and the new-channel name.
+  The spec checks the computed size on the bucket and checklist screens.
+- *24 — the ragged sidebar edge.* `SidebarDisabled`, "+ New channel" and the
+  CHANNELS heading use `pl-3 pr-2`, the link rows' edge.
+- *41 — digits on a thumb.* The channel rows' digit is `pointer-coarse:hidden`,
+  as the capture chips' already was.
+
+**Keyboard, focus and assistive technology (3, 6–12, 14, 15, 38–40).**
+
+- *6 (the blocker) — Escape saved the edit it claimed to discard.* The
+  template text field no longer blurs on Escape: it puts the stored text back
+  and keeps focus, as the stage and bucket rows do. The blur had run
+  `commitText` with the edited draft still in its closure. The spec edits,
+  presses Escape, Tabs away and reads the row from the database: unchanged.
+- *3 and 40 — focus from a backdrop, and after a link in the sheet.* `Modal`'s
+  backdrop calls `preventDefault()` on the mousedown before closing, so the
+  browser's default no longer moves focus to `<body>` after the modal has put
+  it back on the opener. Every dialog benefits. A link chosen in the phone
+  sheet records the moment in a module-level value, and the next page's menu
+  button (every page renders its own shell, so it is a new button) takes focus
+  if it mounts within ten seconds. `e2e/responsive.spec.ts` now asserts focus
+  on the menu button after the backdrop and after the link; `m9-review`
+  asserts it after a desktop capture dialog's backdrop.
+- *7 — `p` in the bank promoted a row the focus was not on.* The row selects
+  on focus anywhere inside it (`onFocus` on the `<li>`, which bubbles), not on
+  the title link alone. The spec does `j`, `j`, Shift+Tab, `p` and checks the
+  database promoted the row the focus ring was on.
+- *8 — one arrow key moved the video.* The stage select keeps a value reached
+  from the keyboard as a *choice*: the status line says it is not moved yet,
+  a Move button appears beside it, Enter or Move makes the move, Escape puts
+  it back. A pick from the open list with the pointer still moves at once
+  (every existing `selectOption` spec is unchanged). The select is never
+  `disabled` in flight any more (`aria-busy` and a guard), so it keeps focus.
+- *9 — Escape on an assist panel, and `p` in the bank, dropped focus.*
+  `AssistPanel` records the element that had focus when it mounted (the pill)
+  in a layout effect and gives it focus back when it unmounts holding focus.
+  A promote in the bank moves the selection, and focus if it was in the row,
+  to the next row (or the previous, when it was last) before the row leaves.
+- *10 — the gate-refusal toast.* The toast's clock stops while the pointer is
+  over it or focus is inside it and starts again, in full, when both leave. A
+  refused `[`/`]` on the board puts focus on "Fix packaging"; the toast is an
+  Escape *region* (`useDismiss` with `within`), and a toast that goes while
+  holding focus gives it back — to the card, for the board. The spec waits
+  thirteen seconds on the focused link to prove the clock stopped.
+- *11 and 12 — forced colours.* In the unlayered forced-colours block of
+  `app/globals.css`: a label wrapping a focused visually-hidden input is
+  outlined (the capture chips); the chosen chip is outlined in `Highlight`;
+  `[aria-pressed="true"]` is outlined; the sidebar's current-row marker has
+  `forced-color-adjust: none` and paints `Highlight`. The spec checks each
+  computed style under `emulateMedia({ forcedColors: 'active' })`.
+- *14 — titles.* `lib/page-title.ts`: a video page is "<title> · NerTube",
+  a channel page "<Channel name> · board · NerTube" (and ideas, and the four
+  settings screens), each through the request's RLS client so a title never
+  confirms another user's row.
+- *15 — "j k".* The slash between alternatives is paired with an `sr-only`
+  " or ".
+- *38 — `p` on a board card.* Bound in the board's `useShortcuts` list for a
+  selected Idea card: the same `move_video` call to the channel's Packaging
+  stage that `]` and the bank's Promote make. On the sheet, not the bar.
+  `e2e/shortcuts.spec.ts`'s board sheet now lists it.
+- *39 — the hint bar emptied itself under any dialog.* It is built from every
+  enabled registration, not only the ones allowed to fire, so the "all keys"
+  button that opened the `?` sheet stays mounted and takes focus back.
+
+**Copy, from a fresh account (16, 18–23, 28, 33, and 17 in part).**
+
+- *16* — the voice-guide note says what the field does now and names the
+  three buttons that read it. `lib/channel-settings.test.ts` asserts no
+  `SETTING_NOTES` string names a milestone.
+- *18* — the Thumbnails tab is quiet, not locked, before Editing (the slots
+  work at every stage) and counts an early upload. "Locked at Packaging." is
+  "Decided in Packaging."
+- *19 and 33* — the Script tab says the copy is a starting draft written
+  once, that it is not edited here, and to write the script in your own
+  editor from it.
+- *20* — no user-facing string cites "the brief": "aim for 10–20", "write
+  three, then choose the strongest", "most channels do well with 3–5", "the
+  eight standard formats". `lib/bucket-settings.test.ts` asserts it.
+- *21* — the stage row's chip says "built in · Publish Prep", not
+  `core · publish_prep`; the card's badge expands TTH on hover
+  (`<abbr>` and a title); capture's hint says "a topic pillar and a format";
+  the README names the feature "the brainstorm" and its four buttons.
+- *22* — the preview rail sits beside the block from 1440px (a 40rem measure
+  there, 42rem from 1480). `e2e/preview.spec.ts` asserts it at 1440×900.
+- *23* — the gate indicator and the board's refusal name every missing field.
+  `packagingGate` returns `allMissing`; `moveVideo` reads the row back after a
+  gate refusal to list them. `missing` is still the first, which the "Fix
+  packaging" link targets.
+- *28* — "are not set" for two, and where the values come from.
+- *17, in part* — the Packaging tab's help was edited: the sketch rule is said
+  at the concept field and in the gate line, not four times; the intro, the
+  hook note, the skip form and the Filing note are shorter. The settings
+  screens were not edited (README).
+
+**Debts and docs (25–27, 29, 30, 32, 34–36).**
+
+- *25* — `npm run dev:stack` checks `postgrest --version` first and stops
+  with one sentence naming the release to install; the README says where
+  PostgREST comes from and what the Postgres role must be able to do.
+- *26 and 36* — `.env.example` points at "Which assist implementation
+  answers"; `scripts/dev-stack/README.md` no longer says the suite reuses a
+  stack, and its "board columns read 0" paragraph is gone; the seed's and
+  `app/actions/channels.ts`'s stale comments are corrected.
+- *29* — besides the README entry and deferral row 51, the display rule M3's
+  finding 15 stated is now true: a checklist row with no estimate prints no
+  minutes on `/now` or in the strip, and a dash in the list.
+  `e2e/checklist.spec.ts` asserts it.
+- *32* — the shoot notes go through `cleanProse`.
+- *34 and 35* — README entries, below.
+
+### Moved to the README, with the exact words
+
+Each is under "Honest limits". Quoted as written:
+
+- **2/4 (targets not raised):** "**Tap targets are 44px on `/now`, `/capture`
+  and the main controls, not everywhere.** … Not raised: the calendar's chips
+  (about 20px tall at 390 — the month is a desktop view, and says so), the
+  settings rows' up/down arrows and their "Remove" links (the review measured
+  24–28px), and links inside sentences. None of it was seen on a real phone."
+- **5 (zoom):** in "No real phone and no touchscreen": "Every text field the M9
+  review found under 16px — the bank's search and filters, the settings rows
+  and add forms, the new-channel name — is 16px below 768px now, which is what
+  should stop that zoom."
+- **13:** "**No key moves a video from its own page.** `[`/`]` are the board's.
+  On `/videos/<id>` the stage select is in the Schedule section: the section
+  tabs, then three Tabs. An arrow key on it chooses a stage and Enter (or the
+  Move button beside it) makes the move; it does not move on the arrow (M9
+  review)."
+- **17 (the part not done):** "**The settings screens are wordier than the
+  rest of the tool.** … the four settings screens did not get the same
+  editing pass, and still read more like documentation than a tool."
+- **27:** "**Postgres 17 has never run these migrations.** … the migrations and
+  all of `supabase/tests/` have only ever been run on PostgreSQL 16 (16.15, the
+  harness's). Nothing in them is known to differ on 17; nothing has checked."
+- **29:** "**A checklist item you add to one video has no estimate.** … The
+  10-minute filter on `/now` counts such an item as ten minutes, so it always
+  passes the filter however long the task is. It prints no minutes …"
+- **30:** "**The script is written once, and nothing rewrites it.** … PLAN.md's
+  review item 19 promised a "reset script from template" on the video page; it
+  was not built (M9, as a decision: it is a new write path into a column the
+  app otherwise never writes)."
+- **31 (the unexplained failure):** "**One browser-suite failure from M9 was
+  never explained.** `e2e/board.m1.spec.ts:513` … It is recorded as
+  unexplained rather than as a flake."
+- **34:** "**Videos cannot be deleted, only archived; channels cannot be
+  removed at all** … Smaller things can be deleted: a filming day, a video's
+  checklist item, a template item, a bucket and a stage you added yourself."
+- **35:** "**A quick run through a checklist stacks its toasts.**" and "**No
+  keys on the calendar, the matrix or settings**". The matrix legend's "Click
+  it" was fixed instead ("Choose it to capture one"). The calendar chips are
+  in the tap-target entry above.
+
+### Rejected
+
+None. Every finding was confirmed against the tree. Recorded here because it
+is the honest answer to "which did you disagree with": the closest to a
+rejection is 17's reach. It asked for an editing pass across the product;
+this pass edited the Packaging tab, the one it measured at 639 words and the
+one the week's walk spends longest on, and wrote the rest down rather than
+rewrite four settings screens' prose in the last hours of the project.
+
+### Decisions taken without the user
+
+1. **The suite runs a production build, always.** Not an option beside
+   `next dev`: the dev server's restart is what kept the suite red, and a
+   suite that exits 0 only sometimes is not a gate. The cost is a build (about
+   15 s warm) at the start of every run and a `.next` aimed at the harness
+   afterwards, both written down.
+2. **The stage select moves on a pointer pick and on Enter, not on an arrow.**
+   Rather than a Move button for everyone, which would add a click to the
+   mouse path every spec and every person already used.
+3. **A keyboard refusal moves focus into the toast; a pointer one does not.**
+   A key has no other way to reach the links; a drag or a click on a card's
+   arrow leaves focus where the person put it.
+4. **Error toasts still expire**, once nobody is hovering or focused on them.
+   An error that never left would pile up behind the three-toast cap.
+5. **Thumbnails is "quiet" before Editing, not a ratio of 0/3.** A 0/3 on a
+   Packaging video would read as work overdue; quiet says nothing until
+   something is uploaded.
+6. **The gate sentence lists every missing field, and the deep link still
+   goes to the first.** One link cannot land on three fields, and the first
+   is the one `move_video` names.
+7. **"Reset script from template" stays unbuilt.** It would be a new write
+   path into `script`, a column the app otherwise never writes, in a
+   milestone that adds no features. Written into the README instead.
+8. **The preview rail's 1440 step narrows the measure, not the rail.** The
+   rail is YouTube's own pixels; shrinking it would make the preview answer
+   "does this read?" wrongly.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md's review item 19 ("reset script from template" on detail) was not
+  built (decision 7).
+- PLAN.md's shortcut list puts `p` "on a card". It is now bound on the board
+  as well as in the bank, which is the plan catching up rather than a
+  deviation; recorded because the deferral table said otherwise until now.
+
+### Gates
+
+Run in this container, last, in this order: no `ANTHROPIC_API_KEY` in the
+environment (`env | grep -c ANTHROPIC_API_KEY` is 0), Postgres up
+(`pg_isready`), no stale stack (`pgrep` for `start.mts`, `postgrest` and
+`next-server` found nothing before each browser run), `E2E_REUSE=0`.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | exit 0, both programs |
+| Lint | `npm run lint` | exit 0 |
+| Build | `npm run build` | exit 0, 19 routes plus the proxy. `.next/static` holds none of `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key` (0 files) |
+| SQL | `./scripts/verify-db.sh m9_final` | `OK (migrations applied, 17 test file(s) passed)` |
+| Unit | `npm run test` | 528 passed, 33 files (525 before; +3: the milestone-name and brief-citation guards and the every-missing-field gate sentence) |
+| Browser, run 1 | `E2E_REUSE=0 npx playwright test` | **307 passed, 0 failed, 1 skipped (11.9m), exit 0** |
+| Browser, run 2 | the same, cold | **307 passed, 0 failed, 1 skipped (11.8m), exit 0** |
+
+307 is the integration pass's 293 runnable specs plus `e2e/m9-review.spec.ts`'s 14. The
+skip is `session-refresh`, as in every milestone; it runs only under `npm run
+e2e:refresh`. Earlier runs in this pass, for the record: the baseline against
+the production build before any product change (293 passed, 0 failed, exit
+0), and two targeted runs while fixing. The first targeted run failed three
+specs, all this pass's own doing and all fixed before the runs above:
+`packaging.spec.ts:520` asserted the skip form's old words ("badge on the
+card"), which the copy edit had dropped, so the copy keeps them; and two
+`responsive.spec.ts` capture tests whose `getByLabel('Idea')` also matched a
+channel radio called "M5 Ideas" — the specs now ask for the textbox by role,
+in all five files that used that locator.
+
+`board.m1.spec.ts:513`, the one failure M9's integration pass could not
+explain, passed in all three full runs of this pass and in a targeted run of its file. That is not an
+explanation, and the README keeps it as an open item.

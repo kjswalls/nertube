@@ -133,7 +133,7 @@ export function MatrixLegend({ monthLabel }: { monthLabel: string }) {
         <span className="font-mono text-foreground">●2</span> — two of them have
         been published. No dot means nothing here has ever gone live.
       </li>
-      <li>A dashed cell is an idea you have not had yet. Click it to capture one.</li>
+      <li>A dashed cell is an idea you have not had yet. Choose it to capture one.</li>
       <li>Quota bars count videos targeted at {monthLabel}.</li>
     </ul>
   );
