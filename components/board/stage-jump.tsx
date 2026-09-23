@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 /**
  * The board's stages as a row of buttons, on a phone only (M10).
@@ -25,6 +25,24 @@ export function StageJump({
   boardRef: RefObject<HTMLDivElement | null>;
 }) {
   const [showing, setShowing] = useState(0);
+  const rowRef = useRef<HTMLElement>(null);
+
+  /*
+    The row is wider than the screen too (nine stages), so the marked stage
+    is kept in it: the M10 week walk found the board opened on Filming with
+    "Film…" cut at the row's right edge. Only the row scrolls, sideways, and
+    only when the marked button is not already whole — never the page.
+  */
+  useEffect(() => {
+    const row = rowRef.current;
+    const button = row?.querySelectorAll<HTMLElement>("button")[showing];
+    if (!row || !button) return;
+    const rowBox = row.getBoundingClientRect();
+    const box = button.getBoundingClientRect();
+    if (box.left >= rowBox.left && box.right <= rowBox.right) return;
+    const gutter = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+    row.scrollTo({ left: row.scrollLeft + box.left - rowBox.left - gutter, behavior: "auto" });
+  }, [showing]);
 
   useEffect(() => {
     const board = boardRef.current;
@@ -70,6 +88,7 @@ export function StageJump({
 
   return (
     <nav
+      ref={rowRef}
       aria-label="Stages"
       data-testid="stage-jump"
       className="-mx-gutter overflow-x-auto px-gutter md:hidden"

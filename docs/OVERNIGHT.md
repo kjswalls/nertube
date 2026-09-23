@@ -173,6 +173,24 @@ ones most likely to matter to you:
 - **A checklist item added to one video has no estimate**, so `/now`'s
   "10 minutes or less" filter always lets it through.
 
+> **Update, 23 September 2026 (M10).** Written after the list above, which is
+> left as it was on the day. Three of its entries are no longer true:
+>
+> - **The script is editable in the app**, from Scripting on, with *Reset from
+>   template* (it asks first, and Undo lasts until you leave the page).
+> - **"Today" is your day.** Your time zone is recorded from your browser at
+>   sign-in and changed in Settings → Time zone; the calendar, `/now`'s
+>   go-live check, the board's batch-day date and the matrix's month follow
+>   it. Migration `0010_time_zone.sql` has **not** been applied to the hosted
+>   database yet; until it is, the deployed app keeps drawing dates in UTC and
+>   says so.
+> - **Tap targets on a phone are 44px** on the settings rows, the calendar
+>   (now a list of days below 768px) and everywhere else `e2e/phone.spec.ts`
+>   measures. Still no real phone.
+>
+> The rest stands. `docs/MILESTONES.md` has the M10 sections, and the README's
+> Honest limits were rewritten to match.
+
 ## Every decision taken without you
 
 These are the ones worth reading first, because each changes how the tool
@@ -200,6 +218,12 @@ behaves and you might choose differently:
   - Milestones ran one at a time, after the sibling sessions failed.
   - I corrected the README's deploy claims.
   - I committed and pushed a checkpoint at every check-in.
+
+> **Update, 23 September 2026 (M10).** Three decisions above were reversed at
+> your request: "Today" is no longer UTC (a per-user setting), there is a
+> script editor with reset-from-template, and below 768px the calendar is a
+> list of days rather than a "wider screen" note. M10's own decisions are in
+> `docs/MILESTONES.md` under its four M10 sections.
 
 The full list, generated from every "Decisions taken without the user" section
 in `docs/MILESTONES.md`, is below: 166 decisions. Each heading links to its

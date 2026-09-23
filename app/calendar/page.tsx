@@ -358,7 +358,7 @@ function summarise(
 
   // The cross-channel claim is only worth making when there is more than one
   // channel to be crossing.
-  const scope = channelCount > 1 ? " Every channel, on one grid." : "";
+  const scope = channelCount > 1 ? " Every channel, on one calendar." : "";
   return `${parts.join(" · ")}.${scope}`;
 }
 

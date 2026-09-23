@@ -267,7 +267,7 @@ export function PostPublishBlock(props: PostPublishProps) {
               data-testid="publish-live-url"
               target="_blank"
               rel="noreferrer"
-              className="truncate text-xs underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="truncate text-xs underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:block thumb:py-3.5 thumb:text-[13px]"
             >
               {props.youtubeUrl}
             </a>

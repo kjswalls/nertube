@@ -58,7 +58,9 @@ decision taken without the user.
   old text back until you leave the page. Before Scripting the tab is locked
   and shows no editor: the title, thumbnail concept and hook come first.
 - **Calendar** (`/calendar`) — target publish dates for every channel on one
-  month, and filming days as their own kind of event.
+  month, and filming days as their own kind of event. On a phone the month is
+  a list of the days that hold something, with whole titles; tapping a date
+  opens that day.
 - **Settings** (`/settings/…`) — per channel: stages (rename, reorder within the
   core order, switch off, add your own), checklist templates with minute
   estimates, buckets and quotas, the voice guide, the script template, the WIP
@@ -78,7 +80,8 @@ decision taken without the user.
   tile size* (the three variants at feed size), conditioned on the channel's
   voice guide and past titles. Proposals, never edits: nothing lands in a field
   until it is accepted. (The code calls each button an "assist".)
-- **Keys** — `?` on any page with the sidebar lists what works there. `g` then a letter goes
+- **Keys** — `?` on any page with the sidebar lists what works there (on a
+  phone, "Keyboard shortcuts" in the menu opens the same list). `g` then a letter goes
   places, `j`/`k`/`Enter`/`Escape` work every list, `[`/`]` move a card, `x`
   does a `/now` row, `p` promotes an idea (in the bank and on the board).
 
@@ -206,7 +209,7 @@ anything but a loopback `PGHOST`.
 | `npm run lint` | ESLint. |
 | `npm test` | Vitest: the ranking rules, the date helper, the assist provider against a stubbed transport, the schemas. |
 | `npm run db:verify [dbname]` | The Docker-free database check: drops and recreates a database on local Postgres, applies `supabase/tests/shim.sql` (the Supabase pieces a plain Postgres lacks: the `auth` and `storage` schemas, `auth.uid()`, the roles and default grants), every migration in order, then every `supabase/tests/*.test.sql`. Exits non-zero on the first failure. |
-| `npm run e2e` | Playwright, against the real app — a production build (`next build && next start`) — and the harness. `e2e/m9-week.spec.ts` is the whole week — capture to thumbnail swap — once with a mouse and keyboard at 1440×900 and once by touch at 390×844, with a screenshot of every step under `test-results/m9-week/`. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. |
+| `npm run e2e` | Playwright, against the real app — a production build (`next build && next start`) — and the harness. `e2e/m9-week.spec.ts` is the whole week — capture to thumbnail swap, with the script written and reset in the app and the time zone changed in Settings (M10) — once with a mouse and keyboard at 1440×900 and once by touch at 390×844, with a screenshot of every step under `test-results/m9-week/`. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. |
 | `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
 The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
@@ -329,10 +332,10 @@ the runbook for someone who has the accounts; see
    project URL, the anon key and the service-role key. The service-role key
    stays in your shell; it never goes to Vercel.
 2. **Push the schema.** `npx supabase login`, `npx supabase link --project-ref
-   <ref>`, `npx supabase db push`. That applies `0001` to `0009`: every table,
-   policy, revoke and function, and the private `thumbnails` bucket with its
-   policy and limits. `npx supabase migration list` should show all nine
-   remotely.
+   <ref>`, `npx supabase db push`. That applies `0001` to `0010`: every table,
+   policy, revoke and function, the private `thumbnails` bucket with its
+   policy and limits, and (0010) the per-user `profiles` row that holds the
+   time zone. `npx supabase migration list` should show all ten remotely.
 3. **Create the one user** in the dashboard (Authentication → Users → *Add
    user*, auto-confirm), then turn sign-ups off (Authentication → Sign In /
    Providers → *Allow new users to sign up*). `supabase/config.toml` covers the
@@ -379,9 +382,13 @@ found.
 
 - **It is deployed, but nothing here was tested against the deployment.** There
   is a hosted Supabase project and a Vercel project, both created by hand on
-  17 September. All nine migrations were applied to the hosted database, one at
-  a time, through Supabase's management API (the MCP connector), and each
-  was read back afterwards. But no test in this repository has run against either one:
+  17 September. Migrations 0001–0009 were applied to the hosted database, one
+  at a time, through Supabase's management API (the MCP connector), and each
+  was read back afterwards. **`0010_time_zone.sql` (M10) has not been applied
+  there.** Until it is, a deployed M10 build runs as M9 did as far as dates
+  go: every page reads no zone, draws in UTC and says so, and saving a zone in
+  Settings is refused with a sentence. But no test in this repository has run
+  against either one:
   - no spec has signed in to the live site;
   - no upload has gone to a hosted bucket (M1's one unfinished acceptance
     item);
@@ -407,14 +414,15 @@ found.
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
 - **The SQL tests have never run on Postgres 17.** The hosted database is
-  17.6, and all nine migrations applied to it cleanly. `supabase/config.toml`
+  17.6, and 0001–0009 applied to it cleanly; 0010 has not been tried there. `supabase/config.toml`
   pins `major_version = 17` to match. `supabase/tests/` has only ever run on
   PostgreSQL 16 (16.15, the harness's version). Nothing in the tests is known to
   behave differently on 17, but nothing has checked.
 - **No real phone and no touchscreen.** Every phone measurement is Chromium at a
   phone-sized viewport. `e2e/m9-week.spec.ts` walks the whole week at 390×844
   as an emulated touch device (`hasTouch`, `isMobile`, so `pointer: coarse` is
-  true and every press is a tap), and the rest of the suite uses a mouse. The
+  true and every press is a tap), `e2e/phone.spec.ts` measures every route that
+  way (M10), and the rest of the suite uses a mouse. The
   on-screen keyboard is simulated by a short viewport; iOS Safari's own
   behaviour (the visual viewport, zoom on focus) has not been seen on a device
   (M9). Every text field the M9 review found under 16px — the bank's search
@@ -502,13 +510,21 @@ found.
 - **"Confirm live" is two writes, not one transaction.** If the move fails after
   the URL is saved, the page says so in those words; a second press finishes it
   (M4).
-- **The board and the calendar are desktop views.** On a phone the board's
-  strip scrolls sideways and the card arrows work; nothing drags. The calendar
-  shows a date and a chip per day at 390px and says so (M9).
+- **On a phone the board is one column at a time, and nothing drags.** Below
+  768px a column is nearly the screen's width and a row of stage buttons
+  (each with its count) jumps between them; the card arrows move a video on.
+  Drag and drop needs a mouse. The weekly strip above the row repeats the
+  counts, with the ages (M10).
+- **On a phone the calendar is a list, not a grid.** Below 768px the month is
+  the days that hold something (plus today), one row each, with whole titles.
+  An empty day is not listed, so opening one takes "Schedule a filming day" or
+  the `?day=` address; the grid, and the weekday columns, are the desktop's
+  (M10).
 - **An existing idea is filed on its own page, not in the matrix.** The
   matrix's empty cells capture a *new* idea straight into that cell; an idea
   captured without its pillar and format is filed from the Packaging tab of its
-  video page (the Filing block, below the packaging fields). The bank row and
+  video page (the Filing block, below the packaging fields; on a phone a link
+  at the top of the tab jumps to it). The bank row and
   the matrix's "not on the grid" line say it is unfiled and cannot fix it in
   place (M5). The week walk in M9 found this the longest detour of the week.
 - **Checklist items do not tick themselves.** Publish Prep's "3 thumbnail
@@ -520,33 +536,40 @@ found.
 - **Capture's tag box does not suggest tags**; it is the comma-separated box,
   deliberately, on the fastest path in the product. The video page's tag
   editor does suggest (M5).
-- **A calendar day holding one or two videos has no link to its day panel**;
-  its chips link to the videos. The panel is reachable for every day by
-  `?day=` (M6).
+- **On a desktop, a calendar day holding one or two videos has no link to its
+  day panel**; its chips link to the videos. The panel is reachable for every
+  day by `?day=` (M6). On a phone every listed day's date opens it (M10).
 - **Reordering is read-then-write.** Stages, template items and buckets are
   reordered by reading the rows and writing them back; a row removed in another
   tab in between can be re-inserted. One user, one session (M7).
 - **The Repurposed switch on a video page is pre-disabled when the lane holds
   videos**, where the stage editor in Settings leaves its switch live and lets
   the database refuse. Same rule, same sentence, two behaviours (M7).
-- **On a phone, some views are usable rather than comfortable.** `/now` and
-  `/capture` were designed for 390px and walked control by control (M9).
-  Elsewhere: the matrix shows two of its eight format columns at a time and
-  scrolls sideways inside itself; the video page's Packaging tab is long, with
-  Filing and the YouTube preview below every packaging field; an assist panel
-  opens below the button that asked for it, partly under the fold; the 24-hour
-  form's "New viewers" field sits below its save button. None of these scrolls
-  the page sideways.
-- **Tap targets are 44px on `/now`, `/capture` and the main controls, not
-  everywhere.** Under a thumb (a phone-width screen or a coarse pointer), the
-  M9 review raised `/now`, capture, the phone menu, the board's card arrows,
-  the brainstorm's buttons, the packaging block's Choose/Remove/Add, the bank's
-  Promote and Archive and its filters, the section tabs, the checklist
-  expander, the calendar's month buttons, the settings screens' Add buttons,
-  sign-in and sign-out to 44px. Not raised: the calendar's chips (about 20px
-  tall at 390 — the month is a desktop view, and says so), the settings rows'
-  up/down arrows and their "Remove" links (the review measured 24–28px), and
-  links inside sentences. None of it was seen on a real phone.
+- **On a phone, a few things are still a scroll away.** Every route was walked
+  at 390×844 by touch in M10. What remains: the matrix shows four of its eight
+  formats at a time (the pillar column stays put while they scroll sideways
+  inside the grid); the video page's Packaging tab is long, with two links at
+  its top to Filing and the YouTube preview; its five section tabs wrap to two
+  lines; a checklist template item in Settings is a one-line field, so a long
+  one scrolls inside its box. On the Script tab the script itself starts about
+  630px down, under the checklist strip, Structure and "End screen points
+  at", so the first thing a phone shows of a script is its first two lines;
+  and a new bullet in the Body is written by tapping between the template's
+  empty `-` lines, which is fiddly by thumb (the M10 week walk). Nothing
+  scrolls the page sideways at 320, 360 or 390.
+- **Tap targets are 44px under a thumb, with two exceptions.** On a
+  phone-width screen or a coarse pointer, every control on the page of every
+  route and in the open menu — the buttons, links, tabs, fields and checkbox
+  labels `e2e/phone.spec.ts` measures on twenty routes, the Script tab and
+  Settings → Time zone among them — is at least 44px tall (M10). Of the
+  dialogs, the week walk measures the script reset's two buttons; the others
+  (schedule a filming day, swap a thumbnail, the keyboard sheet's contents)
+  were not measured, apart from the sheet's Close.
+  The exceptions are M9's: `/now`'s
+  links from a row to somewhere else (the video, the channel) are 24px, WCAG
+  2.5.8's floor for a target that is not the row's own control, and a link
+  inside a sentence is the size of its text. With a mouse on a desktop the
+  density is M3's. None of it was seen on a real phone.
 - **A checklist item you add to one video has no estimate.** Items added on a
   video's own checklist are stored with no minutes, and nothing in the app sets
   them afterwards (M3 left per-item estimates to M7, which built the template
@@ -610,9 +633,6 @@ found.
 - **The add-a-stage and add-a-bucket forms are still two components.** M7's
   review offered to merge them in M9; they differ by a quota box and share a
   dozen lines, and M9 left them as two.
-- **The `?` sheet cannot be opened by touch.** Its button is in the desktop
-  sidebar; a phone with a hardware keyboard gets the keys without a visible way
-  to learn them other than pressing `?` (M9).
 - **No key moves a video from its own page.** `[`/`]` are the board's. On
   `/videos/<id>` the stage select is in the Schedule section: the section tabs,
   then three Tabs. An arrow key on it chooses a stage and Enter (or the Move

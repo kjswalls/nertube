@@ -93,7 +93,7 @@ export function DayPanel({
         <Link
           href={calendarHref({ month })}
           data-testid="calendar-day-close"
-          className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+          className="rounded-button border border-border px-2 py-1 text-[12px] outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent thumb:inline-flex thumb:min-h-11 thumb:items-center"
         >
           Close
         </Link>
@@ -183,7 +183,7 @@ function VideoLine({
       data-testid="calendar-day-line"
       data-state={state}
       className={[
-        "flex items-baseline gap-2 rounded-button py-1 pr-2 pl-2 outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent",
+        "flex items-baseline gap-2 rounded-button py-1 pr-2 pl-2 outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:items-center",
         channel ? stripeClass(channel.stripe) : "",
       ].join(" ")}
     >

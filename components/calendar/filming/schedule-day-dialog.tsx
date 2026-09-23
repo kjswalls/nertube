@@ -298,7 +298,7 @@ export function ScheduleDayDialog({
           {/*
             `min-w-0`: a fieldset's default `min-width` is `min-content`, so one
             long title pushed every row past the dialog's edge at phone width
-            (M9's week walk found it at 390px). With it, `truncate` does its job.
+            (M9's week walk found it at 390px). With it, the two-line clamp does its job.
           */}
           <fieldset className="flex min-w-0 flex-col gap-2">
             <legend className="text-xs font-medium text-muted">
@@ -369,7 +369,13 @@ export function ScheduleDayDialog({
                         className="mt-0.5 accent-[var(--accent)]"
                       />
                       <span className="flex min-w-0 flex-col">
-                        <span className="truncate font-display text-[14px] leading-snug">
+                        {/*
+                          Two lines, not one (M10 integration): at 390px one
+                          line held about forty characters, so the week walk's
+                          own title read "…a month taugh…" in the list of what
+                          to shoot. Two hold a 55-character title whole.
+                        */}
+                        <span className="line-clamp-2 font-display text-[14px] leading-snug">
                           {candidate.title}
                         </span>
                         <span className="text-[11px] text-muted">

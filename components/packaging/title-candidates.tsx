@@ -231,7 +231,7 @@ export function TitleCandidates({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="min-w-0 flex-1 resize-none rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base outline-none field-sizing-content hover:border-border focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full"
+                  className="min-w-0 flex-1 resize-none rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base outline-none field-sizing-content hover:border-border focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full thumb:min-h-11"
                 />
 
                 <button

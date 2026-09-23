@@ -322,7 +322,7 @@ export function FilmingDayPanel({
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <Link
                     href={`/videos/${video.id}`}
-                    className="truncate font-display text-[14px] leading-snug outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                    className="truncate font-display text-[14px] leading-snug outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center"
                   >
                     {video.title}
                   </Link>

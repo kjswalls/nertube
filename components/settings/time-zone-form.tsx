@@ -103,8 +103,14 @@ export function TimeZoneForm({
         <p data-testid="time-zone-today" className="text-[13px] leading-5 text-muted">
           {known ? (
             <>
+              {/*
+                The city is the server's, like the date and the time beside
+                it (M10 integration): naming the zone just saved while the
+                date was still the old zone's read "Wednesday … in Kiritimati,
+                where it is 13:34" for the moment before the refresh landed.
+              */}
               Today is <span className="text-foreground">{todayLabel}</span> in{" "}
-              {timeZoneCity(saved)}
+              {timeZoneCity(initial)}
               {timeLabel ? (
                 <>
                   , where it is{" "}

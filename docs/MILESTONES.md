@@ -9820,3 +9820,316 @@ Seven specs derived a date from the machine's UTC day (`calendar`,
 | Full browser suite, first run | 320 passed, 1 failed, 1 skipped (`session-refresh`, which only runs under `e2e:refresh`). The failure was `m7-acceptance.spec.ts:225` counting four settings links; there are five now, and the spec counts five and checks the fifth's address |
 | The affected specs again (timezone, m7-acceptance, m4-acceptance, post-publish, now, calendar, settings-stages) | 47 passed |
 | Full browser suite, final run (`E2E_REUSE=0 npx playwright test`, with the script-editor slice's specs in the same tree) | **321 passed, 1 skipped** (`session-refresh`), 14.8 min |
+
+## M10 — The phone, everywhere
+
+> The slice that owns the phone-width behaviour of every route except the
+> Script tab (the script slice) and the time-zone field (the time-zone
+> slice). M9 made `/now` and `/capture` good at 390px and called the rest
+> "usable rather than comfortable"; the user asked for mobile web that works
+> OK. Nothing here adds a dependency, a second modal, a second keyboard
+> mechanism or a second date helper.
+
+### The walk, before anything changed
+
+Every route, signed in, at **390×844 as a touch device** (`hasTouch`,
+`isMobile`, so `pointer: coarse` is true and every press is a `tap()`), on a
+seeded account with fourteen videos across every stage of one channel, two in
+another, four pillars, a filming day, checklists half ticked, a published
+video with and without its numbers. A script measured every visible control's
+box, every element cut by an ellipsis or a clamp, and `scrollWidth` against
+`clientWidth`; each page was also looked at in full-page and one-screen
+screenshots. It was repeated at 320×640. What it found, in the task's order:
+
+**Broken — could not be done, or hid what was being used:**
+
+| # | Where | What the walk measured |
+|---|---|---|
+| B1 | Every page | The `?` sheet had no touch way in: its button is the desktop hint bar's, which is not in the phone menu. |
+| B2 | Calendar | A day was 51px wide; a chip was 41×20 and showed two or three letters of a title ("SS I…"). Seeing what is scheduled this month meant tapping every chip. An in-month date was not a link, so a day could be opened only through a filming chip or `?day=`. |
+| B3 | Board | A column was 216px, a card's title had 106px and a three-line clamp: "The one spreadsheet that runs my entire…". Nine columns, no way across but swiping, one and a half columns on screen. |
+| B4 | Video page, every tab | The checklist strip's sentence was cut: "Idea has no checklist on th…", "Generated 10–20 title ca…" (160px of 232 and 293). |
+| B5 | Packaging | A title candidate was a 166px one-line input beside Choose and Remove: "Nine hours of sleep, on" — the half of the title that decides nothing. M9 fixed the same thing for hooks. |
+| B6 | Packaging | Tapping Generate 20 left the panel where it opened: its first proposal at y 873 on an 844 screen. |
+| B7 | Publish | The 24-hour form's Log button sat between Views and New viewers. |
+
+**Tap targets under 44px on controls used in the week's work** (M9's review
+counted some; the walk counted all): the settings rows' arrows (24×24),
+Remove links (45×18) and × buttons (20×26), their name and minute fields
+(27–30px), the settings nav and channel switch (26–28px), List/Matrix (28px),
+the calendar's chips (20px) and its "Schedule a filming day" (34px), the board's
+Filming badge (42px) and card titles (19–39px), "Ship this one" (30px),
+"Schedule a new day…" (26px), Clear / Unblocked / Archive / Add (38px), the
+24-hour Log (38px), a tag's × (15×13) and suggestions (26px), the filming
+day's Detach / Move / Cancel (about 28px), the checklist's own rows and add
+box, "← board" (16px), the wordmark (33px), and text fields at 40–42px.
+
+**Merely not ideal:** the Packaging tab is several screens long with Filing
+and the preview under every field; the matrix showed two of eight formats
+with the pillar column taking 150px; the section tabs wrap to two lines (left
+as they are — both lines are 44px tabs). **No page scrolled sideways** at 320,
+360 or 390: M9's shell clip holds.
+
+### What changed
+
+- **The `?` sheet from the phone menu.** The sheet's foot has a "Keyboard
+  shortcuts ?" button above the theme control. It is plain markup in the
+  server-rendered drawer; `AppSidebarMenu` closes the menu and, once the
+  menu's modal has let go of the page, calls the same `openShortcutSheet()`
+  the hint bar uses. One modal at a time, the sheet lists the page's keys
+  (read after the menu stopped silencing them), and focus comes back to the
+  menu button when it closes. The hint bar's "all keys" is 44px under a
+  coarse pointer too (a tablet in landscape has the desktop sidebar).
+- **The calendar is a list of days below 768px — the same table, restyled.**
+  See the decision below. Every in-month day that holds something, plus today
+  and the open day, is a full-width row: a 48×44 date block (weekday over the
+  number) that opens the day, and the chips as 44px rows with their whole
+  titles wrapped. Empty days and the neighbouring months' days are
+  `display: none` there. A tapped date's panel scrolls itself to the top of
+  the screen (`RevealOnPhone`, a no-op from `md` up), because below a list of
+  days it was a screen or more under the finger.
+- **The board: one column at a time, and a row of stages.** Below `md` a
+  column is `100vw − 4rem` (326px at 390: the screen less a 16px sliver of the
+  next column) and the strip snaps to columns. Above it, `StageJump` lists
+  every stage in board order with its count as 44px buttons; a tap scrolls
+  the strip to that column and marks it `aria-current`. The card title's
+  column is 216px instead of 106, so the three-line clamp no longer cuts
+  ordinary titles. The header sentence no longer offers swiping, which the row
+  replaces.
+- **The checklist strip's sentence** takes its own line below `md` and wraps.
+- **Title candidates wrap.** A candidate is a one-row textarea that grows with
+  its text (`field-sizing: content`); Enter still commits instead of breaking
+  the line, and a pasted line break becomes a space. Below `md` it takes the
+  row and Choose / Remove wrap under it — the hooks' rule from M9.
+- **An assist panel opens on screen.** `useAssistFocus` focuses the heading
+  without the browser's own scroll, then scrolls it: to the top below `md`
+  (under the bar, by `scroll-padding-top`), "nearest" from `md` up, as before.
+  Measured (and asserted): Generate 20's heading between y 57 and 140, under the bar, and its first proposal in the viewport.
+- **The 24-hour form** puts its Log button after the note, at every width.
+- **The Packaging tab has two jump links** at its top below `md`, "Filing and
+  tags ↓" and "How it looks on YouTube ↓" — plain in-page anchors to ids on
+  the Filing block and the preview. The fields keep the gate's order.
+- **The matrix** pins its pillar column (sticky, 96px) and draws formats 60px
+  wide below `md`: four of eight whole on a 390 screen, and the row stays
+  named while the formats scroll under it. Long format names break inside the
+  cell rather than overflow it.
+- **44px under a thumb, everywhere else the walk found.** Every control in the
+  list above got `thumb:min-h-11` (or `thumb:size-11` for the icon buttons),
+  the variant M9 defined as `(width < 48rem), (pointer: coarse)`, so a mouse
+  on a desktop keeps its density. Checkbox rows whose label is the target
+  (the stage switch, the Repurposed lane) raise the label, not the box.
+
+### Decisions taken without the user
+
+1. **The calendar is a day list at phone width, not a grid.** The task allowed
+   it if the grid could not be made to work, and it cannot: at 358px a day is
+   51px, and the content of a calendar day is titles. A smaller font or a
+   two-letter code is still not a title. The list is **the same `<table>`
+   restyled with `max-md:` rules**, not a second rendering: a second one would
+   put every chip, test id and link on the page twice (hidden elements still
+   count for a strict locator), and would be the "second calendar" M9 declined
+   to add. The month's shape (which weekday a date falls on) is carried by the
+   weekday on each date block. Empty days are not listed; "Schedule a filming
+   day" still books any date.
+2. **The board keeps its columns; it does not become a list.** A phone gets
+   one near-full-width column at a time with a stage row to jump, rather than
+   a stacked list of stages: the board's jobs (what is in each stage, move a
+   video on) are both one tap from there, and it keeps being the same board,
+   with the same card, the same arrows and the same keyboard, at every width.
+   Drag and drop still needs a mouse; the arrows are the touch path, as in M9.
+3. **The weekly strip stays above the stage row on a phone.** They overlap
+   (both give counts), but the strip carries the ages a Monday review reads,
+   and hiding it would make the phone a different board.
+4. **The 24-hour save moved after the note on the desktop too.** It is the
+   same form; top-to-bottom order is not a phone-only concern, and a second
+   button for one layout (the `/capture` trick) would have put two
+   `metrics-save` elements on the page.
+5. **Title candidates wrap on the desktop too.** One element cannot be an
+   input at one width and a textarea at another. At desktop widths a
+   candidate of up to about fifty-five characters is still one line; a longer
+   one now wraps instead of scrolling inside its box.
+6. **`/now`'s links to elsewhere stay 24px**, as M9 decided (its decision 5);
+   links inside a sentence keep the inline exception. Everything else is 44.
+7. **Text fields are 44px under a thumb as well,** not only buttons. They were
+   40–42px; the change is `min-height` and invisible with a mouse.
+
+### Deviations from PLAN.md, stated plainly
+
+- **PLAN.md's calendar is "a month grid"; on a phone it is a list of days.**
+  From 768px up it is the grid, unchanged.
+- **The phone pass went past `/now` and `/capture` again** (PLAN.md:199
+  scopes it to those two), because the user asked for mobile web that works.
+
+### Honest limits
+
+- **Still no real phone.** Every number is Chromium at a phone-sized viewport
+  with `hasTouch` and `isMobile`. The smooth scrolls (`StageJump`,
+  `RevealOnPhone`) and CSS snap have not been felt under a finger.
+- **A checklist template item in Settings is still a one-line field.** At 390
+  a long item scrolls inside its 294px box; it was left, as a settings screen
+  rather than the week's work.
+- **The board's weekly strip and stage row both count cards** on a phone (see
+  decision 3).
+- **Section tabs on the video page wrap to two lines at 390.** All five are
+  44px tabs; nothing is hidden.
+- **Hash links on the Packaging tab** change the address (`#video-filing`);
+  Back returns to the top of the tab.
+- **Dialogs were not walked control by control.** The schedule-day dialog, the
+  swap dialog and the capture box are what the M9 week walk taps through at
+  390; `e2e/phone.spec.ts` measures the pages and the open menu, not them.
+
+### Gates
+
+Run in a tree the script and time-zone slices had finished in (the
+orchestrator's checkpoint `ece4502` plus this slice), on its own ports and
+database (`DEV_STACK_PORT=54351`, `NERTUBE_DEV_DB=nertube_e2e_phone`,
+`E2E_PORT=3114`) so as not to meet another agent's stack.
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` and `-p tsconfig.harness.json` | clean |
+| `npx eslint .` | clean |
+| `npx vitest run` | 35 files, 598 tests passed (this slice adds no pure function) |
+| `e2e/phone.spec.ts` + `e2e/responsive.spec.ts` | **18 passed** (10 + 8) |
+| Full browser suite (`E2E_REUSE=0 npx playwright test`, production build) | **331 passed, 1 skipped** (`session-refresh`, which only runs under `e2e:refresh`), 15.2 min, exit 0 |
+
+Found by the first runs of the new spec, and fixed before the full run: the
+wordmark in the phone bar was 33px tall; the day panel's video lines were
+19–29px; the Live URL link on the Publish tab was 16px; the one-row candidate
+box was 34px; the pinned pillar column slid 4px under the scroller's padding
+(it is pinned at `left: 4px` now). The spec's own mistakes were a board move
+read from the database before the server had answered (now polled) and a
+calendar address assumed to be `?day=` alone (it is `?month=…&day=…`).
+
+## M10 — Integration: three slices in one tree, and the week walked again
+
+The user asked for three things after reading the M5–M9 summary: "today" in
+their own time zone, the script editable in the app with a reset from the
+template, and mobile web that works OK. Three agents built them at the same
+time in one working tree (the three sections above). This pass checked their
+reports against the code, walked the whole week again on a laptop and a
+phone with the new steps in it, fixed what the walk found, and brought the
+README and `docs/OVERNIGHT.md` up to date.
+
+### Reconciled: checked, and one of each
+
+| Rule | What the tree holds |
+|---|---|
+| One migration | `0010_time_zone.sql` only. The script slice needed no schema change (its three columns were already in the client's UPDATE grant), and the phone slice none. Nothing to merge; it applies on 0001–0009 (`verify-db.sh m10_check`: 18 files). |
+| One date helper, one zone read | Every "today" goes through `todayColumn(ms, zone)` in `lib/calendar-dates.ts`, the zone through `readTimeZone()` (`cache()`d) and the instant through `readClock()` (`cache()`d). `timeZone: "UTC"` survives only inside the helper, for zoneless `date` columns. The phone slice imported `todayColumn`, `addDays`, `monthKey`, `monthOf` and added no date code. |
+| One patch vocabulary | `lib/video-fields.ts` gained `script`, `scriptStructure`, `endScreenTarget`; no other file validates them. |
+| One save queue | The script editor and the time-zone form both use `useSaveQueue`; the unmount/`beforeunload` guards were extracted into `useUnsavedGuard` in the same file, not copied. |
+| One modal | The reset dialog is `Modal`; the phone menu closes before the `?` sheet opens, so two are never stacked. |
+| One keyboard mechanism | Untouched by M10. |
+| No duplicated components | The phone slice's new pieces (`StageJump`, `RevealOnPhone`) have no counterpart elsewhere; the four `scrollIntoView` calls in the tree do four different jobs. |
+
+**The two screens the phone slice did not own.** `e2e/phone.spec.ts` already
+had Settings → Time zone on its route list; the Script tab was not on it. It
+is now (a Scripting video with a script, `?section=script`), so both are
+measured for sideways scroll at 320/360/390 and for 44px targets like the
+other nineteen routes. Both passed without changes.
+
+### The week, walked again
+
+`e2e/m9-week.spec.ts` was extended rather than copied: the M9 walk already
+carries one idea from capture to a thumbnail swap on a laptop (1440×900,
+mouse and keys) and on a phone (390×844, `hasTouch`, `isMobile`, every press
+a tap). M10 adds, in order: **write in the script** (caret to the end, type a
+line, wait for Saved and the row), **reset it once** (the dialog names the
+chosen hook; confirm; the box and the row are byte-for-byte what `move_video`
+wrote), and at the end **change the time zone in Settings and watch the
+calendar's today move**, reached the way a person would (the sidebar, or the
+phone menu, then the settings nav), then put it back. Nothing in this
+environment can move the real clock, so the walk moves the person: to
+Kiritimati (UTC+14) from 10:00 UTC, Pago Pago (UTC−11) before 11:00, one of
+which is always on another date than UTC. Every step saves a screenshot
+under `test-results/m9-week/`; the notes below are from reading them.
+
+**Where it was awkward, and what happened to it.**
+
+| # | Device | Step | What it was like | Now |
+|---|---|---|---|---|
+| W1 | both | Reset | Reset is pressed from deep in the script, where the toolbar is pinned. "Replaced with the template." and its **Undo** were rendered *after* the toolbar in the flow, so they had scrolled away: on the phone the only visible sign of the reset was the word count dropping. The one way back from a reset was off screen. | **Fixed.** The notice is the toolbar's last row, so it is pinned with Reset. The walk asserts the notice and Undo are in the viewport. |
+| W2 | laptop (and phone) | Time zone | Straight after Save the line read "Today is Wednesday, 23 September 2026 in Kiritimati, where it is 13:34" — the new city (client state) beside the old zone's date and time (server props, until the refresh landed). In Kiritimati it was already Thursday, 03:34. | **Fixed.** The city comes from the server's zone like the date and time, so the three change together. The walk asserts the new zone's date and city side by side. |
+| W3 | phone | Board | The board opens scrolled to the first column with work (M9), but the new stage row did not follow: "Film…" was cut at the row's right edge, so the row that says where you are did not say it. | **Fixed.** `StageJump` scrolls its own row (never the page) to keep the marked stage whole. Asserted with `toBeInViewport({ ratio: 1 })`. |
+| W4 | phone | Schedule a filming day | In the dialog's list of videos to shoot, the walk's own title read "What I tracked every coffee for a month taugh…": one line held about forty characters. | **Fixed.** Two lines (`line-clamp-2`), which hold a 55-character title. |
+| W5 | phone | Calendar | "← August" / "October →" (and a day panel's close link) are 44px boxes with their text stuck to the top edge — links, unlike buttons, do not centre their content. The summary said "Every channel, on one grid" above a list. | **Fixed.** `thumb:inline-flex thumb:items-center`; "on one calendar". |
+| W6 | phone | Script | The script itself starts about 630px down the tab, under the checklist strip, Structure and "End screen points at": on arrival the phone shows its first two lines. | Left, and in the README. Moving the two fields below the script would put them out of reach on a long one; collapsing them is a design change for the user to see. |
+| W7 | phone | Script | A body bullet is written by tapping between the template's empty `-` lines. Placing a caret on a one-character line by thumb is fiddly; the walk put its line at the end instead, under "End screen". | Left, and in the README. It is the template's shape and the textarea's nature; a structured editor is out of scope (no editor library). |
+| W8 | phone | Video page | Section tabs wrap to two rows; the Packaging tab is several screens long. | As the phone slice left them (both in the README). |
+| W9 | both | Board badge | "9 in Filming across all channels" on the phone run: other specs' fixture channels are still in the database mid-suite, and the badge counts every channel by design. | Not an app issue; noted so a reader of the screenshots is not misled. |
+
+What was *not* awkward, and was checked: capture by `c` and by the bar's
+button; filing from the video page and seeing it land in the matrix;
+promote by `p` and by tap; the brainstorm's twenty titles with the panel
+opening on screen; the gate by `]` and by the card's arrow; typing in the
+script with the save line in view (toolbar at y ≥ 56 on the phone) and no
+sideways scroll; the reset dialog (focus on "Keep my script", both buttons
+44px by touch); ticking stages through on `/now`; three thumbnail uploads
+and Ship; Confirm live from `/now`; the 24-hour form with Log after the
+note; the swap from `/now`'s row; Settings → Time zone by touch with a 16px
+select and a full-width Save, and the calendar's today moving to Thursday
+the 24th and back.
+
+### Decisions taken without the user
+
+1. **The week walk was extended, not duplicated.** A second 800-line walk for
+   M10 would have been two copies of every helper to keep in step; the file
+   keeps its name (`m9-week`) because the README and three milestones refer
+   to it by that name, and its header says what M10 added.
+2. **The walk changes the seed account's zone and puts it back.** The suite
+   runs one worker, so nothing else runs meanwhile; the put-back is done
+   through Settings (part of the walk) and again by SQL in `afterAll`, so a
+   failure mid-step cannot leave the other specs' "today" in Kiritimati.
+3. **An exotic zone rather than a plausible one.** Los Angeles differs from
+   UTC's date only between 00:00 and 07:00 UTC; the walk has to see today
+   move at whatever hour it runs, and only zones near ±12 guarantee that.
+   `e2e/timezone.spec.ts` covers ordinary zones at a fixed instant.
+4. **W6 and W7 were left as findings.** Each fix changes the Script tab's
+   design (where the fields sit, or what the editor is), which the user has
+   not seen; the README says what a phone shows.
+
+### Deviations
+
+None from PLAN.md or BRIEF.md in this pass. The three slices' deviations are
+in their own sections above.
+
+### Documents
+
+- **README.** The UTC and read-only-script limits were already removed by
+  their slices; this pass corrected what had become untrue: 0010 is **not**
+  on the hosted database (the "nine migrations" lines, the deploy runbook's
+  step 2 now says ten), the tap-target entry counts twenty routes and the
+  reset dialog, and W6/W7 are in the phone entry.
+- **`docs/OVERNIGHT.md`.** Two dated notes (23 September) under "Still broken
+  or unbuilt" and "Every decision taken without you", saying which entries
+  M10 made untrue; the dated text itself is unchanged.
+
+### Honest limits of this pass
+
+- Still no real phone; every "phone" above is Chromium at 390×844 with touch
+  emulation.
+- The walk proves "today moves" on the calendar only. `/now`'s go-live check
+  and the board's batch-day date moving with the zone are
+  `e2e/timezone.spec.ts`'s, at a fixed instant through the test clock.
+- 0010 has not been applied to the hosted database from here, and its tz
+  catalogue has not been read.
+
+### Gates
+
+Run on the final tree, in this session (not taken from the slices' reports).
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` and `-p tsconfig.harness.json` | clean |
+| `npm run lint` | clean |
+| `npm run build` | clean |
+| `./scripts/verify-db.sh m10_check` | OK — migrations 0001–0010 applied, 18 SQL test files passed |
+| `npx vitest run` | 35 files, 598 tests passed |
+| `E2E_REUSE=0 npm run e2e` (production build) | **331 passed, 0 failed, 1 skipped** (`session-refresh`, which runs only under `e2e:refresh`), 15.0 min, exit 0 |
+
+Before the full run, the walk and its neighbours were run twice on their
+own: `m9-week` + `phone` (12 passed, before the fixes), then `m9-week`,
+`phone`, `script-editor`, `calendar`, `filming-days` and the board specs
+(65 passed, after W1, W3, W4 and W5). W2's fix and its assertion went in
+after that and are covered by the full run.

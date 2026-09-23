@@ -227,7 +227,7 @@ export function SkipPackaging({
           // Padding, not just a line of text: at 12px this was a 240×16 target,
           // under WCAG 2.5.8's 24×24 floor, and it is the only thing in its
           // paragraph so the inline exception does not apply.
-          className="inline-block min-h-6 py-1 text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          className="inline-block min-h-6 py-1 text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         >
           Skip the packaging gate for this video…
         </button>

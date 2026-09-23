@@ -10,7 +10,7 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { todayColumn } from '../lib/calendar-dates';
+import { formatDateColumn, todayColumn } from '../lib/calendar-dates';
 import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 import { untilTaken } from './hydration';
 import { makePng } from './png';
@@ -36,6 +36,14 @@ import { makePng } from './png';
  * only asserted. What each step was *like* is written up in
  * `docs/MILESTONES.md` ("M9 — Integration"); this file is what makes that
  * account repeatable.
+ *
+ * M10 added three things to the same walk rather than a second copy of it:
+ * the script is written in the app and reset from the template once (the
+ * notice and its Undo must be on screen), the Script tab's toolbar and the
+ * reset dialog are measured by touch, and the last step changes the
+ * account's time zone in Settings and watches the calendar's today move,
+ * then puts it back. The write-up is `docs/MILESTONES.md`, "M10 —
+ * Integration".
  *
  * Two things the walk does that a person would not, and why:
  * - "The first 24 hours" are logged from the video's Publish section on the
@@ -74,6 +82,14 @@ test.afterAll(async () => {
 });
 
 async function cleanUp(): Promise<void> {
+  // The walk changes the account's zone and puts it back through Settings; if
+  // it failed in between, put it back here (every other spec's "today" is
+  // computed in `SEED_TIME_ZONE`).
+  await db.query(
+    `update public.profiles set time_zone = $2, time_zone_source = 'chosen'
+      where user_id = $1`,
+    [userId, SEED_TIME_ZONE],
+  );
   await db.query(
     `update public.videos set filming_day_id = null
       where channel_id in (select id from public.channels where slug like 'm9-week%')`,
@@ -536,8 +552,58 @@ async function walkTheWeek(page: Page, device: Device): Promise<void> {
   /* ---------------------------------------------------- script ---- */
   await test.step('script it', async () => {
     await openVideo(page, id, 'script');
-    await expect(page.getByTestId('script-editor')).toHaveValue(/Nine hours a night/);
+    await expect(page.getByTestId('script-section')).toHaveAttribute('data-live', 'true');
+    const editor = page.getByTestId('script-editor');
+    await expect(editor).toHaveValue(/Nine hours a night/);
+    // What `move_video` wrote on the way in: the template with the hook.
+    const drafted = (await videoRow(id)).script!;
+    await expect(editor).toHaveValue(drafted);
     await shot(page, device, '08-script');
+
+    // M10: write in it, in the app. The caret goes to the end of the text,
+    // as a person scrolling down to the Body would put it.
+    const line =
+      device === 'laptop'
+        ? '\n- The alarm that mattered was the one at 20:30, not 06:30.'
+        : '\n- Coffee number four is where the afternoon goes wrong.';
+    await press(device, editor);
+    await editor.evaluate((element: HTMLTextAreaElement) => {
+      element.setSelectionRange(element.value.length, element.value.length);
+    });
+    await page.keyboard.type(line);
+    await expect(page.getByTestId('script-status')).toHaveAttribute('data-state', 'saved');
+    await expect.poll(async () => (await videoRow(id)).script).toBe(drafted + line);
+    await shot(page, device, '08a-script-written');
+    if (device === 'phone') {
+      // Typing near the end of a long script: the toolbar with the save line
+      // is still under the bar, not scrolled away.
+      const toolbar = await page.getByTestId('script-toolbar').boundingBox();
+      expect(toolbar!.y).toBeGreaterThanOrEqual(56);
+      expect(toolbar!.y).toBeLessThan(844);
+      await noSidewaysScroll(page);
+    }
+
+    // And reset it once: the template again, with the chosen hook.
+    await press(device, page.getByTestId('script-reset'));
+    const dialog = page.getByTestId('script-reset-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId('script-reset-hook')).toContainText('Nine hours a night');
+    await shot(page, device, '08b-script-reset-dialog');
+    if (device === 'phone') {
+      for (const testId of ['script-reset-confirm', 'script-reset-cancel']) {
+        const box = await page.getByTestId(testId).boundingBox();
+        expect(box!.height, testId).toBeGreaterThanOrEqual(44);
+      }
+    }
+    await press(device, page.getByTestId('script-reset-confirm'));
+    await expect(dialog).toHaveCount(0);
+    await expect(editor).toHaveValue(drafted);
+    await expect.poll(async () => (await videoRow(id)).script).toBe(drafted);
+    // The notice and its Undo are where the finger is: in the pinned toolbar,
+    // not above it where a reset from deep in the script would leave them.
+    await expect(page.getByTestId('script-reset-notice')).toBeInViewport();
+    await expect(page.getByTestId('script-reset-undo')).toBeInViewport();
+    await shot(page, device, '08c-script-reset');
 
     await page.goto('/now');
     await onlyChannel(page, device, channel.name);
@@ -556,6 +622,12 @@ async function walkTheWeek(page: Page, device: Device): Promise<void> {
     // On a phone the strip opens at the first column with work in it, so the
     // badge is on screen without a swipe (M9).
     await expect(badge).toBeInViewport();
+    if (device === 'phone') {
+      // The stage row says where the strip opened, whole (M10 integration).
+      await expect(
+        page.locator('[data-testid="stage-jump-button"][aria-current="true"]'),
+      ).toBeInViewport({ ratio: 1 });
+    }
     await shot(page, device, '10-badge');
     await untilTaken(
       async () => {
@@ -715,6 +787,74 @@ async function walkTheWeek(page: Page, device: Device): Promise<void> {
     // Answered by acting: no swap row any more.
     await expect(nowRow(page, id).filter({ has: page.locator('[data-input="swap"]') })).toHaveCount(0);
     await expect(nowRow(page, id)).not.toHaveAttribute('data-input', 'swap');
+  });
+
+  /* ------------------------------ M10: change the zone, see today move ---- */
+  await test.step('change the time zone and see today move', async () => {
+    // The seed account's zone is UTC (`SEED_TIME_ZONE`). A zone whose date
+    // differs from UTC's right now, whatever the hour: Kiritimati (UTC+14)
+    // is already tomorrow from 10:00 UTC, Pago Pago (UTC−11) still yesterday
+    // before 11:00 UTC. Nothing here can move the real clock, so the walk
+    // moves the person instead.
+    const zone = new Date().getUTCHours() >= 10 ? 'Pacific/Kiritimati' : 'Pacific/Pago_Pago';
+    const city = zone === 'Pacific/Kiritimati' ? 'Kiritimati' : 'Pago Pago';
+
+    const calendarToday = async (): Promise<string | null> => {
+      await page.goto('/calendar');
+      const cell = page.locator('[data-testid="calendar-day"][data-today="true"]');
+      await expect(cell).toHaveCount(1);
+      return cell.getAttribute('data-date');
+    };
+    expect(await calendarToday()).toBe(todayColumn(Date.now(), SEED_TIME_ZONE));
+    await shot(page, device, '20-calendar-utc');
+
+    // To Settings → Time zone the way a person gets there.
+    await page.goto('/now');
+    if (device === 'phone') {
+      await page.getByTestId('sidebar-menu').tap();
+      await page.getByRole('dialog').getByRole('link', { name: 'Settings', exact: true }).tap();
+    } else {
+      await page
+        .getByRole('navigation', { name: 'Main' })
+        .getByRole('link', { name: 'Settings', exact: true })
+        .click();
+    }
+    await page.waitForURL('**/settings**');
+    await press(device, page.getByTestId('settings-nav-link').filter({ hasText: 'Time zone' }));
+    await page.waitForURL('**/settings/account');
+
+    const select = page.getByTestId('time-zone-select');
+    const status = page.getByTestId('time-zone-status');
+    await expect(select).toHaveValue(SEED_TIME_ZONE);
+    await untilTaken(
+      () => select.selectOption(zone).then(() => undefined),
+      () => expect(status).toContainText('Not saved yet', { timeout: 2_000 }),
+    );
+    await shot(page, device, '21-time-zone-chosen');
+    await press(device, page.getByTestId('time-zone-save'));
+    await expect(status).toHaveText('Saved');
+    // The line under the heading names the new zone and *its* date together
+    // (the integration walk first saw the new city beside the old date).
+    await expect(page.getByTestId('time-zone-today')).toContainText(
+      `${formatDateColumn(todayColumn(Date.now(), zone), 'full')} in ${city}`,
+    );
+    await noSidewaysScroll(page);
+    await shot(page, device, '22-time-zone-saved');
+
+    const moved = await calendarToday();
+    expect(moved).toBe(todayColumn(Date.now(), zone));
+    expect(moved).not.toBe(todayColumn(Date.now(), SEED_TIME_ZONE));
+    await shot(page, device, '23-calendar-moved');
+
+    // And back, so every spec after this one keeps the seed account's day.
+    await page.goto('/settings/account');
+    await untilTaken(
+      () => select.selectOption(SEED_TIME_ZONE).then(() => undefined),
+      () => expect(status).toContainText('Not saved yet', { timeout: 2_000 }),
+    );
+    await press(device, page.getByTestId('time-zone-save'));
+    await expect(status).toHaveText('Saved');
+    expect(await calendarToday()).toBe(todayColumn(Date.now(), SEED_TIME_ZONE));
   });
 
   const end = await videoRow(id);

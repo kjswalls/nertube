@@ -61,7 +61,7 @@ export function Matrix({
               eight columns on a 390px screen instead of two, with the row
               always named. The desktop sizes are unchanged.
             */}
-            <td className="w-[172px] min-w-[150px] max-md:sticky max-md:left-0 max-md:z-10 max-md:w-24 max-md:min-w-24 max-md:bg-background" />
+            <td className="w-[172px] min-w-[150px] max-md:sticky max-md:left-1 max-md:z-10 max-md:w-24 max-md:min-w-24 max-md:bg-background" />
             {tally.horizontals.map((column) => (
               <th
                 key={column.bucket.id}
@@ -87,7 +87,7 @@ export function Matrix({
                 scope="row"
                 data-testid="matrix-row"
                 data-bucket={row.bucket.name}
-                className="rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-top max-md:sticky max-md:left-0 max-md:z-10 max-md:outline-4 max-md:outline-background"
+                className="rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-top max-md:sticky max-md:left-1 max-md:z-10 max-md:outline-4 max-md:outline-background"
               >
                 <span className="block font-display text-[14px] leading-tight font-medium break-words">
                   {row.bucket.name}

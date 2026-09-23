@@ -396,9 +396,16 @@ export function ScriptEditor({
             )}
           </button>
         </div>
-      </div>
 
-      <ResetNoticeLine notice={notice} onUndo={undoReset} />
+        {/*
+          In the sticky toolbar, not under it (M10 integration): Reset is
+          usually pressed from deep in a long script, where the toolbar is
+          pinned and anything after it in the flow has scrolled away — the week
+          walk found "Replaced with the template." and its Undo off screen on
+          a phone. Here they stay beside the button that caused them.
+        */}
+        <ResetNoticeLine notice={notice} onUndo={undoReset} />
+      </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
         <div className="flex flex-col gap-1">
@@ -597,7 +604,7 @@ function ResetNoticeLine({
       data-testid="script-reset-notice"
       data-kind={notice.kind}
       className={[
-        "-mt-2 flex flex-wrap items-center gap-2 text-xs",
+        "flex basis-full flex-wrap items-center gap-2 text-xs",
         failed ? "text-attention" : "text-muted",
       ].join(" ")}
     >
