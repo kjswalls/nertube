@@ -17,13 +17,15 @@ import { requireUser } from "@/lib/supabase/require-user";
 export async function redirectToFirstChannel(section: SettingsSection): Promise<never> {
   const { supabase } = await requireUser();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("channels")
     .select("slug")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
 
+  // A failed read is not "no channels" (M9): it goes to `app/error.tsx`.
+  if (error) throw new Error(`Could not load your channels: ${error.message}`);
   if (!data) redirect("/c/new");
   redirect(settingsPath(section, data.slug));
 }

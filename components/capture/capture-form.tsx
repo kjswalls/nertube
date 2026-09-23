@@ -13,6 +13,7 @@ import {
 
 import { captureVideoAction, type CaptureState } from "@/app/actions/videos";
 import { CaptureBuckets } from "@/components/ideas/assign/capture-buckets";
+import { diagnoseWriteFailure, failureSentence } from "@/lib/write-failure";
 
 import { readLastChannel, writeLastChannel } from "./last-channel";
 
@@ -367,11 +368,14 @@ export function CaptureForm({
         setSubmitting(true);
         void captureVideoAction(null, data)
           .then((result) => setClientResult(result))
-          .catch(() =>
+          .catch(async () =>
             setClientResult({
               ok: false,
-              error:
+              // Offline, signed out, or unreachable: `lib/write-failure.ts`.
+              error: failureSentence(
+                await diagnoseWriteFailure(),
                 "Could not reach the server, so nothing was saved. What you typed is still here — try again.",
+              ),
             }),
           )
           .finally(() => setSubmitting(false));

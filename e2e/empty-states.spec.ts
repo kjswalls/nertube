@@ -3,6 +3,8 @@ import pg from 'pg';
 
 import { PG } from '../scripts/dev-stack/shared';
 
+import { untilTaken } from './hydration';
+
 /**
  * M9 — a brand-new account, walked from the login form to a first channel, a
  * first bucket and a first video, with no dead end on the way.
@@ -13,7 +15,7 @@ import { PG } from '../scripts/dev-stack/shared';
  * account with **nothing** — no channel, no video, no bucket, no filming day —
  * and only ever uses the app to change that. The only SQL here is creating the
  * user (there is no sign-up screen by design) and, for the error-state case,
- * taking one privilege away and giving it back.
+ * making one read fail for this account alone and then putting it back.
  *
  * What it holds the app to (the M9 brief): every empty view says what it is
  * for, why it is empty, and the one thing to do next, *one click away*; and
@@ -47,12 +49,45 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  // Make sure a failed run cannot leave the privilege revoked for every spec
-  // after this one.
-  await db?.query('grant select on public.thumbnail_swaps to authenticated').catch(() => {});
+  // A failed run must not leave the failing read behind for this user.
+  await failReadsFor(null).catch(() => {});
   await removeUser().catch(() => {});
   await db?.end();
 });
+
+/**
+ * Make every read of `channels` fail — for this spec's account only.
+ *
+ * `channels` because a policy is evaluated per row, so the table has to hold a
+ * row of this account's for the read to fail at all (its `thumbnail_swaps`,
+ * the first choice, has none, and the page loaded happily).
+ *
+ * A restrictive RLS policy whose `CASE` raises for exactly one user id: every
+ * other account (the seeded one, which the rest of the suite signs in as,
+ * possibly at the same moment on a shared stack) evaluates the `else true`
+ * branch and never reaches the exception. `CASE` is the one construct whose
+ * evaluation order Postgres guarantees, which is why it is not an `OR`.
+ * `null` removes it.
+ */
+async function failReadsFor(userId: string | null): Promise<void> {
+  await db.query('drop policy if exists e2e_empty_states_fail on public.channels');
+  if (userId === null) {
+    await db.query('drop function if exists public.e2e_empty_states_fail()');
+    return;
+  }
+  await db.query(`
+    create or replace function public.e2e_empty_states_fail() returns boolean
+    language plpgsql volatile as $$
+    begin
+      raise exception 'e2e: a read that did not come back';
+    end $$`);
+  await db.query(
+    `create policy e2e_empty_states_fail on public.channels
+       as restrictive for select to authenticated
+       using (case when auth.uid() = '${userId}'::uuid
+                   then public.e2e_empty_states_fail() else true end)`,
+  );
+}
 
 /** Every row this account made goes with it: `user_id` cascades everywhere. */
 async function removeUser(): Promise<void> {
@@ -208,7 +243,7 @@ test('the matrix leads to a first pillar, and the pillar is a row on the way bac
   await page.goto(`/c/${CHANNEL.slug}/ideas?view=matrix`);
   await hydrated(page);
   const panel = page.getByTestId('matrix-needs-buckets');
-  await expect(panel.getByRole('heading')).toHaveText('No topic pillars yet');
+  await expect(panel.getByRole('heading', { level: 2 })).toHaveText('No topic pillars yet');
   await panel.getByTestId('add-buckets').click();
   await page.waitForURL(`**/settings/buckets/${CHANNEL.slug}`);
   await hydrated(page);
@@ -284,13 +319,17 @@ test('a page whose read fails says so, and Try again recovers it', async ({ page
   await hydrated(page);
 
   /*
-    A real failed read, not a mocked one: `/now` reads `thumbnail_swaps` for
-    its swap rule, and with SELECT taken away PostgREST answers that read
-    with a permission error — which is what a dropped database connection
-    looks like to the page (`lib/now-data.ts` throws either way). Given back
-    in `finally`, and again in `afterAll`.
+    A real failed read, not a mocked one: `/now`'s first read is the
+    account's channels, and with the policy above PostgREST answers it with an
+    error — which is what a dropped database connection looks like to the
+    page (`lib/now-data.ts` throws either way). Removed in `finally`, and
+    again in `afterAll`.
   */
-  await db.query('revoke select on public.thumbnail_swaps from authenticated');
+  const found = await db.query<{ id: string }>(
+    'select id from auth.users where lower(email) = lower($1)',
+    [EMAIL],
+  );
+  await failReadsFor(found.rows[0].id);
   try {
     await page.goto('/now');
     const error = page.getByTestId('route-error');
@@ -298,10 +337,69 @@ test('a page whose read fails says so, and Try again recovers it', async ({ page
     await expect(error).toContainText('Nothing you had already saved is affected.');
     await expect(error.getByRole('link', { name: 'Go to Now' })).toHaveAttribute('href', '/now');
   } finally {
-    await db.query('grant select on public.thumbnail_swaps to authenticated');
+    await failReadsFor(null);
   }
 
   await page.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByTestId('route-error')).toHaveCount(0);
   await expect(page.locator('[data-testid="now-row"]', { hasText: IDEA })).toHaveCount(1);
+});
+
+test('a session that ends mid-edit says so, keeps the text, and saves after signing in again', async ({
+  page,
+  context,
+}) => {
+  await signIn(page);
+  await page.waitForURL('**/now');
+  const found = await db.query<{ id: string }>(
+    `select v.id from public.videos v join auth.users u on u.id = v.user_id
+      where lower(u.email) = lower($1) and v.title = $2`,
+    [EMAIL, IDEA],
+  );
+  const videoId = found.rows[0].id;
+
+  await page.goto(`/videos/${videoId}?section=schedule`);
+  await hydrated(page);
+
+  // The session goes — signed out in another tab, a revoked refresh token.
+  await context.clearCookies();
+
+  const notes = page.getByLabel('Notes', { exact: true });
+  const typed = 'Written after the session had gone';
+  await untilTaken(
+    async () => {
+      await notes.fill(typed);
+      await notes.blur();
+    },
+    () =>
+      expect(page.getByTestId('notes-status')).toContainText(
+        'You have been signed out, so this is not saved.',
+        { timeout: 5_000 },
+      ),
+  );
+
+  // Before M9 this said "Could not reach the server … try again", which was
+  // false, and trying again could never work.
+  await expect(page.getByTestId('notes-status')).not.toContainText('Could not reach');
+  await expect(notes).toHaveValue(typed);
+
+  // The way forward keeps this tab (and its text) where it is.
+  const signInLink = page.getByTestId('notes-status-sign-in');
+  await expect(signInLink).toHaveAttribute('target', '_blank');
+  const [tab] = await Promise.all([context.waitForEvent('page'), signInLink.click()]);
+  await tab.getByLabel('Email').fill(EMAIL);
+  await tab.getByLabel('Password').fill(PASSWORD);
+  await tab.getByRole('button', { name: 'Sign in' }).click();
+  await tab.waitForURL(`**/videos/${videoId}**`);
+  await tab.close();
+
+  // Back here, the same text saves.
+  await notes.focus();
+  await notes.blur();
+  await expect(page.getByTestId('notes-status')).toHaveText('Saved');
+  const saved = await db.query<{ notes: string | null }>(
+    'select notes from public.videos where id = $1',
+    [videoId],
+  );
+  expect(saved.rows[0].notes).toBe(typed);
 });

@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import {
+  diagnoseWriteFailure,
+  failureSentence,
+  signInAgainHref,
+} from "@/lib/write-failure";
+
 /**
  * The application's one autosave pattern.
  *
@@ -68,6 +74,11 @@ export type SaveState<Payload = unknown> =
       payload: Payload;
       /** The row moved under us; a retry would only overwrite the newer values. */
       conflict?: boolean;
+      /**
+       * The session had gone, not the server (M9). The line offers a sign-in
+       * in a new tab beside Retry, so the text on this page survives it.
+       */
+      signedOut?: boolean;
     };
 
 /**
@@ -88,6 +99,8 @@ export type SaveResult<Patch = never> =
       ok: false;
       error: string;
       conflict?: boolean;
+      /** Set by the queue itself when a rejection turns out to be a lost session. */
+      signedOut?: boolean;
       /**
        * The part of the patch that did not land, when a save is a *sequence*
        * and the first part of it did.
@@ -229,7 +242,14 @@ export function useSaveQueue<Patch>({
       try {
         result = await saveRef.current(patch);
       } catch {
-        result = { ok: false, error: UNREACHABLE };
+        // A rejection is "no answer", which is three different things with
+        // three different ways forward — see `lib/write-failure.ts` (M9).
+        const why = await diagnoseWriteFailure();
+        result = {
+          ok: false,
+          error: failureSentence(why, UNREACHABLE),
+          signedOut: why === "signed-out",
+        };
       }
 
       inFlight.current = false;
@@ -271,6 +291,7 @@ export function useSaveQueue<Patch>({
         message: result.error,
         payload,
         conflict: result.conflict,
+        signedOut: result.signedOut,
       });
     });
   }, []);
@@ -548,7 +569,23 @@ export function SaveStatus<Payload>({
         >
           Reload
         </button>
-      ) : state.kind === "error" && onRetry ? (
+      ) : null}
+
+      {state.kind === "error" && state.signedOut ? (
+        // A new tab, because this one holds the unsaved text; the session
+        // cookie is shared, so Retry here works once that tab has signed in.
+        <a
+          href={signInAgainHref()}
+          target="_blank"
+          rel="noopener"
+          data-testid={`${testId}-sign-in`}
+          className="rounded-button border border-border px-2 py-0.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Sign in (new tab)
+        </a>
+      ) : null}
+
+      {state.kind === "error" && !conflict && onRetry ? (
         <button
           type="button"
           data-testid={`${testId}-retry`}

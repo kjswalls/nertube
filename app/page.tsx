@@ -27,12 +27,20 @@ export default async function Home() {
   const { supabase } = await requireUser();
 
   // "First" = earliest created, matching the order the sidebar lists them in.
-  const { data: channel } = await supabase
+  const { data: channel, error } = await supabase
     .from("channels")
     .select("slug")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
+
+  // M9: a read that failed is not an account with no channels. Redirecting it
+  // to `/c/new` greeted an existing user with "Start with a channel" whenever
+  // the database blinked; thrown, it lands on `app/error.tsx`, which says what
+  // happened and offers Try again.
+  if (error) {
+    throw new Error(`Could not load your channels: ${error.message}`);
+  }
 
   redirect(channel ? "/now" : "/c/new");
 }

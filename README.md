@@ -56,7 +56,7 @@ decision taken without the user.
   critique of the three variants at feed size, conditioned on the channel's
   voice guide and past titles. Proposals, never edits: nothing lands in a field
   until it is accepted.
-- **Keys** — `?` on any page lists what works there. `g` then a letter goes
+- **Keys** — `?` on any page with the sidebar lists what works there. `g` then a letter goes
   places, `j`/`k`/`Enter`/`Escape` work every list, `[`/`]` move a card, `x`
   does a `/now` row, `p` promotes an idea.
 
@@ -400,6 +400,17 @@ found.
   closing a panel stops the waiting, not the call, which runs to completion and
   is billed (M8 review). Fine for one person paying their own bill; the first
   thing to add if there is ever a second user.
+- **A signed-out save is recognised in some places, not all.** When a session
+  ends mid-edit (signed out in another tab, a revoked refresh token), the video
+  page's fields, capture, checklist ticks and `/now`'s rows say "You have been
+  signed out", keep what was typed, and offer a sign-in in a new tab. Every
+  other control — the board's moves, the bank's Promote and Archive, the
+  settings editors, the filming-day dialogs, the thumbnail and assist
+  controls — still says "Could not reach the server", and trying again will
+  not work until you sign in (M9).
+- **The error page has no sidebar.** When a page cannot read its data it is
+  replaced by one panel with Try again and Go to Now; the shell is itself a
+  database read, so it is not drawn there (M9).
 - **Fonts are fetched from Google at build time.** A build machine without
   egress to `fonts.googleapis.com` fails the build rather than falling back.
 - **Scale.** PostgREST caps a read at 1000 rows; every list pages past it, then

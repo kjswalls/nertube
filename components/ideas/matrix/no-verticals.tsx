@@ -89,21 +89,23 @@ export function NoVerticals({
       >
         <p>
           The matrix crosses topic pillars with formats, and every empty
-          intersection is a prompt for an idea. It needs both axes:{" "}
-          {missing.join(" and ")} {missing.length === 2 ? "are" : "is"}{" "}
-          missing, so there is nothing to cross yet.
+          intersection is a prompt for an idea.{" "}
+          {missing.length === 2 ? (
+            "This channel has neither yet."
+          ) : verticals.length === 0 ? (
+            <>
+              This channel has the eight formats from the brief and no pillars
+              yet — on purpose: formats are a vocabulary anyone can borrow, but
+              the three to five topics <em>this</em> channel is about are yours
+              to name.
+            </>
+          ) : (
+            "This channel has pillars, and no formats to cross them with."
+          )}
         </p>
-        {verticals.length === 0 ? (
-          <p>
-            A new channel starts with the eight formats from the brief and no
-            pillars, on purpose: formats are a vocabulary anyone can borrow,
-            but the three to five topics <em>this</em> channel is about are
-            yours to name.
-          </p>
-        ) : null}
         <p data-testid="add-buckets-note">
-          Pillars, formats and monthly quotas live in the channel&rsquo;s
-          settings; one named there is a row here on the way back.
+          Both live in the channel&rsquo;s settings, with their monthly quotas;
+          one named there is a row here on the way back.
         </p>
       </StatePanel>
 

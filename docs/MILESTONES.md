@@ -8488,3 +8488,211 @@ counts for this slice.** None of the 270-odd existing specs needed a change
 for the keyboard work: the hint-bar assertions in `m1-acceptance`, the
 capture box, the swap dialog and the assist panels' Escape all passed
 unmodified.
+
+### Gates for this slice
+
+Run in a tree other M9 slices were editing at the same time (the shortcut set,
+and the empty and error states); the numbers are what this container printed.
+
+| Gate | Result |
+|---|---|
+| Lint (every file this slice touched, and `e2e/responsive.spec.ts`) | clean |
+| Types (`tsc` on the app and on the harness) | clean for this slice. The only errors in the tree at the time were in `e2e/shortcuts.spec.ts`, another slice's file mid-edit |
+| Unit (`npx vitest run`) | 519 passed, 32 files (this slice adds no unit test — nothing in it is a pure function) |
+| `e2e/responsive.spec.ts` | **8 passed** in the full run below |
+| Full suite, cold (`E2E_REUSE=0 npx playwright test`, stack stopped first) | **281 passed, 3 failed, 1 skipped (29.8m)** |
+| Re-run of the failures plus every spec this slice's markup reaches (`m2-review`, `responsive`, `shell`, `capture`, `now`), cold | **51 passed, 0 failed (6.3m)** |
+
+**The three failures, named rather than rounded off.** Two were in
+`e2e/m2-review.spec.ts`: one found `/now` rendering the new "This page didn't
+load" error boundary instead of the page, the other a packaging save that
+never started. Both pass on the re-run above, against the same tree, and the
+error boundary they hit was being written by another slice during the run —
+so the most likely cause is a hot-reload of a half-written file. That is a
+likelihood, not a proof. The third was `e2e/shortcuts.spec.ts:472`, the
+shortcut slice's own spec, in progress. The full run should be repeated once
+the tree has stopped moving, and the orchestrator's gate run is the one to trust.
+
+**Found by an earlier run, and fixed.** The first version of the desktop
+assertion expected the sidebar strip to be exactly as tall as the viewport. In
+a full run `/now` holds every other spec's leftover videos and is longer than
+the viewport, and the strip runs the page's full height by design (M3: the
+ground must not stop at the fold). The assertion is now "at least the
+viewport", which is the actual claim.
+
+## M9 — Empty states, error states, and the README
+
+> The slice that owns what an empty or failing view says, and `README.md`.
+> It adds no feature. It pays three deferred items (the NUL byte from M7, the
+> e2e reuse default from M4, the Filming literal from M6), accounts for every
+> other one, and found one real defect on the way (a session that ends
+> mid-edit was reported as the server being down).
+
+### What a brand-new account saw, before this slice
+
+Established by reading the tree at `4a7748c` route by route, and — for the one
+case whose outcome the code did not make obvious — by walking it in Chromium
+before changing anything. The other rows were **not** screenshotted before the
+change; they are what the code at that commit renders.
+
+| Where | What it showed |
+|---|---|
+| `/` → `/c/new`, the first screen of the product | "New channel" and a form: identical for the first channel and the fifth, with no word about what a channel is or why everything else waits on one. |
+| `/c/<slug>/board`, just created | Nine columns, each reading "Nothing here yet." Nothing said how a card gets onto one; the only ways in were `c` and a sidebar button nobody had been told about. |
+| `/now`, a channel and no videos | One muted line: "Nothing is waiting on you. Capture an idea with c, or promote one from the board." A key a phone does not have, and no button. |
+| `/now`, six ideas captured and none promoted | **The same line — which was false.** Six things were waiting; `/now` skips kind `idea` by design and never said so. |
+| `/c/<slug>/ideas`, empty | The summary, a filter bar of five controls that could only ever find nothing, and "This bank is empty. Press c to capture an idea". |
+| `?view=matrix`, no pillars | The M7 `NoVerticals` card — the best of them, with a real link to the bucket editor — in its own card style and three paragraphs. |
+| `/calendar`, no channel yet | "No video anywhere has a target publish date yet … a card from the board", with *the board* unlinked because there was none. No way forward. |
+| `/videos/<unknown id>`, `/c/<unknown slug>/…`, `/settings/<section>/<unknown slug>`, any unmatched URL | Next's default "404 · This page could not be found." No sidebar, no link, no way back but the browser's. There was no `not-found.tsx` anywhere. |
+| Any page whose read throws | Next's default error screen — in production "Application error: a server-side exception has occurred". There was no `app/error.tsx`; three components' comments said so, each having been bitten. |
+| `/` when the channel read fails | A redirect to `/c/new`: an existing user greeted with "New channel" because the database blinked. `app/settings/first-channel.ts` did the same. |
+| **A session that ends mid-edit** (walked) | The Notes field on the video page said "Could not reach the server, so this is not saved. Nothing you typed has been lost — try again." **False, and the way forward could never work**: `proxy.ts` 307s the signed-out action POST to `/login`, the action's fetch follows it to HTML it cannot parse, and every retry is redirected the same way. |
+| A failed save with the network down | The save queue's line with Retry — already one presentation across the video page and settings. Kept. |
+
+### What changed
+
+- **One presentation: `components/state-panel.tsx`.** Title (what this view is,
+  in the state it is in), one or two sentences (why, and what changes it), and
+  actions (the one thing to do next, then at most a quiet alternative). A card —
+  8px radius, 1px hairline, surface ground, no shadow — so an empty view reads as
+  a view with something in it rather than a page that did not finish loading.
+  `tone="problem"` adds one thing: a 3px rule in the attention colour, not red
+  (red means a rule is being broken right now). `actions` is required: a panel
+  with no way forward is the dead end it exists to prevent. Used by the board,
+  `/now`, the bank, the matrix, the calendar, every not-found page and the
+  error page.
+- **Capture from an empty view is the capture box.** `CaptureDialog` (the modal,
+  the form, the toast with "Open it") was extracted from `CaptureHost`, which now
+  renders it; `CaptureLink` opens it from an empty state. Link first and dialog
+  second, like the matrix's empty cell: a real `<a href="/capture?c=…">` that a
+  click intercepts. After a save it refreshes the route and puts focus on the
+  video that arrived — the link that opened the box was the empty state, so
+  `Modal`'s own focus return would land on `<body>`.
+- **`/c/new`** reads the count: the first time it says "Start with a channel"
+  and two sentences about what a channel holds; after that it is the plain form.
+- **The board**: a panel above the columns when there are no cards (the columns
+  still draw — they are the answer to "what is this page"), and each empty column
+  is a quiet dashed slot with an `sr-only` sentence instead of "Nothing here yet."
+  eight times over. A channel with every stage off gets a panel linking to stage
+  settings instead of a bare sentence.
+- **`/now`** says *why* it is empty (`components/now/now-empty.tsx`): nothing
+  captured (capture here), ideas but nothing in production (to the bank with
+  the most ideas, where Promote is), or videos in production with no step to
+  offer (to the board). The filter chips are hidden when there is nothing to
+  filter.
+- **The bank**: a panel for a bank that has never held anything and one for a
+  bank worked through by promotion ("Everything in the bank has moved on", with
+  the board one click away). The filter bar is not drawn over an empty bank.
+  The summary sentences `e2e/ideas.spec.ts` asserts are unchanged.
+- **The matrix and the calendar** use the panel. The calendar's channel-less
+  case now offers "Create your first channel"; its nearest months are the
+  actions. `e2e/calendar.spec.ts`'s text and hooks are unchanged.
+- **Not found, four ways, in the frame**: `app/not-found.tsx` (anything),
+  `app/videos/[id]/not-found.tsx` (which cannot say whether the video exists
+  elsewhere, on purpose), `app/c/[slug]/not-found.tsx` and
+  `app/settings/not-found.tsx` (which list your channels, each one click from the
+  same place in the right one). All render inside `AppShell`; the status stays
+  404, which `e2e/upload.spec.ts` and `e2e/settings-checklists.spec.ts` assert.
+- **`app/error.tsx` and `app/global-error.tsx`.** "This page didn't load", or
+  "You're offline" when the browser knows it is; nothing already saved is
+  affected; Try again (`retry`, Next 16.3's re-fetching reset) and Go to Now
+  (a full load). The digest is printed small; the server's message never is.
+- **A failed read is not an empty account.** `/` and the settings redirect now
+  throw when the channel read fails, and land on the error page, instead of
+  sending an existing user to `/c/new`.
+- **A write that gets no answer is diagnosed** (`lib/write-failure.ts`):
+  offline (the browser's flag), signed out (a `HEAD` for the current page with
+  `redirect: "manual"` comes back as the proxy's redirect), or unreachable. The
+  save queue says "You have been signed out, so this is not saved. What you
+  typed is still here…" and puts a **Sign in (new tab)** link beside it — a new
+  tab, because this one holds the unsaved text; the cookie is shared, so the next
+  save here goes through. Capture, checklist ticks and `/now`'s rows use the same
+  diagnosis for their sentence. The offline sentence still begins "Could not
+  reach the server", which is true and is what `e2e/now.spec.ts` asserts.
+- **Deferred items paid** (table below): the NUL byte, the e2e reuse default,
+  the Filming literal. And `supabase/config.toml`, which the README had been
+  describing since M0 and which **did not exist** — `supabase init` was never
+  run. It is now the pinned CLI's own output with three changes.
+- **`README.md`** rewritten: what NerTube is, the principles and why the data
+  model looks like it does, running it with Docker and without (and why not to
+  reach for `supabase start` without Docker), every environment variable with
+  no value, the browser-client rule, deploying, and the limits.
+
+### Every item deferred to M9, accounted for
+
+| From | Item | Where it went |
+|---|---|---|
+| M3 review, finding 32 | The shell has no responsive breakpoint | The responsive slice (above). |
+| M3 deviation 1 | `/` lands on the board, not `/now` | Already closed by M3's integration pass (`app/page.tsx` → `/now`); checked, not redone. |
+| M4 review | `npm run e2e` should refuse a stack it did not start | **Done here.** `playwright.config.ts` reuses neither server unless `E2E_REUSE=1`; with a stack already up, Playwright stops before any test. The config comment, `scripts/dev-stack/README.md` item 31 and the README say so. |
+| M4 review | `channels.expected_ctr` has no UI | Closed by M7 (the channel settings form); checked. |
+| M5 review | No way to create a bucket | Closed by M7; this slice's spec walks it from an empty matrix. |
+| M6 review | `aria-disabled` instead of `disabled` on in-flight controls, application-wide | **Not done.** Recorded in the README's limits. It is a mechanism change in every in-flight control, in files three M9 slices were editing at once; doing it blind in the last pass was the riskier choice. |
+| M6 review | `e2e/board.m1.spec.ts`'s literal "3 in Filming across all channels" | **Done here.** The spec counts Filming videos outside its own channels and asserts `3 + n`, and asserts the count going down rather than the badge disappearing when other specs' videos keep it at three. |
+| M6 → M7 → M9 | The timezone question ("today" is the UTC day) | **Not done**, as a decision (below). In the README's limits. |
+| M7 review, finding 13 | The add-a-stage and add-a-bucket forms as one component | **Not done**, as a decision (below). In the README's limits. |
+| M7 review | The video page's text fields and the NUL byte | **Done here.** `cleanProse` in `NullableText`, the working title, tags, title candidates and their notes, hooks, the skip reason, the new-viewers note, the capture title and the swap reason. `lib/video-text.test.ts` (6 cases) pins each, including that a zero-width joiner in prose survives. |
+| M8 | "The script editor is M9's job, per PLAN.md" | PLAN.md:199 does not assign it to M9, and M9 adds no features. In the README's limits, prominently: the script is read-only, and `script_structure` and `end_screen_target` have no UI at all. |
+
+### Decisions taken without the user
+
+1. **An empty view keeps its structure.** The board draws its nine columns under
+   the panel; the matrix keeps its formats strip. The alternative, replacing the
+   view with a welcome card, hides the one thing that explains what the page is.
+2. **Capture from an empty view happens in place**, in the same box `c` opens,
+   rather than on `/capture`. The person should watch the view stop being empty.
+3. **`/now`'s empty action depends on why it is empty**, and "ideas but nothing
+   in production" sends you to the bank, not to the board: Promote is there.
+4. **The error page has no sidebar.** The shell is itself a database read, and
+   drawing it on the page that says the database did not answer would be a
+   second failure on top of the first.
+5. **A signed-out save offers sign-in in a new tab**, not a redirect: a redirect
+   is exactly what loses the unsaved text. Retry is the person's, after.
+6. **A 404 never says whether the thing exists for someone else**, as
+   `app/videos/[id]/page.tsx` already argued for its status code.
+7. **`supabase/config.toml` is the CLI's generated file** (v2.117.0, the pinned
+   dev dependency) with `project_id`, both `enable_signup` switches and the
+   seed step changed. Hand-writing one from memory would have been a file that
+   looks right and is not.
+8. **No timezone setting.** It needs a per-user profile table, a settings screen
+   and a change to the one date helper every view reads — a feature, and M9
+   adds none. "Today is the UTC day" is the first entry under the README's
+   "things it does, with a catch".
+9. **The two add forms stay two.** They share a text field and a button and
+   differ by a quota box and its validation; one component with a slot for the
+   difference is more code than the two it replaces, and both are already the
+   same control visually.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md:199 names "empty states" for M9. This slice also built the error
+  states (the M9 brief asked for them): four `not-found.tsx` files, `error.tsx`
+  and `global-error.tsx`, none of which PLAN.md's route table lists.
+- PLAN.md's M0 says `supabase init`. It was never run; `supabase/config.toml`
+  arrives in M9.
+- `lib/write-failure.ts` makes one extra request (a `HEAD` of the current page)
+  after a write has failed, and only then.
+
+### Honest limits
+
+- **The "before" table is code reading**, except the session-expiry row, which
+  was walked in Chromium before the fix and again after it.
+- **The session diagnosis reaches four callers, not all of them.** The save
+  queue, capture, checklist ticks and `/now`'s rows. The board's moves, the
+  bank's Promote and Archive, the settings editors, the filming-day dialogs and
+  the thumbnail and assist controls still say "Could not reach the server" when
+  the session has gone. In the README.
+- **The error page is proved with an induced failure**, not a dropped
+  connection: a restrictive RLS policy that raises for the spec's own account
+  alone (so a suite sharing the stack is unaffected). The "You're offline"
+  branch and `global-error.tsx` are not exercised by any spec.
+- **The diagnosis `HEAD` renders the page on the server** once per failure. Cheap
+  at one user; a dedicated endpoint would be cheaper and would be an API route,
+  which PLAN.md's architecture does not have.
+- **No real phone, again.** The empty states were looked at at 390px in
+  Chromium, not on a device.
+
+### Gates for this slice
+
+<!-- M9-EMPTY-GATES -->

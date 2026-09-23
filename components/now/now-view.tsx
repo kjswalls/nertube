@@ -22,6 +22,7 @@ import {
   type NowVideo,
 } from "@/lib/next-action";
 import { useShortcuts } from "@/lib/shortcuts";
+import { diagnoseWriteFailure, failureSentence } from "@/lib/write-failure";
 
 /**
  * `/now`'s list: the filters, the three sections, the keyboard, and the one
@@ -486,8 +487,12 @@ export function NowView({
           the list saying it too. Nothing here is optimistic, so there is
           nothing to roll back — the row is already showing the truth.
         */
+        // Offline, signed out, or unreachable: `lib/write-failure.ts` (M9).
         toast.push({
-          message: "Could not reach the server — nothing was saved. Try again.",
+          message: failureSentence(
+            await diagnoseWriteFailure(),
+            "Could not reach the server — nothing was saved. Try again.",
+          ),
           tone: "error",
         });
       } finally {
@@ -609,7 +614,12 @@ export function NowView({
       </div>
 
       {/* ---- filters ---- */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+      {/* Nothing to narrow on an empty list: the chips would be controls that
+          can only ever find nothing (M9). */}
+      <div
+        hidden={allRows.length === 0}
+        className="flex flex-wrap items-center gap-x-2 gap-y-2"
+      >
         {channels.length > 1
           ? channels.map((channel) => {
               const on = filters.channelIds.includes(channel.id);

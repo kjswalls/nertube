@@ -11,6 +11,7 @@ import {
 } from "@/app/actions/checklist";
 import { useSaveQueue, type SaveState } from "@/components/autosave";
 import { sortItems, topPosition, type ChecklistItem } from "@/lib/checklist";
+import { diagnoseWriteFailure, failureSentence } from "@/lib/write-failure";
 
 /**
  * The checklist's client state: what is on screen, and how it gets to the row.
@@ -336,7 +337,11 @@ export function useChecklist({
         } catch {
           failed.current = ops.slice(index);
           retryable.current = true;
-          return { ok: false, error: UNREACHABLE };
+          // Offline, signed out, or unreachable: `lib/write-failure.ts` (M9).
+          return {
+            ok: false,
+            error: failureSentence(await diagnoseWriteFailure(), UNREACHABLE),
+          };
         }
 
         if (!result.ok) {
