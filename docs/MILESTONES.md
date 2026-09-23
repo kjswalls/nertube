@@ -8195,6 +8195,9 @@ After this slice, measured the same way:
    with its own ids, so there is one "Main" navigation at every width and no
    duplicate id. `CaptureHost` and `ChannelShortcuts` — the things that bind
    keys — are mounted once in the bar and never passed into the sheet.
+   *(Integration note: the keyboard slice has since replaced the
+   `ChannelShortcuts` mount with `KeyboardShortcuts`, which contains it; the
+   rule is unchanged — it is mounted once, in the bar.)*
    The alternative, extracting `Modal`'s behaviour into a hook and applying
    dialog semantics to the in-place sidebar, would have made two consumers of
    one half of the modal; one prop on the whole modal is smaller.
@@ -8262,6 +8265,39 @@ After this slice, measured the same way:
   `components/shortcuts/` while this slice was restructuring
   `components/app-sidebar.tsx`; the sidebar's imports were pointed at the new
   paths here. Nothing else of that slice was touched.
+
+### Gates for this slice
+
+*(Moved here from under the keyboard section by the M9 integration pass, where the two slices' concurrent edits had left it.)*
+
+Run in a tree other M9 slices were editing at the same time (the shortcut set,
+and the empty and error states); the numbers are what this container printed.
+
+| Gate | Result |
+|---|---|
+| Lint (every file this slice touched, and `e2e/responsive.spec.ts`) | clean |
+| Types (`tsc` on the app and on the harness) | clean for this slice. The only errors in the tree at the time were in `e2e/shortcuts.spec.ts`, another slice's file mid-edit |
+| Unit (`npx vitest run`) | 519 passed, 32 files (this slice adds no unit test — nothing in it is a pure function) |
+| `e2e/responsive.spec.ts` | **8 passed** in the full run below |
+| Full suite, cold (`E2E_REUSE=0 npx playwright test`, stack stopped first) | **281 passed, 3 failed, 1 skipped (29.8m)** |
+| Re-run of the failures plus every spec this slice's markup reaches (`m2-review`, `responsive`, `shell`, `capture`, `now`), cold | **51 passed, 0 failed (6.3m)** |
+
+**The three failures, named rather than rounded off.** Two were in
+`e2e/m2-review.spec.ts`: one found `/now` rendering the new "This page didn't
+load" error boundary instead of the page, the other a packaging save that
+never started. Both pass on the re-run above, against the same tree, and the
+error boundary they hit was being written by another slice during the run —
+so the most likely cause is a hot-reload of a half-written file. That is a
+likelihood, not a proof. The third was `e2e/shortcuts.spec.ts:472`, the
+shortcut slice's own spec, in progress. The full run should be repeated once
+the tree has stopped moving, and the orchestrator's gate run is the one to trust.
+
+**Found by an earlier run, and fixed.** The first version of the desktop
+assertion expected the sidebar strip to be exactly as tall as the viewport. In
+a full run `/now` holds every other spec's leftover videos and is longer than
+the viewport, and the strip runs the page's full height by design (M3: the
+ground must not stop at the fold). The assertion is now "at least the
+viewport", which is the actual claim.
 
 ## M9 — The keyboard: one set, one sheet, one Escape
 
@@ -8488,37 +8524,6 @@ counts for this slice.** None of the 270-odd existing specs needed a change
 for the keyboard work: the hint-bar assertions in `m1-acceptance`, the
 capture box, the swap dialog and the assist panels' Escape all passed
 unmodified.
-
-### Gates for this slice
-
-Run in a tree other M9 slices were editing at the same time (the shortcut set,
-and the empty and error states); the numbers are what this container printed.
-
-| Gate | Result |
-|---|---|
-| Lint (every file this slice touched, and `e2e/responsive.spec.ts`) | clean |
-| Types (`tsc` on the app and on the harness) | clean for this slice. The only errors in the tree at the time were in `e2e/shortcuts.spec.ts`, another slice's file mid-edit |
-| Unit (`npx vitest run`) | 519 passed, 32 files (this slice adds no unit test — nothing in it is a pure function) |
-| `e2e/responsive.spec.ts` | **8 passed** in the full run below |
-| Full suite, cold (`E2E_REUSE=0 npx playwright test`, stack stopped first) | **281 passed, 3 failed, 1 skipped (29.8m)** |
-| Re-run of the failures plus every spec this slice's markup reaches (`m2-review`, `responsive`, `shell`, `capture`, `now`), cold | **51 passed, 0 failed (6.3m)** |
-
-**The three failures, named rather than rounded off.** Two were in
-`e2e/m2-review.spec.ts`: one found `/now` rendering the new "This page didn't
-load" error boundary instead of the page, the other a packaging save that
-never started. Both pass on the re-run above, against the same tree, and the
-error boundary they hit was being written by another slice during the run —
-so the most likely cause is a hot-reload of a half-written file. That is a
-likelihood, not a proof. The third was `e2e/shortcuts.spec.ts:472`, the
-shortcut slice's own spec, in progress. The full run should be repeated once
-the tree has stopped moving, and the orchestrator's gate run is the one to trust.
-
-**Found by an earlier run, and fixed.** The first version of the desktop
-assertion expected the sidebar strip to be exactly as tall as the viewport. In
-a full run `/now` holds every other spec's leftover videos and is longer than
-the viewport, and the strip runs the page's full height by design (M3: the
-ground must not stop at the fold). The assertion is now "at least the
-viewport", which is the actual claim.
 
 ## M9 — Empty states, error states, and the README
 

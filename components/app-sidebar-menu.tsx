@@ -37,7 +37,7 @@ import { Modal } from "@/components/modal";
  * same list the desktop `<nav>` draws — because the two cannot be one element:
  * one is in the sidebar, the other is in a portal. That is safe because they
  * are pure markup. What must exist exactly once — `CaptureHost` (`c`) and
- * `ChannelShortcuts` (`1`..`9`) — stays in the bar, mounted at every width,
+ * `KeyboardShortcuts` (`1`..`9`, `g`, `?`) — stays in the bar, mounted at every width,
  * and is never passed in here.
  */
 export function AppSidebarMenu({ drawer }: { drawer: ReactNode }) {
