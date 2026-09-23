@@ -165,7 +165,29 @@ export function Board({
    * say something no card reads.
    */
   useEffect(() => {
-    boardRef.current?.setAttribute("data-ready", "true");
+    const board = boardRef.current;
+    if (!board) return;
+    board.setAttribute("data-ready", "true");
+
+    /*
+      On a phone the strip shows one column at a time, and it used to open on
+      Idea — which for a channel whose ideas live in the bank is an empty
+      column, with the work (and the Filming badge, principle 4's whole
+      signal) three swipes to the right. M9's week walk found the badge by
+      swiping past three empty columns. Below `md` the strip now opens at the
+      first column that holds anything. At desktop widths nothing moves: the
+      board there is what M3 signed off, and the columns fit or nearly fit.
+    */
+    if (!window.matchMedia("(width < 48rem)").matches) return;
+    if (board.scrollWidth <= board.clientWidth) return;
+    const first = Array.from(
+      board.querySelectorAll<HTMLElement>('[data-testid="board-column"]'),
+    ).find((column) =>
+      column.querySelector('[data-testid="board-card"], [data-testid="filming-badge"]'),
+    );
+    if (!first) return;
+    board.scrollLeft +=
+      first.getBoundingClientRect().left - board.getBoundingClientRect().left;
   }, []);
 
   /* ---------------------------------------------------------------- data -- */

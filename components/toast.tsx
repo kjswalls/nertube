@@ -147,7 +147,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center gap-2 px-4">
+      {/*
+        Below `md` the toasts sit under the phone's 56px bar rather than at the
+        bottom: the bottom of a phone screen is where the thumb is, and on
+        `/now` it is where the next row's control lands after a tick. M9's week
+        walk found "Ticked: …" drawn over the Move button it was reporting on.
+      */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex flex-col items-center gap-2 px-4 max-md:top-[4.25rem] max-md:bottom-auto">
         {/* Two regions, always present, each with its own politeness. */}
         <div role="status" aria-live="polite" className="contents">
           {statuses.map((toast) => (

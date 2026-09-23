@@ -529,11 +529,16 @@ export function CaptureForm({
                   onChange={() => aimAt(channel.id)}
                   className="sr-only"
                 />
+                {/*
+                  The digit is the Alt+1–9 key for this chip, so it goes where
+                  the keyboard sentences in the hint go: away on a coarse
+                  pointer, which has no Alt key (M9's week walk).
+                */}
                 {index < 9 ? (
                   <span
                     aria-hidden="true"
                     className={[
-                      "rounded-button px-1 text-xs tabular-nums",
+                      "rounded-button px-1 text-xs tabular-nums pointer-coarse:hidden",
                       checked ? "bg-background/20" : "bg-surface",
                     ].join(" ")}
                   >

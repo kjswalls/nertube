@@ -8695,4 +8695,41 @@ change; they are what the code at that commit renders.
 
 ### Gates for this slice
 
-<!-- M9-EMPTY-GATES -->
+Run in this container with no `ANTHROPIC_API_KEY`, while the two other M9
+slices were editing the same tree and running their own stacks.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs |
+| Lint | `npm run lint` | clean |
+| Unit | `npm test` | **525 passing in 33 files** (519 before, plus `lib/video-text.test.ts`'s 6) |
+| SQL | `./scripts/verify-db.sh nertube_m9_empty_verify` | OK — migrations applied, 17 test files passed |
+| Build | `npm run build` | succeeds; `.next/static` contains none of `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key` |
+| This spec | `e2e/empty-states.spec.ts` | **7 passed** — against a stack of its own, and alone after the full run |
+| Browser, full | `E2E_REUSE=0 DEV_STACK_PORT=54371 DEV_STACK_POSTGREST_PORT=54372 NERTUBE_DEV_DB=nertube_e2e_m9empty E2E_PORT=3141 npx playwright test` | **289 passed, 2 failed, 1 skipped (30.1m)**, on a database that run built |
+| The two, again | the same stack flags, `npx playwright test settings-channel flow-fields empty-states` | **21 passed** |
+
+The two failures in the full run, named rather than rounded off:
+
+1. **`flow-fields.spec.ts:352`** (the target date set and cleared). The status
+   line stayed on its idle sentence through twenty seconds of retries: the
+   date never reached React state, which is `/videos/[id]` not having hydrated
+   — the flake M4, M6 and M8 each recorded on this page, under full-suite
+   load. It passed in the rerun. Nothing in this slice adds to that page's
+   hydration; `SaveStatus` gained one conditional link.
+2. **`settings-channel.spec.ts:337`**, on its *second* visit to the bucket
+   editor: the page was fully drawn (the screenshot shows it) and the capture
+   button's hydration marker never appeared in twenty seconds — again a page
+   that had not hydrated, not a page that was wrong. It passed in the rerun,
+   and in the sibling slice's full run earlier the same day. This slice does
+   not touch that page.
+
+**The orchestrator's final `E2E_REUSE=0` full run is the one that counts.**
+Two other runs happened during this slice and are worth knowing about: the
+responsive slice's full run (281 passed, 3 failed) was running *while this
+slice was editing files under it* — its `next dev` recompiled on every save
+here — so its failures say nothing about either slice; and this spec's first
+runs were made with `E2E_REUSE=1` against another agent's stack, because its
+`next dev` held the directory's dev lock, which is why the failing-read test
+makes the read fail for its own account only.
+

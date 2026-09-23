@@ -295,7 +295,12 @@ export function ScheduleDayDialog({
             />
           </div>
 
-          <fieldset className="flex flex-col gap-2">
+          {/*
+            `min-w-0`: a fieldset's default `min-width` is `min-content`, so one
+            long title pushed every row past the dialog's edge at phone width
+            (M9's week walk found it at 390px). With it, `truncate` does its job.
+          */}
+          <fieldset className="flex min-w-0 flex-col gap-2">
             <legend className="text-xs font-medium text-muted">
               Videos to shoot
               <span

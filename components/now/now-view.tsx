@@ -689,9 +689,26 @@ export function NowView({
         <NowEmpty channels={channels} videos={current} />
       ) : sections.length === 0 ? (
         <p data-testid="now-empty" className="text-[13px] text-muted">
-          {hiddenByFilters > 0
-            ? "Nothing matches those filters. Turn one off to see the rest."
-            : `Everything left is set aside for now. Reload to bring ${setAsideCount === 1 ? "it" : "them"} back.`}
+          {hiddenByFilters > 0 ? (
+            <>
+              Nothing matches those filters.{" "}
+              {/*
+                M9: the same way out the idea bank's filtered-empty line has
+                always had, so the two lists answer "my filters hid
+                everything" with the same words and the same button.
+              */}
+              <button
+                type="button"
+                data-testid="now-clear-filters"
+                onClick={() => setFilters({ channelIds: [], quickOnly: false })}
+                className="rounded-button underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+              >
+                Clear the filters
+              </button>
+            </>
+          ) : (
+            `Everything left is set aside for now. Reload to bring ${setAsideCount === 1 ? "it" : "them"} back.`
+          )}
         </p>
       ) : (
         <div className="flex max-w-3xl flex-col gap-5">

@@ -2,6 +2,12 @@
 
 import "./globals.css";
 
+import {
+  PRIMARY_ACTION,
+  QUIET_ACTION,
+  StatePanel,
+} from "@/components/state-panel";
+
 /**
  * The last resort: the root layout itself failed, so `app/error.tsx` (which
  * renders inside it) cannot. Next requires this file to bring its own `<html>`
@@ -9,36 +15,40 @@ import "./globals.css";
  * layout would have set — `globals.css` still follows the system's light or
  * dark preference, which is what the layout's default is anyway.
  *
- * Deliberately smaller than `app/error.tsx`: if the layout is what broke,
- * the less this page depends on, the more likely it is to draw. Same words,
- * same way forward.
+ * Deliberately smaller than `app/error.tsx`, but the same presentation: M9's
+ * integration pass put it on `StatePanel`, the one shape every empty, missing
+ * and failed view in the application uses. `StatePanel` is plain markup with
+ * no state and no data, so depending on it costs this page nothing it could
+ * fail on; a hand-drawn second "problem" layout was the thing to avoid.
  */
 export default function GlobalError({ retry }: { retry: () => void }) {
   return (
     <html lang="en">
       <body className="bg-background font-sans text-foreground antialiased">
         <title>Something went wrong · NerTube</title>
-        <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-3 px-5">
-          <h1 className="font-display text-[20px] font-semibold">
-            NerTube didn&rsquo;t load
-          </h1>
-          <p className="text-[14px] leading-relaxed text-muted">
-            Something went wrong before the page could be drawn — usually the
-            connection or the database, for a moment. Nothing you had already
-            saved is affected.
-          </p>
-          <div className="flex gap-4 pt-1">
-            <button
-              type="button"
-              onClick={() => retry()}
-              className="rounded-button bg-foreground px-3 py-2 text-[13px] font-medium text-background"
-            >
-              Try again
-            </button>
-            <a href="/now" className="py-2 text-[13px] text-muted underline">
-              Go to Now
-            </a>
-          </div>
+        <main className="flex min-h-dvh w-full items-start justify-center px-gutter-reading py-[12vh]">
+          <StatePanel
+            tone="problem"
+            headingLevel={1}
+            className="w-full"
+            title="NerTube didn’t load"
+            actions={
+              <>
+                <button type="button" onClick={() => retry()} className={PRIMARY_ACTION}>
+                  Try again
+                </button>
+                <a href="/now" className={QUIET_ACTION}>
+                  Go to Now
+                </a>
+              </>
+            }
+          >
+            <p>
+              Something went wrong before the page could be drawn — usually the
+              connection or the database, for a moment. Nothing you had already
+              saved is affected.
+            </p>
+          </StatePanel>
         </main>
       </body>
     </html>

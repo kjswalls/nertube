@@ -202,6 +202,14 @@ export function HooksEditor({
               <label className="sr-only" htmlFor={`${addId}-text-${hook.id}`}>
                 Hook {index + 1}
               </label>
+              {/*
+                The hook is the one piece of writing on this page that is
+                read in full before it is chosen, so it grows to fit it
+                (`field-sizing: content`; `rows` is the floor where that is
+                unsupported). Below `md` it takes the row's whole width and
+                the two buttons wrap under it: at 390px two lines beside them
+                cut a hook off mid-sentence (M9's week walk).
+              */}
               <textarea
                 id={`${addId}-text-${hook.id}`}
                 value={hook.text}
@@ -210,7 +218,7 @@ export function HooksEditor({
                 data-testid="hook-text"
                 onChange={(event) => onEditText(hook.id, event.target.value)}
                 onBlur={onCommit}
-                className="min-w-0 flex-1 resize-y rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base leading-relaxed outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
+                className="min-w-0 flex-1 resize-y rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base leading-relaxed outline-none field-sizing-content hover:border-border focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full"
               />
 
               <button
