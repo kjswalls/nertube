@@ -10144,3 +10144,149 @@ own: `m9-week` + `phone` (12 passed, before the fixes), then `m9-week`,
 `phone`, `script-editor`, `calendar`, `filming-days` and the board specs
 (65 passed, after W1, W3, W4 and W5). W2's fix and its assertion went in
 after that and are covered by the full run.
+
+## M10 — Review: the adversarial pass
+
+Thirty-one findings against the three M10 slices and their integration: two
+blockers, eleven majors, eighteen minors. Each was checked against the code
+before anything changed; the two blockers and the stale-tab and conflict
+findings were reproduced first by the specs that now pin them.
+
+### Verified before anything changed
+
+- **1** — `post-publish`, `now` and `responsive` seeded targets with
+  `current_date`; the harness's `postgresql.conf` has `timezone = 'Etc/UTC'`,
+  which is the only reason they passed. **2** — `m2-review.spec.ts:515`
+  printed a node-pg `Date` in UTC. **3** — `TimeZoneDetector`'s guard was a
+  module variable, so each hard load re-sent; `readTimeZone` answered
+  "unknown" for no row, an unreadable row and a failed read alike.
+- **4** — `StageSelect` called `moveVideo` with nothing waiting on the
+  script's queue; `onMoved` → `router.refresh()` → `editable` false →
+  `ScriptEditor` unmounted. **5** — `moveVideo` carried no precondition and
+  `StageSelect` adopted its `updated_at` unconditionally; so did the thumbnail
+  section and the concept sketch. **6** — `undoReset` replaced the whole box
+  whatever had been typed since. **7** — the blur on mousedown ran `commit`,
+  which re-sent the refused patch and set `saving`, unmounting the button.
+  **8** — the conflict line offered Reload only. **9** — `SaveStatus`'s
+  buttons had no `thumb:` size. **10** — `maxLength` on the end-screen input.
+  **11** — `cleanProse` removed only U+0000. **12** — `ResetNoticeLine`
+  returned `null` until there was a notice. **13** — `sections.ts` hardcoded
+  "Scripting"; the reason was a `title` only. **14** — the conflict sentence
+  pushed Reset to a third toolbar row.
+- **15–31** — each class name the reviewers quoted was in the tree as quoted.
+  The landscape pass added in this review then found more than finding 17
+  listed: every settings field, the bank's filters, `/now`'s number boxes,
+  the time-zone select and the new-channel name were 12–14px at 844×390 under
+  a coarse pointer, and `/capture`'s title was 42px tall.
+
+### Fixed
+
+| # | Sev. | What changed |
+|---|---|---|
+| 1 | minor | `post-publish`, `now` and `responsive` compute targets with `addDays(todayColumn(Date.now(), SEED_TIME_ZONE), n)` and pass them as `$n::date`; post-publish compares `published_at` with `startOfDay(target, SEED_TIME_ZONE)`. The inventory and decision 8 above carry a correction. Checked by running `post-publish`, `now` and `responsive` with every harness session in `Pacific/Kiritimati` (below). |
+| 2 | minor | `m2-review` reads `target_publish_date::text` and compares strings. |
+| 3 | minor | `readTimeZone` returns `missing: "none" \| "unreadable" \| "failed"`; the detector mounts only for `none`, and remembers its attempt per tab and zone in `sessionStorage` (module flag as the fallback). The notice says which case it is. New spec: a stored `Mars/Olympus_Mons` over three loads sends **0** server actions and shows "not one this server can read". |
+| 4 | blocker | `VideoVersion` gains `register`/`settle`; the script editor and the packaging block register their queue's new `settled()`; `StageSelect` awaits `version.settle()` before `moveVideo`, and refuses the move with a sentence when a save failed. The editor is also held open: `ScriptHold` keeps it mounted, read-only, with Copy and "Let it go", if the stage leaves Scripting while it holds unsaved text. Spec: the save held back 1.5 s, then Packaging chosen — the row holds the typed line and the stage is Packaging; a second spec: a failing save, then a move, is refused and the stage stays. |
+| 5 | blocker | New `move_video_versioned(p_video, p_stage, p_expected_updated_at, p_published_at)` in 0010: locks the row, does exactly `move_video`, and returns `was_current`. `StageSelect` adopts the move's stamp only when true. The thumbnail actions and the concept sketch return `previousUpdatedAt` (their existing pre-read) and the page uses `version.advance(previous, next)`. Spec: the reviewer's scenario C — tab two moves to Filming, then types, and is refused; the row keeps tab one's line. SQL tests: current, stale, exact-version and cross-tenant cases, and the gate. |
+| 6 | major | Undo is shown only while the box equals what the reset put there; the first keystroke after retires it. Spec. |
+| 7 | major | A `conflict` or `signedOut` failure is sticky in the editor: pause, blur, keystroke and the unload flush do not re-send or clear it; Retry still does. Spec: focus in the box, one click on Reload reloads. |
+| 8 | major | The Script tab's conflict line is its own ("Not saved: this video changed in another tab. Reload replaces this text — copy yours first.") with **Copy mine** beside Reload; the refused draft is kept in the tab's `sessionStorage` and offered back after the reload ("Use mine", Copy, Discard). Spec: reload, Use mine, the row holds it. |
+| 9 | major | `SaveStatus`'s buttons share `STATUS_BUTTON`, 44px under a thumb. Spec: Retry ≥ 44 at 390×844 touch. |
+| 10 | minor | No `maxLength`; over 300 characters the field says how long it is and the server's refusal keeps the text. Spec: 305 characters stay whole, nothing stored. |
+| 11 | minor | `cleanProse` replaces a lone surrogate with U+FFFD, so the stored forms compare equal. Unit test and spec. |
+| 12 | minor | The notice's `status` and `alert` spans are always mounted; with no notice the line is `sr-only`. |
+| 13 | minor | `SectionFacts.scriptingName` (the channel's live name) is in the lock reason, which is also in the tab's accessible name. |
+| 14 | minor | Shorter conflict sentence, and below 640px a failure's line takes its own row under Reset instead of pushing Reset down. |
+| 15, 25 | major | Toast: below `md` the sentence takes a full line, links are `thumb:` 44px, the × is 44×44 (`toast-dismiss`), and the toast is capped to the screen under the bar and scrolls inside itself. Spec at 320×568 and 390×844: the board's gate refusal and a promote. |
+| 16 | major | Below `md` a list of more than five candidates shows five (and the chosen one) until "Show all N candidates"; the jump row has **Concept ↓** and **Hooks ↓**; the brainstorm panel has a second Close at its foot. Spec with twenty candidates: five visible, the concept < 2,000px under the list and in view after the jump. |
+| 17, 23 | major | Under a coarse pointer at any width: calendar chips, borrowed-day links, the wordmark, `/capture`'s field, `/now`'s links (24px) and number boxes, and every settings field are 44px / 16px (`thumb:`, and `md:pointer-fine:` for the two fields that are smaller on a desktop). `useAssistFocus` uses the `thumb` query. New spec: all twenty routes at 844×390, touch — no control under 44px, no field under 16px. The **layouts** (list calendar, one-column board, top bar) stay width-based: in the README. |
+| 18 | minor | Swap prompt's link and buttons are `thumb:min-h-11`. Spec with a published video's metrics logged. |
+| 19 | minor | A candidate's note is the same one-row growing textarea as the candidate. Spec: not cut. |
+| 20 | minor | `/now`'s concept row is a growing textarea (Enter saves, line breaks become spaces); Save goes under it below `md`. |
+| 21 | minor | Below `md` Packaging's save line is pinned to the bottom of the screen while a save is on the wire or has failed (`packaging-save-dock`). |
+| 22 | minor | README corrected: two or three lines at 390×844, none at 320×568 or in landscape. |
+| 24 | major | The filming panel's title truncates on an inner span (the ellipsis draws again) and, like the day panel's line, wraps whole below `md`. |
+| 26 | major | The script template is 16px below `md` and under a coarse pointer; `phone.spec` now checks every field's computed font size on every route, portrait and landscape. |
+| 27 | minor | The dialog's date field and "Not now" / Close are `thumb:min-h-11`; below `md` a title in its list is never clamped. |
+| 28 | minor | Below `md` a card's title is not clamped. |
+| 29 | minor | Matrix headers break between words (`break-words`, no `overflow-wrap: anywhere`); a longer word widens its column. |
+| 31 | minor | A checklist template item is a one-row growing textarea (Enter commits, line breaks become spaces). |
+
+### Found by this pass's own browser runs
+
+- **`m2-review.spec.ts:669`** ("removing a row keeps the keyboard in the
+  list") failed once in the first full run: focus on `<body>` after removing
+  the last hook. It is the "focus after removing a hook row" failure M5
+  recorded as load and never explained. Reading the code gave a mechanism:
+  the removal-focus effect ran after *every* render and consumed its request
+  on the first one after the click; a render that landed before the one that
+  removed the row found the Remove button still mounted and focused, stood
+  down, and threw the request away. Both copies (hooks, title candidates) are
+  now one hook, `useFocusAfterRemove` in `components/packaging/hash-focus.ts`,
+  which keeps the request until the pressed button has left the document.
+  The mechanism is inferred, not seen in a trace. `m2-review`, `packaging`
+  and `brainstorm` then passed three times over (126 of 126), and the run
+  that failed was discarded: both full runs below are on the fixed code.
+- **The first full run was also stopped once before it counted**, when a
+  re-read of `settled()` found that a failure kept refusing stage moves after
+  the person had typed the field back to its stored value; `touch()` now
+  clears it.
+
+### Moved to the README, with the exact words
+
+- Finding 23's layout half, under "Things it does, with a catch":
+  > **A phone held sideways gets the desktop layout.** The phone layouts —
+  > the top bar and menu, the calendar's day list, the one-column board — are
+  > decided by width (below 768px), and most phones are wider than that in
+  > landscape (844–932px). Turned sideways, a phone gets the sidebar, the
+  > seven-column month and 216px board columns, with titles cut in the grid
+  > and on the cards. What does follow the pointer is size: under a coarse
+  > pointer every control on the measured routes is 44px (chips, date links,
+  > toasts, the wordmark) and every field 16px, and an assist panel opens at
+  > the top of the screen; `e2e/phone.spec.ts` measures all twenty routes at
+  > 844×390. Moving the layouts themselves to a pointer-and-height query would
+  > change every `md:` rule in the app, which was not done in a review pass
+  > and could not be seen on a device here (M10 review).
+- Finding 30, in the phone entry: "On a 320×568 phone the menu's "Keyboard
+  shortcuts" entry sits half under the screen's edge until the menu is
+  scrolled."
+- Finding 5's residue, in "Two tabs do not merge": "For the move that check
+  is exact (one transaction); for a thumbnail or the sketch it is a read then
+  a write, and a write from another tab landing in the milliseconds between
+  them would not be noticed."
+- Finding 4's residue: "**A stage move from the video page waits for the
+  page's saves.** The script and packaging saves on the wire land first; if
+  one has failed, the move is not made and says why. The flow fields beside
+  the select (target date, waiting on, the URL) are not waited for (M10
+  review)."
+
+### Rejected
+
+- **30** (menu's shortcuts entry below the fold at 320×568) — not changed,
+  as the reviewer allowed: the drawer scrolls and the entry is reachable;
+  moving it above the channels would put a desktop affordance before the
+  navigation a phone opens the menu for. Recorded in the README.
+
+### Decisions taken without the user
+
+1. **A move waits for the page's saves, and is refused when one failed.**
+   The alternative — move anyway and keep the editor open read-only — would
+   leave a failed save behind a stage the editor cannot write in. The hold
+   (`ScriptHold`) still exists for moves made from another tab.
+2. **The conflict keeps the text rather than merging it.** "Use mine" after
+   the reload writes this tab's text over the other tab's, by choice, with
+   both visible first; a three-way merge of prose is out of scope.
+3. **The versioned move lives in 0010.** It is the one M10 migration and has
+   not been applied to the hosted database, so it grew rather than a 0011
+   appearing. Without it the stage select falls back to the plain move
+   (`PGRST202`), which is M9's behaviour.
+4. **Landscape phones get sizes, not layouts** (the README entry above).
+5. **The candidate list folds at five below `md` only.** A laptop shows all
+   twenty, as before; the folded rows stay in the DOM, so a draft in one is
+   not lost by folding.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md's `move_video` is the one move function; `move_video_versioned` is
+  a wrapper that calls it, adds nothing to the gate, and exists only so the
+  video page can tell whether its version is current.

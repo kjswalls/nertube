@@ -161,7 +161,7 @@ export function MetricsPair({
     ? // The row density is `/now`'s, which is the view a phone opens: 16px
       // type below `md` (anything smaller and iOS zooms the page on focus) and
       // a 44px target wherever a thumb is likely.
-      "rounded-input border border-border bg-background px-2 py-1 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
+      "rounded-input border border-border bg-background px-2 py-1 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base thumb:min-h-11"
     : "rounded-input border border-border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11";
   const labelClass = compact
     ? "text-[11px] text-muted"

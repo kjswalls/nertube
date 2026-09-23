@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { MAX_CANDIDATES, MAX_CANDIDATE_NOTE_LENGTH, MAX_TITLE_LENGTH, type TitleCandidate } from "@/lib/packaging";
 
-import { focusAnchor } from "./hash-focus";
+import { useFocusAfterRemove } from "./hash-focus";
 
 import type { RowIssue } from "./row-issue";
 
@@ -84,18 +84,7 @@ export function TitleCandidates({
     click and applied after the re-render, because the element to focus does not
     exist yet at click time.
   */
-  const focusAfterRemove = useRef<string | null>(null);
-  useEffect(() => {
-    const wanted = focusAfterRemove.current;
-    if (wanted === null) return;
-    focusAfterRemove.current = null;
-    if (document.activeElement !== null && document.activeElement !== document.body) {
-      return;
-    }
-    focusAnchor(
-      wanted === "" ? addRef.current : document.getElementById(wanted),
-    );
-  });
+  const focusAfterRemove = useFocusAfterRemove(addRef);
 
   const count = candidates.length;
   const atLimit = count >= MAX_CANDIDATES;
@@ -282,12 +271,13 @@ export function TitleCandidates({
                   type="button"
                   data-testid="candidate-remove"
                   aria-label={`Remove candidate ${index + 1}`}
-                  onClick={() => {
+                  onClick={(event) => {
                     const neighbour =
                       candidates[index + 1] ?? candidates[index - 1] ?? null;
-                    focusAfterRemove.current = neighbour
-                      ? `${addId}-text-${neighbour.id}`
-                      : "";
+                    focusAfterRemove(
+                      neighbour ? `${addId}-text-${neighbour.id}` : null,
+                      event.currentTarget,
+                    );
                     onRemove(candidate.id);
                   }}
                   className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"

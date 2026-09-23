@@ -357,7 +357,7 @@ function AddBucketForm({
           placeholder={axis === "vertical" ? "e.g. productivity" : "e.g. tier list"}
           // A real basis, and the whole line below `md`: beside the quota
           // and the button it was 29px wide at 390 (M9 review).
-          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base thumb:min-h-11"
+          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base thumb:text-base thumb:min-h-11"
         />
         <div className="flex items-center gap-1.5">
           <label htmlFor={quotaId} className="text-[12px] text-muted">
@@ -379,7 +379,7 @@ function AddBucketForm({
               setQuota(event.target.value);
               setError(null);
             }}
-            className="w-16 rounded-input border border-border bg-background px-2 py-2 text-right font-mono text-[12px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
+            className="w-16 rounded-input border border-border bg-background px-2 py-2 text-right font-mono text-[12px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base thumb:min-h-11"
           />
           <span className="text-[12px] text-muted">a month</span>
         </div>

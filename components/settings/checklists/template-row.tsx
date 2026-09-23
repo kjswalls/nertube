@@ -170,7 +170,7 @@ export function TemplateRow({
               setTextDraft(item.text);
             }
           }}
-          className="min-w-0 flex-1 resize-none rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none field-sizing-content disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base thumb:min-h-11"
+          className="min-w-0 flex-1 resize-none rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none field-sizing-content disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base thumb:text-base thumb:min-h-11"
         />
 
         <div className="flex shrink-0 items-center gap-1 max-md:ml-7">
@@ -194,7 +194,7 @@ export function TemplateRow({
             onKeyDown={(event) => {
               if (event.key === "Enter") event.currentTarget.blur();
             }}
-            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
+            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base thumb:min-h-11"
           />
           <span aria-hidden="true" className="font-mono text-[11px] text-muted">
             min

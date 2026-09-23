@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { MAX_HOOK_LENGTH, MAX_HOOKS, type Hook } from "@/lib/packaging";
 
-import { focusAnchor } from "./hash-focus";
+import { useFocusAfterRemove } from "./hash-focus";
 
 import type { RowIssue } from "./row-issue";
 
@@ -69,17 +69,8 @@ export function HooksEditor({
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
-  /** Where the caret goes after a row is removed — see `title-candidates.tsx`. */
-  const focusAfterRemove = useRef<string | null>(null);
-  useEffect(() => {
-    const wanted = focusAfterRemove.current;
-    if (wanted === null) return;
-    focusAfterRemove.current = null;
-    if (document.activeElement !== null && document.activeElement !== document.body) {
-      return;
-    }
-    focusAnchor(wanted === "" ? addRef.current : document.getElementById(wanted));
-  });
+  /** Where the caret goes after a row is removed — see `useFocusAfterRemove`. */
+  const focusAfterRemove = useFocusAfterRemove(addRef);
 
   const atLimit = hooks.length >= MAX_HOOKS;
   const chosen = hooks.filter((hook) => hook.chosen).length;
@@ -250,11 +241,12 @@ export function HooksEditor({
                 type="button"
                 data-testid="hook-remove"
                 aria-label={`Remove hook ${index + 1}`}
-                onClick={() => {
+                onClick={(event) => {
                   const neighbour = hooks[index + 1] ?? hooks[index - 1] ?? null;
-                  focusAfterRemove.current = neighbour
-                    ? `${addId}-text-${neighbour.id}`
-                    : "";
+                  focusAfterRemove(
+                    neighbour ? `${addId}-text-${neighbour.id}` : null,
+                    event.currentTarget,
+                  );
                   onRemove(hook.id);
                 }}
                 className="shrink-0 rounded-button border border-border px-2 py-1 text-xs outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"

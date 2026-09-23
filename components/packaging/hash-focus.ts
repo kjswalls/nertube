@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 /**
  * Following a link into a field, and landing *in* it.
@@ -87,4 +87,40 @@ export function focusAnchor(element: HTMLElement | null): void {
 /** `focusAnchor` on whatever carries this `id`, if anything does. */
 export function focusAnchorId(id: string): void {
   focusAnchor(document.getElementById(id));
+}
+
+/**
+ * Where the caret goes after a row is removed: the next row's field, or the
+ * add box when the list is empty. Shared by the title candidates and the
+ * hooks, which each used to hold a copy.
+ *
+ * The request is kept until the button that was pressed has actually left
+ * the document (M10 review). The effect runs after every render, and the old
+ * copies consumed the request on the first render after the click — if any
+ * render landed before the one that removed the row (the save queue's own
+ * state, under load), the button was still there and focused, the effect
+ * stood down and threw the request away, and the removal render then left
+ * focus on `<body>`. That is the most likely cause of `m2-review`'s "focus
+ * after removing a hook row" failure, recorded since M5 as load and never
+ * explained; it is inferred from the code, not observed in a trace.
+ */
+export function useFocusAfterRemove(
+  fallback: RefObject<HTMLElement | null>,
+): (targetId: string | null, pressed: HTMLElement) => void {
+  const pending = useRef<{ targetId: string | null; pressed: HTMLElement } | null>(null);
+  useEffect(() => {
+    const request = pending.current;
+    if (request === null) return;
+    // Not removed yet: this render is some other update. Keep waiting.
+    if (request.pressed.isConnected) return;
+    pending.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    focusAnchor(
+      request.targetId === null ? fallback.current : document.getElementById(request.targetId),
+    );
+  });
+  return useCallback((targetId: string | null, pressed: HTMLElement) => {
+    pending.current = { targetId, pressed };
+  }, []);
 }

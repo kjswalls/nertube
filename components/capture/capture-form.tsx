@@ -429,7 +429,7 @@ export function CaptureForm({
             aria-invalid={error ? true : undefined}
             aria-describedby={hintId}
             placeholder="What is the video?"
-            className={`${field} min-w-0 flex-1 max-md:min-h-11`}
+            className={`${field} min-w-0 flex-1 max-md:min-h-11 thumb:min-h-11`}
           />
           <button
             type="submit"

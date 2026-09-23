@@ -267,7 +267,7 @@ function AddStageForm({
             setError(null);
           }}
           placeholder="e.g. Sponsor review"
-          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
+          className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-3 py-2 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base thumb:min-h-11"
         />
         <button
           type="submit"

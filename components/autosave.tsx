@@ -329,6 +329,12 @@ export function useSaveQueue<Patch>({
   }, [send]);
 
   const touch = useCallback(() => {
+    // The failure line is gone once typing resumes, and so is its hold on
+    // `settled`: what is on screen now is a new edit, which the next blur or
+    // pause sends (and `settled` waits for). Otherwise a failed save that the
+    // person then undid by hand — nothing left to send — would refuse every
+    // later stage move from the page.
+    failedRef.current = false;
     // "saving" is left alone: a save really is in flight, and hiding the line
     // because a key was pressed would be a lie about the wire.
     setState((current) =>
