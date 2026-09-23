@@ -23,14 +23,27 @@ import type { AssistErrorCode, AssistMeta } from "@/lib/assist/types";
  * not render anything. `components/assist/chrome.tsx` renders the three states
  * this produces, and it is the only thing that does.
  *
- * ## Why "cancel" is a client-side word
+ * ## Why "cancel" is a client-side word — and why the answer is still kept
  *
  * A server action cannot be recalled. By the time somebody presses Cancel the
  * model is already thinking and, for the kinds that persist, the row will still
- * be written. So cancelling here means *stop waiting for this answer*: the
- * request id moves, a late reply is ignored rather than dropped into a panel
- * the person has moved on from, and the notice says so in as many words instead
- * of implying the call was called off. Closing a panel does the same thing.
+ * be written. So cancelling here means *stop waiting for this answer*: nothing
+ * is dropped into a panel the person has moved on from, the notice says so in
+ * as many words, and the spending carries on whatever the panel does. Closing
+ * a panel does the same thing.
+ *
+ * What it does **not** mean any more is throwing the answer away. Cancel used
+ * to move the request id and ignore the reply outright, which made its own
+ * notice false in the most expensive way available: "if the answer did arrive
+ * it is kept — it will be here, as from earlier, next time you open this" was
+ * true of `videos.brainstorm_last` and false of this page, because the run
+ * still had `data: null`, so reopening asked again and paid for a second
+ * answer to a question already answered. A cancelled request is now *retained*
+ * — when it lands it settles in quietly as `fresh: false`, exactly what the
+ * notice promises — and `outstanding` says one is still on its way, so a panel
+ * reopened in the gap waits rather than asking twice. A late **failure** after
+ * a cancel is still dropped: nobody wants an alert about something they
+ * already walked away from.
  *
  * ## Why asking happens in a handler and never in an effect
  *
@@ -47,6 +60,18 @@ export interface AssistFailureView {
   readonly message: string;
   readonly retryable: boolean;
   readonly retryAfterSeconds: number | null;
+  /**
+   * Which implementation failed — `"fake"` when it was the fixtures.
+   *
+   * The failure sentences no longer name a vendor, and this is the other half
+   * of that fix: a refusal that came from `lib/assist/fake.ts` reads exactly
+   * like a refusal from a model, and a refusal reads as a judgement about
+   * *your* notes. The panel renders the fixtures notice from this, so a
+   * keyless deployment admits it on a failure as it already did on an answer.
+   * `null` when the request never reached the server and there is nothing
+   * honest to say about who would have answered it.
+   */
+  readonly provider: string | null;
 }
 
 /**
@@ -93,6 +118,15 @@ export interface AssistRunState<T> {
   readonly startedAt: number | null;
   readonly failure: AssistFailureView | null;
   readonly notice: AssistNotice | null;
+  /**
+   * A request nobody is waiting for any more, which has not landed yet.
+   *
+   * Cancelled or closed, so `pending` is false and no spinner is shown — but
+   * the call is still running and its answer is still coming, so asking the
+   * same question again would buy a second copy of it. Callers read this
+   * before deciding whether pressing a pill should cost a call.
+   */
+  readonly outstanding: boolean;
 }
 
 function emptyRun<T>(data: T | null = null): AssistRunState<T> {
@@ -105,6 +139,7 @@ function emptyRun<T>(data: T | null = null): AssistRunState<T> {
     startedAt: null,
     failure: null,
     notice: null,
+    outstanding: false,
   };
 }
 
@@ -122,17 +157,29 @@ export const TRANSPORT_FAILURE: AssistFailureView = {
     "The request never reached the server. Nothing was changed — check the connection and ask again.",
   retryable: true,
   retryAfterSeconds: null,
+  provider: null,
 };
 
-/** What Cancel, and closing a panel mid-flight, leaves behind. */
+/**
+ * What Cancel, and closing a panel mid-flight, leaves behind.
+ *
+ * Every clause of this is now something the code does. The waiting stops; the
+ * call does not, and saying so is the difference between "cancelled" and what
+ * actually happened; and the answer really does turn up here, marked "from
+ * earlier", because `ask` retains a cancelled request rather than discarding
+ * its reply.
+ */
 export const CANCELLED_NOTICE =
-  "Stopped waiting. If the answer did arrive it is kept — it will be here, as “from earlier”, next time you open this.";
+  "Stopped waiting — though the request itself carries on, so this one is still paid for. If the answer arrives it is kept, and it will appear here as “from earlier” rather than being asked for again.";
 
 export interface AssistRun<T> {
   readonly state: AssistRunState<T>;
-  /** Ask. Any answer to an earlier ask is already being ignored. */
+  /** Ask. An earlier ask stops driving this panel the moment this one starts. */
   ask(attempt: () => Promise<AssistAttempt<T>>): Promise<void>;
-  /** Stop waiting for whatever is in flight. Does not stop the model. */
+  /**
+   * Stop waiting for whatever is in flight. Does not stop the model, and does
+   * not throw the answer away: it lands as "from earlier" if it arrives.
+   */
   cancel(notice?: string): void;
   /** Say what just happened, under the panel. */
   note(notice: AssistNotice | string | null): void;
@@ -164,6 +211,23 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
    */
   const wanted = useRef(0);
 
+  /**
+   * The one request that stopped being *waited for* without being replaced:
+   * cancelled, or left behind by a closing panel. Its answer is still wanted;
+   * only the spinner is not. A second cancel replaces it, because there can
+   * only be one in flight at a time from this run.
+   */
+  const retained = useRef<number | null>(null);
+
+  /**
+   * Which request is actually in flight, or null. A ref rather than reading
+   * `state.pending`, because Cancel has to know it synchronously, inside the
+   * handler, before any re-render — and because reading state from inside a
+   * `setState` updater to get at it would be a side effect in a function React
+   * is allowed to call twice.
+   */
+  const inFlight = useRef<number | null>(null);
+
   const patch = useCallback((next: Partial<AssistRunState<T>>) => {
     setState((previous) => ({ ...previous, ...next }));
   }, []);
@@ -172,24 +236,69 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
     async (attempt: () => Promise<AssistAttempt<T>>) => {
       const id = wanted.current + 1;
       wanted.current = id;
-      patch({ pending: true, failure: null, notice: null, startedAt: Date.now() });
+      inFlight.current = id;
+      retained.current = null;
+      patch({
+        pending: true,
+        failure: null,
+        notice: null,
+        startedAt: Date.now(),
+        outstanding: false,
+      });
 
       let answer: AssistAttempt<T>;
       try {
         answer = await attempt();
       } catch {
-        if (wanted.current !== id) return;
+        if (inFlight.current === id) inFlight.current = null;
+        if (wanted.current !== id) {
+          if (retained.current === id) {
+            retained.current = null;
+            patch({ outstanding: false });
+          }
+          return;
+        }
         patch({ pending: false, failure: TRANSPORT_FAILURE });
         return;
       }
 
-      if (wanted.current !== id) return;
+      if (inFlight.current === id) inFlight.current = null;
+
+      if (wanted.current !== id) {
+        /*
+          Nobody is waiting for this one. If it was *cancelled* rather than
+          superseded, it is still the answer to the last question asked, it is
+          already in `videos.brainstorm_last`, and it has already been paid
+          for — so it settles in quietly, as "from earlier", which is what the
+          cancel notice says will happen. Two guards, inside the updater so
+          they read the state that actually exists: a newer ask in flight owns
+          the panel, and an answer that has already landed is newer than this
+          one. A late failure is dropped either way.
+        */
+        if (retained.current !== id) return;
+        retained.current = null;
+        setState((previous) => {
+          if (previous.pending || previous.fresh) {
+            return { ...previous, outstanding: false };
+          }
+          if (!answer.ok) return { ...previous, outstanding: false };
+          return {
+            ...previous,
+            outstanding: false,
+            data: answer.data,
+            fresh: false,
+            meta: answer.meta,
+            persisted: answer.persisted,
+          };
+        });
+        return;
+      }
 
       if (!answer.ok) {
-        const { code, message, retryable, retryAfterSeconds } = answer;
+        const { code, message, retryable, retryAfterSeconds, provider } = answer;
         patch({
           pending: false,
-          failure: { code, message, retryable, retryAfterSeconds },
+          failure: { code, message, retryable, retryAfterSeconds, provider },
         });
         return;
       }
@@ -206,12 +315,25 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
     [patch],
   );
 
+  /**
+   * Stop waiting for whatever is in flight, but keep wanting its answer.
+   * Returns whether there was anything to stop waiting for.
+   */
+  const stopWaiting = useCallback((): boolean => {
+    const id = inFlight.current;
+    wanted.current += 1;
+    inFlight.current = null;
+    if (id === null) return false;
+    retained.current = id;
+    return true;
+  }, []);
+
   const cancel = useCallback(
     (notice: string = CANCELLED_NOTICE) => {
-      wanted.current += 1;
-      patch({ pending: false, notice: { text: notice } });
+      const outstanding = stopWaiting();
+      patch({ pending: false, notice: { text: notice }, outstanding });
     },
-    [patch],
+    [patch, stopWaiting],
   );
 
   const note = useCallback(
@@ -222,12 +344,17 @@ export function useAssistRun<T>(initial: T | null = null): AssistRun<T> {
   );
 
   const settle = useCallback(() => {
-    wanted.current += 1;
-    patch({ pending: false, fresh: false });
-  }, [patch]);
+    // Closing a panel mid-flight is the same bargain as Cancel without the
+    // sentence: the waiting ends, the answer is still wanted, and reopening
+    // must not buy a second copy of it.
+    const outstanding = stopWaiting();
+    patch({ pending: false, fresh: false, outstanding });
+  }, [patch, stopWaiting]);
 
   const forget = useCallback(() => {
     wanted.current += 1;
+    inFlight.current = null;
+    retained.current = null;
     setState(emptyRun<T>());
   }, []);
 

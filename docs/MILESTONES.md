@@ -7686,4 +7686,342 @@ dev server — my mistake, and the kind that produces one unexplained failure
 (`board.m1`'s WIP warning) that looks like a flake and is not. The number above
 is from the clean run, with nothing else touching the tree while it ran.
 
+## M8 — Review: what the adversarial pass found, and what was done about it
+
+> Scope: 32 findings across five lenses (secrets, failures, principles,
+> provider-code, scope-quality). Every one was checked against the tree before
+> anything was changed; several were the same defect seen from two angles, and
+> those are answered once and cross-referenced. Files touched:
+> `lib/assist/{types,clamp,schema,prompts,fake,anthropic}.ts` and their tests,
+> `app/actions/assist.ts`, `components/assist/{run,stored,chrome,acceptance,
+> brainstorm-assist,brainstorm-panel,concept-assist,critique-assist}.ts(x)`,
+> `components/packaging/{working-title,title-candidates,hooks-editor,
+> thumbnail-concept}.tsx`, `components/capture/capture-form.tsx`,
+> `components/ideas/matrix/capture-cell.tsx`, `app/videos/[id]/page.tsx`,
+> `vitest.config.mts`, `.env.example`, `README.md`,
+> `e2e/{brainstorm,m8-acceptance}.spec.ts`, **one migration
+> (`0009_brainstorm_merge.sql`) and one new SQL test
+> (`75_brainstorm_merge.test.sql`)**. No new runtime dependency.
+
+### The blocker
+
+**An answer the clamp emptied was a success with nothing in it, and it
+destroyed the answer `brainstorm_last` was keeping.** (findings 6, 25)
+
+`assemble()` rejected an empty answer by checking the payload *before*
+clamping, never after. So an answer whose every suggestion was dropped — all
+duplicates of what the video already had — resolved `ok: true` with
+`suggestions: []`. Two things followed, and the second is why this was a
+blocker rather than a rough edge:
+
+1. The panel drew "0 proposals — the tool talking." over an empty list, with
+   no failure block and no retry, after somebody had waited for a call and (in
+   production) paid for it — while `lib/assist/types.ts` already had a written
+   sentence for exactly this case.
+2. `app/actions/assist.ts` writes on the success path, so that empty entry went
+   into `videos.brainstorm_last`, where `readStoredBrainstorm`'s `usable()`
+   reads an entry with no suggestions as **absent**. The twenty titles the
+   column was holding were gone, and the call answered `persisted: true`.
+
+It is not a corner case. It is the straight line the panel is built for: ask,
+"Add all as candidates", "Ask again" — the fixtures are deterministic on the
+video's own text, so the second answer is the first one, and every suggestion
+in it is now a candidate. Once there, it repeats for as long as anybody keeps
+pressing.
+
+Three changes, at three depths:
+
+- `assemble()` throws `AssistError("empty")` when the **clamped** list is
+  empty, with a sentence naming why ("Everything it came back with is already
+  on this video…" / "…everything in the answer was blank or too long"). `empty`
+  is retryable, so the panel already has the button, and `failure()` returns
+  before the write, so the kept answer survives.
+- `withEntry` refuses to replace a non-empty stored entry with an empty one.
+  An empty entry does not store an empty answer; it destroys the one that was
+  there.
+- `merge_brainstorm_entry` (migration 0009) raises on an entry with no
+  suggestions, so the column refuses it even if something else ever tries.
+
+Walked in a browser as the ordinary flow (`e2e/brainstorm.spec.ts` §12): 20
+proposals, add all, ask again → `data-code="empty"`, "already on this video",
+"Try again", no `brainstorm-count` at all, and `brainstorm_last` still holding
+its twenty. Unit-covered in `clamp.test.ts` (the test that used to assert the
+*opposite* is rewritten with the reason it changed) and `fake.test.ts` via a
+new `[[assist:all_duplicates]]` scenario.
+
+### Fixed
+
+**Two brainstorms at once destroyed each other's stored answer** (2, 20). The
+action read the whole `brainstorm_last` envelope at the top, spent 10–40 s in
+the model, then wrote back an envelope rebuilt from that snapshot — so the
+slower of two overlapping asks committed a state that had never seen the
+faster one's key, while answering `persisted: true`. Reachable with two
+adjacent clicks, because the panel deliberately holds one run per kind.
+Migration **0009** adds `merge_brainstorm_entry(video, kind, entry)`: one
+statement, ownership proved first, a jsonb merge of one key, `security
+definer` like the other eight functions — and `brainstorm_last` leaves the
+client's UPDATE grant, so there is no second way to write it and no snapshot
+that can go stale. Six cases in `supabase/tests/75_brainstorm_merge.test.sql`,
+plus two privilege assertions in `90_schema_contract.test.sql`.
+
+**Cancelling or closing the panel mid-flight bought a second model call**
+(7, 13). `cancel()` and `settle()` left `data: null`, `askedAlready` read
+exactly that, and the request itself was never abortable — so the answer was
+written to the column, ignored, and asked for again on the next open.
+`CANCELLED_NOTICE` promised the opposite in as many words. `useAssistRun` now
+*retains* a cancelled request: when it lands it settles in as `fresh: false`
+("from earlier"), guarded inside the state updater so a newer ask or an
+already-landed answer wins, and a late **failure** is still dropped — nobody
+wants an alert about something they walked away from. `outstanding` says a
+retained request is still on its way, and `askedAlready` reads it, so
+reopening in the gap waits rather than asking twice. The notice was rewritten
+to say the other true thing as well: the waiting stops, the spending does not.
+Walked in `e2e/brainstorm.spec.ts` §13, which holds the assist POST, cancels,
+releases, closes and reopens, and counts **one** POST.
+
+**Structured outputs were being sent to the beta endpoint without the
+structured-outputs beta flag** (23). This was the one detail in
+`lib/assist/anthropic.ts` asserted from outside the installed package, and it
+was wrong by omission. `output_config.format` goes to
+`client.beta.messages.create`, and the SDK's own structured-output entry point
+on that namespace — `client.beta.messages.parse`,
+`node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.js:75-83` in
+the installed 0.128.0 — unconditionally adds `structured-outputs-2025-12-15`
+on top of whatever `betas` the caller passed; the plain `create()` above it
+adds nothing of its own. Without it the request may be rejected as malformed
+on 100% of production calls, surfacing as `rejected` ("that is a bug in this
+app") with nobody able to find out from this container; with it, if it is
+unnecessary, the cost is an ignored header. Both flags now go out together and
+`anthropic.test.ts` asserts both on the wire, so it is pinned rather than
+remembered.
+
+**The vendor leaked through the seam** (24, 11, 4). Three separate holes in
+one claim:
+
+- `AssistProvider["name"]` and `AssistMeta["provider"]` were the closed union
+  `"anthropic" | "fake"`, so a third provider could not satisfy the interface
+  without editing the file whose comment promises it would be "a new file and
+  one line in that chooser". Both are `string` now; readers compare against
+  `"fake"`, which is the one value with a meaning attached.
+- Every default failure sentence named Claude — six times — and a keyless
+  deployment therefore told people "Claude declined to answer this one" about
+  notes no model had ever seen. The sentences are neutral, and the fixture
+  admission now renders on the **failure** path too: `AssistState`'s failure
+  branch carries `provider`, `AssistFailureView` carries it through, and
+  `AssistFixtureNotice` has a `variant="failure"` sentence under all three
+  panels. That closes the hole the integration pass claimed to have closed and
+  had only closed on successful answers.
+- `MESSAGES.unauthorized` put `ANTHROPIC_API_KEY` on the user's screen,
+  contradicting this milestone's own recorded decision. The variable name now
+  lives only in `AssistError.detail`, which is written on the server, logged
+  there, and never rendered — asserted in `anthropic.test.ts`. PLAN.md's
+  build-output grep was unaffected either way and is still **0 files**.
+
+**The typographic boundary the design was signed off on did not exist**
+(8, 15). `app/globals.css` defines `font-display` (Newsreader) as "what the
+*user* wrote", and `chrome.tsx` asserts a proposal is drawn "never the
+Newsreader face the person's own writing is set in" — but `font-display`
+appeared nowhere under `components/packaging/`, so proposal and accepted
+candidate were the same Instrument Sans and the whole boundary rested on a
+dashed border and a chip. The app even contradicted itself within one screen:
+the same `thumbnail_concept` string was Newsreader in
+`components/thumbnails/concept-brief.tsx` and sans in the editor that writes
+it. The four fields an M8 suggestion can land in — the working title, the
+candidate rows and their add box, the hooks, the concept — are now set in the
+reading face, so accepting a proposal visibly moves it out of the tool's
+voice. The proposal side stays sans.
+
+**"Why it picked this one:" labelled a sentence that was not a reason for the
+pick** (12). The label sat over the picked row's own `rationale`, which says
+why that one works — a comparison was never asked for, in the schema or the
+prompt, and under the fixtures `recommended_index` was a hash unrelated to the
+list, so the "why" was routinely about a different suggestion. The question is
+asked now: `recommended_reason` on `SuggestionsPayload` (optional, so an
+answer that omits it is not thrown away over it), a matching instruction in
+all three `craftSection` branches, `recommendedReason` on `SuggestionsResult`
+and on the stored entry, and a fixture pool of comparative sentences. It is
+dropped whenever the pick moves — a reason for a proposal that was clamped
+away is a reason about something nobody can see — and where there is none the
+badge carries the pick alone.
+
+**The critique could recommend the one variant its own verdict called
+illegible** (16). `clampCritique` accepted any `recommended_role` that named a
+variant that was sent, so "WOULD SHIP" was drawn over "Does not read at tile
+size", above a button that writes a real `swap_thumbnail`; under the fixtures
+roughly one critique in three was self-contradictory, because
+`critiqueFor` picked from the seed rather than from the verdicts it had just
+written. The clamp now drops such a recommendation and counts it, the fixture
+derives its pick from its own verdicts, and `AssistMetaLine` takes
+`marksFallback` so the critique says "nothing is marked as the one to ship"
+rather than the ranked-list panels' "the first is marked instead".
+
+**Hooks were always asked for in threes** (17). `WANT.hooks` pinned the ask at
+`HOOKS_MAX`, which made `wantedFor`'s hooks branch unreachable from the app —
+it only runs when `want` is undefined — so a video with two hooks was offered
+three proposals it had room for one of. Both the function's doc comment and
+this milestone's decision 5 described behaviour that did not ship. The hooks
+request is built without `want`.
+
+**The hooks pill said "Draft a third" on a video with no hooks** (18). The
+verb stays the control's identity (`data-assist`, which every spec selects on);
+`hookPillLabel` supplies the text from the hook count — "Draft hooks", "Draft
+a second", "Draft a third", "Another hook to compare" — through the `label`
+prop the integration pass added for exactly this.
+
+**"Add all as candidates" could report zeros** (9). Disabled only on a full
+list, it dispatched an empty batch with nothing on screen and produced
+"Nothing added — 0 were already in your list and there was no room for 0", in
+the file whose comment promises "always a full sentence". The button is now
+disabled on an empty list, and `describeAcceptance` has an `asked === 0` guard
+so the catch-all can never render zeros. (The blocker above means an empty
+list should not reach the panel at all; this is the rule behind the guard.)
+
+**The packaging panel hand-copied chrome's `Proposal` frame** (19). The
+integration notes said that frame was drawn in one place so it "cannot be
+drawn differently twice"; the brainstorm panel repeated the classes, the chip
+and the pick badge inline while the other two panels used the component. It
+renders through `Proposal` now, with `testId` and `pickedTestId` — the props
+the component already had for this case.
+
+**The capture remedy existed on one of three capture surfaces** (21). M8's
+recorded compensation for keeping capture assist-free is that "the capture
+toast now carries a link to the video it just wrote". Only the `c` modal did.
+The matrix cell's toast now carries the same `links`, and the `/capture`
+page's inline confirmation carries an "Open it" link beside it.
+
+**Fixture rationales were assigned round-robin** (22). Text and reasons came
+from two pools rotated independently, so a title with no number sat under "…the
+number gives it a spine", and eight sentences covered twenty rows. They are
+paired — one array of `{say, reason}` — so every fixture rationale is at least
+true of the line above it, and a twenty-item list carries twenty distinct
+reasons.
+
+**The fixture's dependence on the voice guide was cosmetic** (14, and see
+"what the acceptance row actually showed" below). `seedOf` included the guide,
+so two guides started the same pool at a different index — a reordering, which
+a set assertion passes. Measured by the reviewer: **16 of 20 titles identical**
+between two deliberately opposite guides. Each shape now carries two phrasings
+and the guide's hash picks which, so the texts differ rather than their
+positions; `fake.test.ts` asserts **zero** shared lines between the two
+fixture guides. This still proves nothing about a model, and the acceptance
+row has been restated to say so.
+
+**Documentation that described code that does not exist** (3/26/29, 5, 28, 30,
+31, 32). `AssistCallOptions.signal`'s comment claimed the panel aborts
+in-flight calls "so a brainstorm nobody is waiting for stops costing money" —
+no caller passes one and none can, because an `AbortSignal` does not cross the
+server-action boundary; it is now described as the seam it is, pointing at
+`components/assist/run.ts`, which had the accurate account all along.
+`vitest.config.mts` named `lib/assist/provider.ts`, which has never existed.
+`AssistState.kind` was said to be matched against a late reply; nothing
+matches on it, and the invalid-input branch hard-coded `kind: "titles"` — the
+comment says what it is for and the branch echoes the requested kind.
+`app/videos/[id]/page.tsx` still called the three assists "inert" three
+milestones after they became real, and `chrome.tsx` described
+`components/preview/assist-pill.tsx` in the present tense after M8 deleted it.
+`.env.example` and `README.md` both said "anything else, **including unset**,
+means Claude", which is false for the case this milestone spent the most care
+on — unset with no key outside production is the fixtures.
+
+**A per-question in-flight guard** (1, partly — see "The honest limit"). The
+same POST replayed 25 times in parallel with one session's cookies produced 25
+live model calls, each carrying the voice guide and fifty past titles. The
+same question asked twice at once is waste in every case, so `assist()` now
+refuses a second ask for the same `(user, video, kind)` while one is in
+flight, with the existing `rate_limited` code the panel already renders. It is
+keyed by *question*, not by user, because two different questions at once is
+the design.
+
+### Rejected
+
+Nothing was rejected outright. Two findings were answered differently from
+their suggested fix, and both are recorded here rather than silently:
+
+- **1 (rate limit / cost ceiling)** asked for either a server-side ceiling or
+  an honest written record of the gap. Both were done, but neither fully: the
+  guard above bounds the *repeat of one question*, not spend in general, and a
+  per-user hourly quota was not built — it needs a table and a migration for a
+  single-tenant app whose only user is the person paying the bill. The
+  exposure that remains is written into "The honest limit" below, named rather
+  than left to be discovered from an invoice.
+- **12** offered "drop the label" as an alternative to asking for the datum.
+  Asking for it is the larger change and was chosen anyway, because BRIEF.md
+  asks for "a recommended pick" and the panel's own argument is that the
+  reason beside a proposal is the part still useful after it closes. A pick
+  marked and unexplained is a weaker feature than a pick explained.
+
+### Deferred
+
+- **Nothing to M9.** No finding in this pass was M9 polish. The mobile pass,
+  the full shortcut set and the `?` sheet remain M9's, untouched here.
+
+### The honest limit, restated
+
+Everything the previous section said still holds: **the real provider has
+never run against the live API from this container**, and no HTTP request has
+ever left it for Anthropic. Two things are added to that list by this review.
+
+**An authenticated session can spend the key faster than a person can.** The
+in-flight guard above refuses the *same* question twice at once, and it is
+process-local, so on a platform that runs more than one instance it bounds a
+tight loop rather than a determined one. There is no per-user counter, no
+asks-per-hour ceiling and no daily cap. With `ASSIST_PROVIDER` unset in Vercel
+every ask is a live `claude-opus-5` call with `max_tokens: 16_000` carrying the
+voice guide and up to fifty past titles. For a single-user deployment that is
+a deliberate deferral and not a vulnerability; on the day this app has a second
+user, a counter is the first thing to add.
+
+**Closing the panel stops the waiting, not the spending.** A server action
+cannot be recalled from the browser. The answer is now kept when it lands —
+which is the fix above — but the call runs to completion and is billed either
+way, and the cancel notice says so.
+
+**What the voice-guide acceptance row actually showed.** The previous section
+recorded *"changing the voice guide visibly changes output"* as walked, with
+the evidence that "Ask again" returns a different list asserted as a set. That
+is weaker than it reads. What the walk demonstrated is that the guide reaches
+the prompt (`voiceSection` puts it first, fenced, with "where a craft rule and
+this voice disagree, the voice wins" — `prompts.test.ts` holds it to that) and
+that the **fixture** is conditioned on it. Whether a model's output is
+conditioned on it is unproven from here and belongs on the Vercel checklist
+beside `effort` and the beta headers.
+
+**The first four things to check when a key exists in Vercel**, in order: that
+a brainstorm returns at all; that the outgoing request carries `effort:
+"medium"`, **both** `anthropic-beta` flags
+(`server-side-fallback-2026-07-01`, `structured-outputs-2025-12-15`) and
+`fallbacks: "default"`; that a refusal arrives as the panel's sentence rather
+than a crash; and that two opposite voice guides produce genuinely different
+titles for the same video.
+
+### Decisions taken without the user
+
+1. **`videos.brainstorm_last` left the client's UPDATE grant** (migration
+   0009). The alternative was to re-read the column immediately before the
+   write, which narrows the race from forty seconds to a round trip without
+   closing it. A jsonb merge in one statement closes it, and the column having
+   exactly one write path is what makes that a property of the schema rather
+   than a convention in one action. It is the ninth `security definer` function
+   in a codebase whose architecture is "writes go through the server actions
+   and the security-definer functions", so it is the shape already established
+   rather than a new one.
+2. **`recommended_reason` is optional in the schema and asked for in the
+   prompt.** `schema.ts`'s doctrine is structural-only: a nine-title answer is
+   not a wrong-shape error, and an answer that is useful without a comparison
+   must not be discarded over one. The `describe` still travels into the JSON
+   Schema the model is shown, and the prompt asks for it in as many words.
+3. **The failure sentences name no vendor at all**, rather than naming the one
+   that is actually answering. A per-provider sentence table is a second place
+   for copy to drift, and the fixtures notice already says who answered —
+   which is more useful than a name inside a sentence, because it also says
+   what that means.
+4. **A cancelled request's answer is adopted; a cancelled request's failure is
+   not.** Keeping the answer is what the notice promises and what the column
+   is for. Raising an alert about a request somebody explicitly walked away
+   from is not, so a late failure is dropped and the panel stays as they left
+   it.
+5. **The in-flight guard is per question, not per user.** Pressing "Generate
+   20" and then "Draft a third" is two panels' worth of work and the design
+   supports it; refusing the second would have made the guard a bug.
+
 <!-- GATES -->

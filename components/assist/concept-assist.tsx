@@ -7,6 +7,7 @@ import { sameLabel } from "@/lib/text";
 
 import {
   AssistFailure,
+  AssistFixtureNotice,
   AssistMetaLine,
   AssistNoticeLine,
   AssistPanel,
@@ -199,12 +200,21 @@ export function ConceptAssist({
           ) : null}
 
           {state.failure ? (
-            <AssistFailure
-              prefix={PREFIX}
-              failure={state.failure}
-              onRetry={ask}
-              disabled={state.pending}
-            />
+            <>
+              <AssistFailure
+                prefix={PREFIX}
+                failure={state.failure}
+                onRetry={ask}
+                disabled={state.pending}
+              />
+              {/* A fixture must not pass itself off as a model on the failure
+                  path either. See `AssistFixtureNotice`. */}
+              <AssistFixtureNotice
+                prefix={PREFIX}
+                provider={state.failure.provider}
+                variant="failure"
+              />
+            </>
           ) : null}
 
           {state.notice ? (
@@ -302,11 +312,17 @@ function ConceptProposals({
                 {suggestion.text}
               </p>
               <p data-testid="suggestion-rationale" className="text-xs text-muted">
-                {entry.recommended === index ? (
-                  <strong className="text-foreground">Why it picked this one: </strong>
-                ) : null}
                 {suggestion.rationale}
               </p>
+              {/* The comparison, where the answer gave one. See the same note
+                  in `brainstorm-panel.tsx`: the label used to sit over this
+                  proposal's own rationale, which is not a reason for a pick. */}
+              {entry.recommended === index && entry.recommendedReason ? (
+                <p data-testid={`${PREFIX}-pick-reason`} className="text-xs text-muted">
+                  <strong className="text-foreground">Why it picked this one: </strong>
+                  {entry.recommendedReason}
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"

@@ -80,6 +80,19 @@ const TEXT_LIMITS = {
 export type SuggestionKind = "titles" | "concepts" | "hooks";
 
 /**
+ * The ceiling an answer of this kind is held to — which is not always the
+ * number the prompt asks for. Concepts are asked for four and capped at six,
+ * because a fifth genuinely different picture is worth keeping and a fifth
+ * paragraph of padding is not. `prompts.ts` reads this so the instruction the
+ * model is given ("anything past six will be trimmed") is the rule the code
+ * actually applies.
+ */
+export function capFor(request: AssistRequest): number {
+  if (request.kind === "thumbnail_critique") return request.variants.length;
+  return CAPS[request.kind];
+}
+
+/**
  * How many the prompt should ask for.
  *
  * Hooks are the interesting one: the pill says "Draft a third", because what
@@ -160,6 +173,12 @@ export interface ClampReport {
 export interface ClampedSuggestions {
   readonly suggestions: AssistSuggestion[];
   readonly recommended: number | null;
+  /**
+   * The model's comparative sentence, or null when it gave nothing usable or
+   * when its pick did not survive. A reason for a pick that was dropped is a
+   * reason about something the person cannot see, so it goes with it.
+   */
+  readonly recommendedReason: string | null;
   readonly report: ClampReport;
 }
 
@@ -218,9 +237,23 @@ export function clampSuggestions(
     suggestions.length,
   );
 
+  /*
+    The comparison only stands while the thing it compares is the thing that
+    is marked. If the pick was dropped or out of range, `pickRecommended` falls
+    back to the first survivor — an honest fallback, but not what the sentence
+    was written about — so the sentence goes rather than being re-pointed at a
+    proposal it was never about.
+  */
+  const reason = tidy(payload.recommended_reason ?? "");
+  const recommendedReason =
+    recommended === null || adjusted || reason === ""
+      ? null
+      : fitRationale(reason);
+
   return {
     suggestions,
     recommended,
+    recommendedReason,
     report: {
       returned: payload.suggestions.length,
       droppedOverflow,
@@ -310,10 +343,24 @@ export function clampCritique(
   // model happened to list them, so the critique reads down the page.
   verdicts.sort((a, b) => roles.indexOf(a.role) - roles.indexOf(b.role));
 
+  /*
+    A recommendation is kept only if it survives its own verdict.
+
+    Two ways it does not. It can name a variant nobody uploaded, which is the
+    same repair as an out-of-range index — the pick is gone. Or it can name one
+    the model *itself* just said does not read at tile size, which is the one
+    question the critique exists to answer: "would ship" printed directly above
+    "Does not read at tile size", with a button that writes a real
+    `swap_thumbnail`, is worse than no recommendation. Both are dropped and
+    counted, and the panel says the pick could not be used.
+  */
   const recommendedRaw = tidy(payload.recommended_role).toLowerCase();
-  const recommendedRole = seen.has(recommendedRaw)
+  const named = seen.has(recommendedRaw)
     ? (recommendedRaw as ThumbnailVerdict["role"])
     : null;
+  const namedVerdict = verdicts.find((verdict) => verdict.role === named);
+  const contradicted = namedVerdict !== undefined && !namedVerdict.readsAtTileSize;
+  const recommendedRole = contradicted ? null : named;
 
   return {
     verdicts,
@@ -323,8 +370,6 @@ export function clampCritique(
       droppedOverflow: 0,
       droppedDuplicates,
       droppedUnusable,
-      // A recommendation naming a variant nobody uploaded is the same repair
-      // as an out-of-range index: the pick is gone, and the panel should say so.
       recommendationAdjusted: recommendedRaw !== "" && recommendedRole === null,
     },
   };
@@ -350,10 +395,25 @@ export interface AssembleContext {
  * producing a shape the real one never would, because neither of them builds
  * an `AssistResult` by hand.
  *
- * The one thing this rejects outright is an answer with nothing in it. An
- * empty list is not something to clamp — there is no work to keep — and a
- * panel that opens on nothing with no explanation is worse than a sentence
- * saying the model came back empty.
+ * The one thing this rejects outright is an answer with nothing *usable* in
+ * it, and the emphasis is the point. Checking the payload alone was not
+ * enough: an answer of twenty titles that are all duplicates of what the video
+ * already has arrives full and leaves the clamp empty, and that resolved as a
+ * *success* with `suggestions: []`. Two things followed from it, both bad. The
+ * panel drew "0 proposals — the tool talking." over an empty list, with no
+ * failure block and no retry, after somebody had waited for a call and paid
+ * for it. And `app/actions/assist.ts` writes on the success path, so that
+ * empty entry replaced whatever `videos.brainstorm_last` was holding — and
+ * `readStoredBrainstorm` reads an empty entry as absent, so the twenty titles
+ * that were kept were gone. That is the one job PLAN.md gives the column.
+ *
+ * It is not a corner case either: "Add all as candidates", then "Ask again",
+ * is the straight line the panel is built for, and once the candidate list
+ * matches the answer it repeats for as long as somebody keeps pressing.
+ *
+ * So the emptiness check happens *after* the clamp, it names which drop
+ * emptied the list, and it throws — which means `failure()` returns before the
+ * write and the kept answer survives.
  */
 export function assemble(
   request: AssistRequest,
@@ -390,10 +450,44 @@ export function assemble(
     suggestions,
     request.existing ?? [],
   );
+  if (clamped.suggestions.length === 0) throw emptyAfterClamp(clamped.report);
   return {
     kind: request.kind,
     suggestions: clamped.suggestions,
     recommended: clamped.recommended,
+    recommendedReason: clamped.recommendedReason,
     meta: { ...context, requested, ...clamped.report },
   };
+}
+
+/**
+ * Nothing survived the clamp: a failure, with the reason it was empty.
+ *
+ * `empty` is retryable, so the panel already offers the button. The sentence
+ * differs by cause because the two are different situations for the person:
+ * an answer that was entirely repeats of their own list is one to retry after
+ * changing the list, and one that was entirely unusable text is a bad answer
+ * to ask for again.
+ */
+function emptyAfterClamp(report: ClampReport): AssistError {
+  const { returned, droppedDuplicates, droppedUnusable } = report;
+  if (droppedDuplicates > 0 && droppedUnusable === 0) {
+    return new AssistError("empty", {
+      message:
+        "Everything it came back with is already on this video, so there is nothing new to offer. Accept or remove some of what you have, or ask again.",
+      detail: `All ${returned} suggestions were duplicates of what the video already has.`,
+    });
+  }
+  if (droppedUnusable > 0 && droppedDuplicates === 0) {
+    return new AssistError("empty", {
+      message:
+        "Nothing usable came back this time — everything in the answer was blank or too long for the field. Try again.",
+      detail: `All ${returned} suggestions were blank or over the column's limit.`,
+    });
+  }
+  return new AssistError("empty", {
+    message:
+      "Nothing usable came back this time — everything in the answer was either already on this video or unusable. Try again.",
+    detail: `All ${returned} suggestions were dropped: ${droppedDuplicates} duplicates, ${droppedUnusable} unusable.`,
+  });
 }

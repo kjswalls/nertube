@@ -44,6 +44,13 @@ export function capacityLine(
 export function describeAcceptance(outcome: AcceptOutcome, asked: number): string {
   const { added, duplicates, noRoom } = outcome;
 
+  // Nothing was offered, so nothing is the honest answer — and the catch-all
+  // below would otherwise produce "0 were already in your list and there was
+  // no room for 0", which is what a sentence built only from counts says when
+  // all the counts are zero. The panel disables the control that can reach
+  // this; this is the rule rather than the guard.
+  if (asked === 0) return "There was nothing to add.";
+
   if (added === 0) {
     if (duplicates > 0 && noRoom === 0) {
       return asked === 1
@@ -81,7 +88,11 @@ export function describeAcceptance(outcome: AcceptOutcome, asked: number): strin
  * `null` when the answer arrived exactly as asked for, which is the normal
  * case and deserves no line at all.
  */
-export function describeMeta(meta: AssistMeta | null): string | null {
+export function describeMeta(
+  meta: AssistMeta | null,
+  /** See `AssistMetaLine`: does this panel mark a substitute, or nothing? */
+  marksFallback = true,
+): string | null {
   if (!meta) return null;
 
   const dropped: string[] = [];
@@ -104,7 +115,11 @@ export function describeMeta(meta: AssistMeta | null): string | null {
     parts.push(`The answer overshot: dropped ${dropped.join(", ")}.`);
   }
   if (meta.recommendationAdjusted) {
-    parts.push("Its pick pointed at something that was dropped, so the first is marked instead.");
+    parts.push(
+      marksFallback
+        ? "Its pick pointed at something that was dropped, so the first is marked instead."
+        : "Its own pick could not be used — it named one it had just called illegible, or one that was not sent — so nothing is marked as the one to ship.",
+    );
   }
   if (meta.servedByFallback) {
     parts.push("A fallback model answered this one.");

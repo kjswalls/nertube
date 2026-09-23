@@ -1,6 +1,6 @@
 import { cleanProse, isBlank } from "@/lib/text";
 
-import { wantedFor } from "./clamp";
+import { capFor, wantedFor } from "./clamp";
 import type { AssistRequest, ChannelContext, VideoContext } from "./types";
 
 /**
@@ -132,7 +132,7 @@ function craftSection(request: AssistRequest): string {
         "4. No promise the video cannot pay off, and no phrasing this channel would not use.",
         "5. Vary the angle across the list — different promises, different framings. Twenty rewordings of one title is one title.",
         "",
-        "Then pick the single strongest and give its index.",
+        "Then pick the single strongest, give its index, and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "concepts":
@@ -150,7 +150,7 @@ function craftSection(request: AssistRequest): string {
         "3. It has to be filmable by one person with the gear they already own.",
         "4. Range across the list: one riskier than the channel usually goes, one safe, the rest in between.",
         "",
-        "Then pick the strongest and give its index.",
+        "Then pick the strongest, give its index, and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "hooks":
@@ -170,7 +170,7 @@ function craftSection(request: AssistRequest): string {
           ? "The hooks already written are listed below. Do not rewrite them and do not repeat their angle; write the ones that are missing."
           : "There are no hooks written yet.",
         "",
-        "Then pick the strongest of the ones you wrote and give its index.",
+        "Then pick the strongest of the ones you wrote, give its index, and say in one sentence why that one beats the others — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "thumbnail_critique":
@@ -192,13 +192,25 @@ function craftSection(request: AssistRequest): string {
   }
 }
 
-/** The one instruction about form. The schema does the rest. */
+/**
+ * The one instruction about form. The schema does the rest.
+ *
+ * The trim is quoted at the *cap*, not at the ask. For titles and hooks those
+ * are the same number; for concepts the cap is deliberately two higher than
+ * the four asked for (`CAPS` in `clamp.ts`), so telling the model that a fifth
+ * concept "will be trimmed" was an instruction the code did not carry out —
+ * five and six are kept and shown. Saying the ask and the ceiling separately
+ * is both true and more useful than either alone.
+ */
 function outputSection(request: AssistRequest): string {
   const want = wantedFor(request);
+  const cap = capFor(request);
   const counted =
     request.kind === "thumbnail_critique"
       ? `Return exactly one verdict per image — ${want} in total — using the role labels given.`
-      : `Return ${want} of them. Fewer is better than padding the list with weak ones; more than ${want} will be trimmed.`;
+      : cap > want
+        ? `Return ${want} of them. Fewer is better than padding the list with weak ones; one or two more than ${want} is fine if they are genuinely different, and anything past ${cap} will be trimmed.`
+        : `Return ${want} of them. Fewer is better than padding the list with weak ones; more than ${want} will be trimmed.`;
 
   return [
     "## Output",

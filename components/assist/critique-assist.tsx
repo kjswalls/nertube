@@ -212,19 +212,39 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
           ) : null}
 
           {state.failure ? (
-            <AssistFailure
-              prefix={PREFIX}
-              failure={state.failure}
-              onRetry={ask}
-              disabled={state.pending}
-            />
+            <>
+              <AssistFailure
+                prefix={PREFIX}
+                failure={state.failure}
+                onRetry={ask}
+                disabled={state.pending}
+              />
+              {/* A fixture must not pass itself off as a model on the failure
+                  path either. See `AssistFixtureNotice`. */}
+              <AssistFixtureNotice
+                prefix={PREFIX}
+                provider={state.failure.provider}
+                variant="failure"
+              />
+            </>
           ) : null}
 
           {state.notice ? (
             <AssistNoticeLine prefix={PREFIX} notice={state.notice} />
           ) : null}
 
-          <AssistMetaLine prefix={PREFIX} meta={state.fresh ? state.meta : null} />
+          {/*
+            `marksFallback={false}`: this panel marks nothing when the model's
+            own pick cannot be used. A ranked list can fall back to its first
+            survivor honestly; "would ship" cannot fall back at all, because it
+            is a claim about one specific image and the button under it writes
+            a real `swap_thumbnail`.
+          */}
+          <AssistMetaLine
+            prefix={PREFIX}
+            meta={state.fresh ? state.meta : null}
+            marksFallback={false}
+          />
 
           {(state.data?.skipped ?? []).map((skip) => (
             <p

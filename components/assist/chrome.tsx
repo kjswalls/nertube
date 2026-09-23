@@ -160,7 +160,7 @@ export function AssistFailure({
       <p className="text-xs text-muted">
         Nothing was changed, and nothing was added to your fields.
         {failure.retryAfterSeconds
-          ? ` The API asked for ${failure.retryAfterSeconds} seconds.`
+          ? ` It asked for ${failure.retryAfterSeconds} seconds before another try.`
           : ""}
       </p>
       <div>
@@ -237,11 +237,22 @@ export function AssistNoticeLine({
 export function AssistMetaLine({
   prefix,
   meta,
+  marksFallback = true,
 }: {
   prefix: string;
   meta: AssistMeta | null;
+  /**
+   * Whether this panel marks a fallback when the model's own pick is dropped.
+   *
+   * The ranked-list panels do — the list is still in order, so the first
+   * survivor is an honest substitute and gets the badge. The critique does
+   * not: "would ship" is a claim about a specific image, and the one thing it
+   * must never do is land on an image the same answer just called illegible.
+   * One sentence per case, so neither panel describes the other's behaviour.
+   */
+  marksFallback?: boolean;
 }) {
-  const line = describeMeta(meta);
+  const line = describeMeta(meta, marksFallback);
   if (line === null) return null;
   return (
     <p data-testid={`${prefix}-meta`} className="text-xs text-muted">
@@ -278,10 +289,16 @@ export function AssistMetaLine({
  * harmless in itself (it is the name, never a value) and *fatal to the gate*,
  * which stops being "finds nothing" and becomes "finds one thing somebody has
  * to re-examine on every build". A gate with a known-benign hit is a gate
- * people learn to ignore. The sentence points at the README instead. The
- * failure messages that *do* name the variable — `not_configured`,
- * `unauthorized` in `lib/assist/types.ts` — are written on the server and
- * arrive as data, so they never enter a bundle.
+ * people learn to ignore. The sentence points at the README instead.
+ *
+ * Since the review, no *rendered* sentence anywhere names it. This comment
+ * used to say `not_configured` and `unauthorized` in `lib/assist/types.ts`
+ * did, which was half true — `not_configured` never had — and the half that
+ * was true contradicted this milestone's own recorded decision by putting an
+ * infrastructure variable in front of whoever happened to be using the app.
+ * Both sentences are neutral now, and the variable's name lives only in
+ * `AssistError.detail`, which is written on the server, logged there, and
+ * never sent anywhere a person can read it.
  *
  * ## Why it is one component
  *
@@ -350,18 +367,31 @@ export function AssistProvenance({
 export function AssistFixtureNotice({
   prefix,
   provider,
+  variant = "answer",
 }: {
   prefix: string;
   /** `"fake"`, `"anthropic"`, or null when nothing has been asked for yet. */
   provider: string | null;
+  /**
+   * Whether this sits under an answer or under a failure.
+   *
+   * The failure case is the one the review found still open, and it is the
+   * worse of the two. `lib/assist/fake.ts` can refuse, rate-limit and time
+   * out; the sentence a refusal shows reads as a judgement about the notes
+   * somebody just wrote, and on a keyless deployment no model had seen them.
+   * The notice was rendered from the stored *entry*, which on a failure is
+   * null, so it said nothing exactly where it mattered most.
+   */
+  variant?: "answer" | "failure";
 }) {
   if (provider !== "fake") return null;
   return (
     <p data-testid={`${prefix}-fixtures`} className="text-xs text-attention">
-      These came from this app’s built-in fixtures, not from Claude — so nothing
-      here is a model’s opinion of your video. Giving this deployment an
-      Anthropic API key is what makes these real; the README says which
-      environment variables to set.
+      {variant === "failure"
+        ? "That failure came from this app’s built-in fixtures, not from Claude — nothing was asked of a model, and this is not a judgement about your notes."
+        : "These came from this app’s built-in fixtures, not from Claude — so nothing here is a model’s opinion of your video."}{" "}
+      Giving this deployment an Anthropic API key is what makes these real; the
+      README says which environment variables to set.
     </p>
   );
 }
@@ -503,12 +533,13 @@ export function AssistPanel({
 /**
  * The pill itself: one control, one look, four call sites.
  *
- * `components/preview/assist-pill.tsx` is the inert version M2 placed and left
- * disabled on purpose, with a doc comment explaining that *where the button is*
- * is a layout decision worth making early and that shipping a listener for a
- * button nobody can press would be shipping the illusion of a feature. This is
- * the other half of that comment: same size, same border, same place, now with
- * something behind it.
+ * `components/preview/assist-pill.tsx` *was* the inert version M2 placed and
+ * left disabled on purpose, with a doc comment explaining that *where the
+ * button is* is a layout decision worth making early and that shipping a
+ * listener for a button nobody can press would be shipping the illusion of a
+ * feature. M8 deleted that file and this is what replaced it — same size, same
+ * border, same place, now with something behind it — so its reasoning is
+ * carried here rather than at a path that no longer exists.
  */
 export function AssistPillButton({
   verb,

@@ -24,6 +24,7 @@ import { AssistError, type SuggestionsResult } from "./types";
 function payload(
   texts: readonly string[],
   recommended = 0,
+  recommendedReason = "It beats the others because it names a cost.",
 ): SuggestionsPayload {
   return {
     suggestions: texts.map((text, index) => ({
@@ -31,6 +32,7 @@ function payload(
       rationale: `Reason ${index}`,
     })),
     recommended_index: recommended,
+    recommended_reason: recommendedReason,
   };
 }
 
@@ -224,6 +226,41 @@ describe("clampCritique", () => {
     expect(clamped.recommendedRole).toBe("safe");
   });
 
+  it("refuses a recommendation the answer's own verdict calls illegible", () => {
+    /*
+      The review found the panel drawing "WOULD SHIP" on a card that said
+      "Does not read at tile size" directly beneath it, over a button that
+      writes a real `swap_thumbnail`. Nothing had ever checked the
+      recommendation against the verdict it names. It is dropped and counted,
+      the same repair as a recommendation naming a variant nobody uploaded.
+    */
+    const clamped = clampCritique(
+      {
+        verdicts: [
+          { ...verdict("wild_card"), reads_at_tile_size: false },
+          verdict("safe"),
+        ],
+        recommended_role: "wild_card",
+      },
+      ["wild_card", "safe"],
+    );
+
+    expect(clamped.recommendedRole).toBeNull();
+    expect(clamped.report.recommendationAdjusted).toBe(true);
+    // The verdicts themselves survive: the judgement was fine, the pick was not.
+    expect(clamped.verdicts).toHaveLength(2);
+  });
+
+  it("keeps a recommendation its own verdict stands behind", () => {
+    const clamped = clampCritique(
+      { verdicts: [verdict("wild_card"), verdict("safe")], recommended_role: "safe" },
+      ["wild_card", "safe"],
+    );
+
+    expect(clamped.recommendedRole).toBe("safe");
+    expect(clamped.report.recommendationAdjusted).toBe(false);
+  });
+
   it("orders verdicts the way the section shows the variants", () => {
     const payloadIn: CritiquePayload = {
       verdicts: [verdict("safe"), verdict("wild_card"), verdict("moderate")],
@@ -275,6 +312,40 @@ describe("assemble", () => {
     expect(result.meta.elapsedMs).toBe(1_000);
   });
 
+  it("carries the comparison for the pick, and drops it when the pick moves", () => {
+    /*
+      The panel labels a sentence "Why it picked this one:", and until this
+      field existed the sentence it labelled was the picked item's *own*
+      rationale — which says why that one works, not why it beats the rest.
+      Nothing in the schema or the prompt had ever asked why. Now that it is
+      asked, it is also thrown away the moment it stops being about the thing
+      on screen: a reason for a proposal that was dropped is a reason about
+      something nobody can see.
+    */
+    const kept = assemble(
+      titlesRequest(),
+      payload(numbered(3), 1, "Only this one names a number."),
+      context,
+    ) as SuggestionsResult;
+    expect(kept.recommended).toBe(1);
+    expect(kept.recommendedReason).toBe("Only this one names a number.");
+
+    const moved = assemble(
+      titlesRequest({ existing: ["Title 2"] }),
+      payload(numbered(3), 1, "Only this one names a number."),
+      context,
+    ) as SuggestionsResult;
+    expect(moved.meta.recommendationAdjusted).toBe(true);
+    expect(moved.recommendedReason).toBeNull();
+
+    const silent = assemble(
+      titlesRequest(),
+      payload(numbered(3), 0, "   "),
+      context,
+    ) as SuggestionsResult;
+    expect(silent.recommendedReason).toBeNull();
+  });
+
   it("calls an answer with nothing in it empty rather than a success", () => {
     expect(() => assemble(titlesRequest(), payload([]), context)).toThrowError(
       AssistError,
@@ -286,15 +357,45 @@ describe("assemble", () => {
     }
   });
 
-  it("does not call a fully de-duplicated answer empty — nothing was wrong with it", () => {
-    const result = assemble(
-      titlesRequest({ existing: ["Title 1"] }),
-      payload(["Title 1"]),
-      context,
-    ) as SuggestionsResult;
+  /*
+    This used to assert the opposite — that an answer the clamp empties is a
+    success with no proposals in it, on the grounds that nothing was wrong with
+    the answer. The M8 review showed what that cost. The panel drew "0
+    proposals" over an empty list with no failure and no retry, after a call
+    somebody waited for and paid for; and because `app/actions/assist.ts`
+    writes on the success path, the empty entry replaced whatever
+    `videos.brainstorm_last` was keeping — and an empty entry reads back as
+    absent, so the twenty titles that were kept were gone. It is reached by the
+    ordinary route: "Add all as candidates", then "Ask again".
+  */
+  it("calls an answer the clamp empties empty, so nothing overwrites what was kept", () => {
+    const request = titlesRequest({ existing: ["Title 1", "Title 2"] });
+    expect(() =>
+      assemble(request, payload(["Title 1", "Title 2"]), context),
+    ).toThrowError(AssistError);
 
-    expect(result.suggestions).toEqual([]);
-    expect(result.meta.droppedDuplicates).toBe(1);
-    expect(result.recommended).toBeNull();
+    try {
+      assemble(request, payload(["Title 1", "Title 2"]), context);
+    } catch (error) {
+      const failure = error as AssistError;
+      expect(failure.code).toBe("empty");
+      // Retryable, so the panel offers the button it already has.
+      expect(failure.retryable).toBe(true);
+      // And the sentence says *why* it was empty, rather than reusing the
+      // generic "nothing came back" for an answer that was full.
+      expect(failure.message).toContain("already on this video");
+      expect(failure.detail).toContain("duplicates");
+    }
+  });
+
+  it("calls an answer that is entirely unusable empty, with its own sentence", () => {
+    try {
+      assemble(titlesRequest(), payload(["   ", "\u200b"]), context);
+      throw new Error("expected assemble to throw");
+    } catch (error) {
+      const failure = error as AssistError;
+      expect(failure.code).toBe("empty");
+      expect(failure.message).toContain("blank or too long");
+    }
   });
 });

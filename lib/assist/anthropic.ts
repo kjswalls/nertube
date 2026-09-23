@@ -66,6 +66,21 @@ import {
  *   constrains the model, and *we* parse, so a bad body becomes one of our
  *   typed errors instead of an SDK exception. (Why the schema carries no
  *   counts: the long note in `schema.ts`.)
+ * - **`structured-outputs-2025-12-15` alongside the fallback beta.** This was
+ *   the one detail in this file asserted from outside the package, and it was
+ *   asserted wrongly — by omission. `output_config.format` is being sent to
+ *   the *beta* messages endpoint, and the SDK's own structured-output entry
+ *   point on that namespace (`client.beta.messages.parse`, at
+ *   `resources/beta/messages/messages.js:75-83` in the installed 0.128.0)
+ *   unconditionally adds that exact flag on top of whatever `betas` the caller
+ *   passed. The plain `create()` two methods above it adds nothing of its own
+ *   — it forwards `betas` and no more — so a direct `create()` call sends only
+ *   what is listed here. Going without it is a request the vendor may reject
+ *   as malformed on 100% of production calls, surfacing as `rejected` ("that
+ *   is a bug in this app") with nobody able to find out from this container.
+ *   Going with it, if it turns out to be unnecessary, costs an ignored header.
+ *   `anthropic.test.ts` asserts both flags are on the wire, so this is pinned
+ *   rather than remembered.
  * - **`stop_reason: "refusal"` with `stop_details`.** `BetaStopReason`
  *   includes `refusal`; `stop_details` is `BetaRefusalStopDetails | null`,
  *   carrying `category` and `explanation`. Checked before the content is
@@ -97,6 +112,17 @@ const MAX_TOKENS = 16_000;
 
 /** Pairs with the scalar `fallbacks: "default"`. Present in `AnthropicBeta`. */
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
+/**
+ * What `client.beta.messages.parse` sends for `output_config.format`, copied
+ * from the installed SDK's own source rather than from memory. See the note
+ * above: `create()` adds no beta of its own, so structured output on the beta
+ * endpoint has to carry its flag from here.
+ */
+const STRUCTURED_OUTPUT_BETA = "structured-outputs-2025-12-15";
+
+/** Both flags, in the order the SDK would send them. */
+export const REQUIRED_BETAS = [FALLBACK_BETA, STRUCTURED_OUTPUT_BETA] as const;
 
 /**
  * The SDK retries 429s, 5xx *and timeouts* twice by default, so the worst case
@@ -176,7 +202,7 @@ async function callAnthropic(
       {
         model,
         max_tokens: MAX_TOKENS,
-        betas: [FALLBACK_BETA],
+        betas: [...REQUIRED_BETAS],
         // A refusal is retried server-side on a substitute model chosen by the
         // API, so a single declined request is not a dead end.
         fallbacks: "default",
@@ -335,8 +361,11 @@ function mapSdkError(error: unknown): AssistError {
     error instanceof AuthenticationError ||
     error instanceof PermissionDeniedError
   ) {
+    // The variable's name belongs here and nowhere else: `detail` is logged
+    // on the server and never rendered, so the person who can fix it reads it
+    // and the person using the app does not.
     return new AssistError("unauthorized", {
-      detail: error.message,
+      detail: `${error.message} — check ANTHROPIC_API_KEY in the deployment's server-side environment.`,
       cause: error,
     });
   }

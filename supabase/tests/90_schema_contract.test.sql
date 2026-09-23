@@ -89,6 +89,17 @@ begin
   if has_function_privilege('anon', 'public.set_stage_enabled(uuid,boolean)', 'execute') then
     raise exception 'FAILED: anon can execute set_stage_enabled';
   end if;
+  if has_function_privilege('anon', 'public.merge_brainstorm_entry(uuid,text,jsonb)', 'execute') then
+    raise exception 'FAILED: anon can execute merge_brainstorm_entry';
+  end if;
+  if not has_function_privilege('authenticated', 'public.merge_brainstorm_entry(uuid,text,jsonb)', 'execute') then
+    raise exception 'FAILED: authenticated cannot execute merge_brainstorm_entry';
+  end if;
+  -- videos.brainstorm_last left the client's UPDATE grant in 0009, so the
+  -- function above is its only write path (and therefore its merge is atomic).
+  if has_column_privilege('authenticated', 'public.videos', 'brainstorm_last', 'UPDATE') then
+    raise exception 'FAILED: a client can still update videos.brainstorm_last directly';
+  end if;
   if has_function_privilege('anon', 'public.set_video_archived(uuid,boolean)', 'execute') then
     raise exception 'FAILED: anon can execute set_video_archived';
   end if;

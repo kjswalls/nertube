@@ -124,11 +124,35 @@ describe("the request it builds", () => {
     expect(body.output_config.effort).toBe("medium");
     expect(body.fallbacks).toBe("default");
 
-    // The beta flag travels as a header, not in the body — and the scalar
+    // The beta flags travel as a header, not in the body — and the scalar
     // "default" form pairs with the -07-01 flag, never with -06-01.
     const header = new Headers(calls[0].init.headers).get("anthropic-beta");
     expect(header).toContain("server-side-fallback-2026-07-01");
     expect(header).not.toContain("server-side-fallback-2026-06-01");
+  });
+
+  it("sends the structured-outputs beta the SDK's own parse() sends", async () => {
+    /*
+      The review found this missing, and it is the one thing in the provider
+      that could be wrong on 100% of production calls with nobody here able to
+      find out. `output_config.format` goes to the *beta* messages endpoint,
+      and the SDK's own structured-output entry point on that namespace —
+      `client.beta.messages.parse`, `resources/beta/messages/messages.js:75-83`
+      in the installed 0.128.0 — adds this exact flag on top of whatever
+      `betas` the caller passed. The plain `create()` adds nothing of its own,
+      so a direct `create()` call sends only what the provider lists. Asserted
+      here rather than remembered.
+    */
+    const { calls, provider: anthropic } = provider(() =>
+      jsonResponse(message(suggestions(20))),
+    );
+
+    await anthropic.run(titlesRequest());
+
+    const header = new Headers(calls[0].init.headers).get("anthropic-beta");
+    expect(header).toContain("structured-outputs-2025-12-15");
+    // Both, together, on the one request that carries a schema.
+    expect(header).toContain("server-side-fallback-2026-07-01");
   });
 
   it("sends no thinking configuration at all", async () => {
@@ -347,6 +371,29 @@ describe("every failure maps to a typed error", () => {
         "unauthorized",
       );
     }
+  });
+
+  it("names the environment variable in the detail and never in the sentence", async () => {
+    /*
+      The review found `MESSAGES.unauthorized` reading "Check ANTHROPIC_API_KEY
+      in the deployment's environment", which `failureOf` returns verbatim to
+      the browser — so a 401 put an infrastructure variable on the screen of
+      whoever happened to be using the app, contradicting this milestone's own
+      recorded decision to keep PLAN.md's build-output grep a bright line. The
+      name belongs where the person who can act on it reads it: `detail`, which
+      is logged on the server and never rendered.
+    */
+    const { provider: anthropic } = provider(() =>
+      apiError(401, "authentication_error"),
+    );
+
+    const error = (await anthropic
+      .run(titlesRequest())
+      .catch((e) => e)) as AssistError;
+
+    expect(error.code).toBe("unauthorized");
+    expect(error.message).not.toContain("ANTHROPIC_API_KEY");
+    expect(error.detail).toContain("ANTHROPIC_API_KEY");
   });
 
   it("a 400 becomes rejected — our bug, and it says so", async () => {

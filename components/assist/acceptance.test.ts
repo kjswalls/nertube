@@ -92,3 +92,22 @@ describe("describeMeta", () => {
     );
   });
 });
+
+describe("describeAcceptance with nothing to accept", () => {
+  it("never renders a sentence made of zeros", () => {
+    /*
+      "Add all as candidates" was disabled only on a full list, so with zero
+      proposals on screen it dispatched an empty batch and the catch-all below
+      produced "Nothing added — 0 were already in your list and there was no
+      room for 0" — in the file whose doc comment promises "always a full
+      sentence". The panel disables the button now; this is the rule behind it.
+    */
+    const sentence = describeAcceptance(
+      { added: 0, duplicates: 0, noRoom: 0 },
+      0,
+    );
+
+    expect(sentence).toBe("There was nothing to add.");
+    expect(sentence).not.toContain("0");
+  });
+});

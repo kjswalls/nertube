@@ -19,10 +19,13 @@ export default defineConfig({
    * typechecked but not unit-tested, which quietly pushes testable logic into
    * `lib/` for the resolver's sake rather than for a reason.
    *
-   * `server-only` is the M8 addition. `lib/assist/anthropic.ts` and
-   * `lib/assist/provider.ts` import it as a build-time tripwire: a client
-   * component that reaches the module holding the API key fails the build
-   * instead of shipping the key to a browser. It is not a dependency — Next
+   * `server-only` is the M8 addition. `lib/assist/anthropic.ts` — the one
+   * module in the tree that imports it, and the one that reads the API key —
+   * uses it as a build-time tripwire: a client component that reaches the
+   * module holding the key fails the build instead of shipping it to a
+   * browser. (This comment used to name a second module beside it,
+   * `lib/assist/provider.ts`, which has never existed; a reader auditing what
+   * may touch the key was being sent to a file that was never committed.) It is not a dependency — Next
    * aliases the bare specifier to its own bundled copy and declares the module
    * in `next/types/global.d.ts` — so Node, and therefore Vitest, cannot
    * resolve it on its own and the unit tests would fail on the import alone.

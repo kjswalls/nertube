@@ -69,6 +69,30 @@ export const SuggestionsPayload = z.object({
     .describe(
       "Zero-based index into suggestions of the single strongest option.",
     ),
+  /**
+   * The comparative sentence. Asked for because the panel marks one proposal
+   * as the model's pick and labels a sentence as the reason for it — and until
+   * this field existed, the sentence it labelled was the picked item's own
+   * `rationale`, which says why that one works, not why it beats the rest.
+   *
+   * Structural only, like everything else here, and *optional* for the same
+   * reason a nine-title answer is not a wrong-shape error: an answer that is
+   * useful without it must not be thrown away over it. A missing or empty
+   * reason means the panel marks the pick and says nothing else about it,
+   * which is what it did before the question was asked at all. The one thing
+   * that must never happen is a label with nothing behind it.
+   *
+   * The `describe` below is not a comment — `betaZodOutputFormat` carries it
+   * into the JSON Schema the model is shown — and `prompts.ts` asks for it in
+   * as many words, so optional here is about what this code will *accept*,
+   * not about what it asks for.
+   */
+  recommended_reason: z
+    .string()
+    .optional()
+    .describe(
+      "One sentence: why the recommended option beats the others in this list. Not a restatement of it.",
+    ),
 });
 
 export type SuggestionsPayload = z.infer<typeof SuggestionsPayload>;

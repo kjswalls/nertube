@@ -57,6 +57,15 @@ export const StoredAssistEntry = z.object({
   suggestions: z.array(Suggestion),
   /** The model's own pick, as an index into `suggestions`. */
   recommended: z.number().int().nullable(),
+  /**
+   * Why that one beats the others, when the answer said.
+   *
+   * Optional and defaulted rather than required, for the same reason
+   * `concepts` is optional above: rows written before the question was asked
+   * have to keep reading. A row without it shows the pick without a reason,
+   * which is what every row written before this did anyway.
+   */
+  recommendedReason: z.string().nullable().optional().default(null),
 });
 
 export type StoredAssistEntryValue = z.infer<typeof StoredAssistEntry>;
@@ -110,7 +119,13 @@ function usable(
     entry.recommended < entry.suggestions.length
       ? entry.recommended
       : null;
-  return { ...entry, recommended };
+  // The comparison belongs to the pick. A stored row whose index no longer
+  // points anywhere keeps neither.
+  return {
+    ...entry,
+    recommended,
+    recommendedReason: recommended === null ? null : (entry.recommendedReason ?? null),
+  };
 }
 
 /**
@@ -129,7 +144,20 @@ export function withEntry(
 ): StoredBrainstormValue {
   const next: StoredBrainstormValue = { v: 1 };
   for (const which of STORED_ASSIST_KINDS) {
-    const value = which === kind ? entry : current[which];
+    const replacing = which === kind;
+    /*
+      An empty answer never replaces a kept one.
+
+      `lib/assist/clamp.ts` now refuses to return an empty list at all, so in
+      this app nothing reaches here with one. This is the backstop for the
+      thing that made that a blocker: an entry with no suggestions reads back
+      as *absent* (`usable` above), so writing one does not store an empty
+      answer — it destroys the answer that was there, silently, while the call
+      reports success. The column's whole job is that closing the panel loses
+      nothing, and no answer is worth less than the one it would overwrite.
+    */
+    const value =
+      replacing && entry.suggestions.length === 0 ? current[which] : replacing ? entry : current[which];
     if (value) next[which] = value;
   }
   return next;

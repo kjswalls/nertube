@@ -208,7 +208,7 @@ value into the browser bundle):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | **Yes**, for the real provider | Your Anthropic API key. Server-side only. Nothing else in this repository reads it, and no value for it is written down anywhere here. |
 | `ANTHROPIC_MODEL` | No | Overrides the model id. Defaults to the one `lib/assist/anthropic.ts` pins. Set it to migrate models without a deploy of new code. |
-| `ASSIST_PROVIDER` | No | `fake` forces the fixtures. Leave it **unset in production.** Anything else, including unset, means Claude. |
+| `ASSIST_PROVIDER` | No | `fake` forces the fixtures. Leave it **unset in production.** Unset means Claude when a key is present, and Claude (failing with "no API key configured") in production when it is not; a development checkout with no key falls back to the fixtures and says so on every answer. Any other non-empty value means Claude. The full rule is the table below. |
 | `ASSIST_FAKE_SCENARIO` | No | Only read by the fixtures: makes them answer with a named failure, for driving the error paths. Never set it in production. |
 
 Everything else the app needs (`NEXT_PUBLIC_SUPABASE_URL`,

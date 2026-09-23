@@ -604,7 +604,7 @@ export default async function VideoDetailPage({
                  and `videos.title` in one save, and two inputs bound to one
                  column on one page is a race, not a convenience. The sketch
                  goes in as a slot, next to the written concept it illustrates;
-                 so do the warning and the three inert assists.
+                 so do the warning and the three assist controls.
 
                  Every one of those slot elements carries a `key`, which looks
                  odd on something that is not in a list and is not decoration.

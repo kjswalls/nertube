@@ -8,6 +8,7 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
+import { TITLES_WANT } from '../lib/assist/clamp';
 import { MAX_CANDIDATES } from '../lib/packaging';
 import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
 import { untilTaken } from './hydration';
@@ -243,13 +244,22 @@ test('the pill opens a panel of proposals, each with a rationale and one marked 
     expect((await rationale.innerText()).trim().length).toBeGreaterThan(10);
   }
 
-  // Exactly one is the model's own pick, and it says why.
+  // Exactly one is the model's own pick, and it says why — in its own
+  // sentence, which is a *comparison*. The label used to sit over the picked
+  // row's own rationale, which says why that one works rather than why it
+  // beats the rest, and nothing had ever asked the second question. So this
+  // asserts the two are different text as well as that both are there.
   await expect(page.getByTestId('brainstorm-pick-badge')).toHaveCount(1);
   const picked = suggestions(page).filter({ has: page.getByTestId('brainstorm-pick-badge') });
   await expect(picked).toHaveCount(1);
-  await expect(picked.getByTestId('suggestion-rationale')).toContainText(
-    'Why it picked this one:',
-  );
+  const reason = picked.getByTestId('brainstorm-pick-reason');
+  await expect(reason).toContainText('Why it picked this one:');
+  const comparison = (await reason.innerText()).replace('Why it picked this one:', '').trim();
+  const own = (await picked.getByTestId('suggestion-rationale').innerText()).trim();
+  expect(comparison.length).toBeGreaterThan(10);
+  expect(comparison).not.toBe(own);
+  // No other row claims a reason for the pick.
+  await expect(page.getByTestId('brainstorm-pick-reason')).toHaveCount(1);
 
   // Proposals are not the user's writing yet, and say so.
   await expect(picked.getByText('Proposal')).toBeVisible();
@@ -610,11 +620,25 @@ test('an answer past the ceiling is cut to fit and says what it cut', async ({ p
   await openPanel(page, videoId);
   await expectAnswered(page);
 
-  // Clamped, not thrown away.
-  const count = await suggestions(page).count();
-  expect(count).toBeGreaterThanOrEqual(10);
-  expect(count).toBeLessThanOrEqual(20);
-  await expect(page.getByTestId('brainstorm-meta')).toContainText('overshot');
+  /*
+    Clamped, not thrown away — and pinned at the number PLAN.md's review item
+    names.
+
+    This used to assert `10 <= count <= 20`, which is the range of a *good*
+    answer rather than the outcome of a clamp: a regression that dropped the
+    overflowing answer back to ten, or kept twelve, would have passed it
+    unchanged, and that regression is the exact failure the review item exists
+    to catch. The fixture returns 21 for `[[assist:overflow]]`, so the answer
+    is 20 and the line says it dropped one.
+  */
+  expect(await suggestions(page).count()).toBe(TITLES_WANT);
+  await expect(page.getByTestId('brainstorm-meta')).toContainText(
+    `dropped 1 past the ${TITLES_WANT} asked for`,
+  );
+
+  // And the twenty that arrived are all still usable: clamping is not a
+  // half-measure that leaves the survivors unacceptable.
+  await expect(suggestions(page).first().getByTestId('suggestion-add')).toBeEnabled();
 });
 
 /* -------------------------------------------------------------------------- */
@@ -663,4 +687,129 @@ test('the hooks pill opens the same panel on its hooks, and they land in the hoo
   await expect(suggestions(page).first()).toBeVisible();
   await expect(page.getByTestId('suggestion-add')).toHaveCount(0);
   expect((await readRow(videoId)).brainstorm_last!.hooks!.at).toBe(hooksAskedAt);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 12. An answer the clamp empties is a failure, and the kept one survives     */
+/* -------------------------------------------------------------------------- */
+
+test('an answer that is entirely repeats fails in words and does not wipe what was kept', async ({
+  page,
+}) => {
+  /*
+    The M8 review's blocker, walked the way it is actually reached.
+
+    `assemble` used to call an answer empty only when the *payload* was empty,
+    never when the clamp emptied it. So the straight line the panel is built
+    for — ask, "Add all as candidates", "Ask again" — came back `ok: true` with
+    zero proposals: the panel drew "0 proposals — the tool talking." over an
+    empty list with no failure block and no retry, and the action wrote that
+    empty entry into `videos.brainstorm_last`, where an entry with no
+    suggestions reads back as *absent*. The twenty titles the column was
+    holding were gone, and the call said `persisted: true`.
+
+    The fixtures are deterministic on the video's own text, so the second ask
+    returns the same twenty titles — which are now all candidates. No marker is
+    needed: this is the ordinary flow.
+  */
+  const videoId = await capture('Sharpening a chisel properly');
+  await signIn(page);
+  await openPanel(page, videoId);
+  await expectAnswered(page);
+
+  expect(await suggestions(page).count()).toBe(TITLES_WANT);
+
+  await page.getByTestId('brainstorm-add-all').click();
+  await expect(page.getByTestId('packaging-save-status')).toHaveText(/^Saved$/);
+  const afterAdd = await readRow(videoId);
+  expect(afterAdd.title_candidates).toHaveLength(TITLES_WANT);
+  expect(afterAdd.brainstorm_last?.titles?.suggestions).toHaveLength(TITLES_WANT);
+
+  // Ask again. Every proposal is now already on the video.
+  await page.getByTestId('brainstorm-ask-again').click();
+
+  const failure = page.getByTestId('brainstorm-failure');
+  await expect(failure).toBeVisible();
+  await expect(failure).toHaveAttribute('data-code', 'empty');
+  await expect(page.getByTestId('brainstorm-failure-message')).toContainText(
+    'already on this video',
+  );
+  // Retryable, so the offer is "Try again" rather than a dead end.
+  await expect(page.getByTestId('brainstorm-retry')).toHaveText('Try again');
+
+  // Not a list of nothing: the failure replaces the answer rather than
+  // rendering beside an empty `<ul>` that claims zero proposals.
+  await expect(page.getByTestId('brainstorm-count')).toHaveCount(0);
+
+  // And the thing the blocker was really about: the kept answer is still kept.
+  const after = await readRow(videoId);
+  expect(after.brainstorm_last?.titles?.suggestions).toHaveLength(TITLES_WANT);
+  expect(after.title_candidates).toHaveLength(TITLES_WANT);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 13. Cancelling keeps the answer, and reopening does not buy a second one    */
+/* -------------------------------------------------------------------------- */
+
+test('an answer that arrives after Cancel is kept, and reopening asks nothing', async ({
+  page,
+}) => {
+  /*
+    `CANCELLED_NOTICE` promises that an answer which did arrive "is kept, and
+    it will appear here as from earlier". Until the review that was false in
+    the most expensive way available: `cancel()` moved the request id, the
+    reply was discarded, the run went back to `data: null`, and reopening the
+    panel took the `if (!askedAlready(kind)) ask(kind)` branch and paid for a
+    second answer to a question the column had already been given.
+
+    So: hold the first assist POST, cancel while it is in flight, let it land,
+    and count the POSTs.
+  */
+  const videoId = await capture('Sharpening a chisel properly');
+  await signIn(page);
+
+  let releaseHeld: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    releaseHeld = resolve;
+  });
+  let asks = 0;
+
+  await page.route(`**/videos/${videoId}`, async (route) => {
+    const request = route.request();
+    const body = request.method() === 'POST' ? (request.postData() ?? '') : '';
+    // Only the titles ask — the packaging block's autosave POSTs here too.
+    if (!body.includes('"kind":"titles"')) return route.continue();
+    asks += 1;
+    if (asks === 1) await held;
+    await route.continue();
+  });
+
+  await openPanel(page, videoId);
+  await expect(page.getByTestId('brainstorm-pending')).toBeVisible();
+
+  await page.getByTestId('brainstorm-cancel').click();
+  await expect(page.getByTestId('brainstorm-pending')).toHaveCount(0);
+  await expect(page.getByTestId('brainstorm-notice')).toContainText('Stopped waiting');
+
+  // Let the request the person stopped waiting for finish.
+  releaseHeld();
+
+  // It lands where the notice said it would: in this panel, as "from earlier".
+  await expect(suggestions(page).first()).toBeVisible();
+  expect(await suggestions(page).count()).toBe(TITLES_WANT);
+  await expect(page.getByTestId('brainstorm-provenance')).toContainText('From earlier');
+  expect((await readRow(videoId)).brainstorm_last?.titles?.suggestions).toHaveLength(
+    TITLES_WANT,
+  );
+
+  // Close, then press the pill again — what the notice tells you to do.
+  await page.getByTestId('brainstorm-close').click();
+  await expect(panel(page)).toHaveCount(0);
+  await pill(page).click();
+  await expect(panel(page)).toBeVisible();
+  await expect(suggestions(page).first()).toBeVisible();
+
+  // One model call, not two.
+  expect(asks).toBe(1);
+  await expect(page.getByTestId('brainstorm-provenance')).toContainText('From earlier');
 });

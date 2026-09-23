@@ -73,7 +73,21 @@ export function WorkingTitle({
           }
         }}
         // 16px so iOS does not zoom the page when the field is focused.
-        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        /*
+          `font-display` — Newsreader — because this is the user's own writing.
+
+          `app/globals.css` defines that role as "what the *user* wrote: page
+          titles, video titles, hooks", and `components/assist/chrome.tsx` says
+          a proposal is drawn "never the Newsreader face the person's own
+          writing is set in". Neither was true on this block until the M8
+          review measured it in a browser: the proposal and the accepted
+          candidate were both Instrument Sans, so the whole boundary rested on
+          a dashed border and a chip. It does not any more — the four fields an
+          M8 suggestion can land in (this, the candidate rows, the hooks, the
+          concept) are set in the reading face, so accepting a proposal visibly
+          moves it from the tool's voice into yours.
+        */
+        className="w-full rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
       />
 
       <p

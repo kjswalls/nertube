@@ -8,11 +8,13 @@ import { sameLabel } from "@/lib/text";
 import { capacityLine, describeAcceptance } from "./acceptance";
 import {
   AssistFailure,
+  AssistFixtureNotice,
   AssistMetaLine,
   AssistNoticeLine,
   AssistPanel,
   AssistPending,
   AssistProvenance,
+  Proposal,
   useAssistFocus,
 } from "./chrome";
 import { useAssistTarget } from "./packaging-assist";
@@ -266,12 +268,26 @@ export function BrainstormPanel({
       ) : null}
 
       {view.failure ? (
-        <AssistFailure
-          prefix="brainstorm"
-          failure={view.failure}
-          onRetry={onAsk}
-          disabled={view.pending}
-        />
+        <>
+          <AssistFailure
+            prefix="brainstorm"
+            failure={view.failure}
+            onRetry={onAsk}
+            disabled={view.pending}
+          />
+          {/*
+            A fixture must never pass itself off as a model, and a *failure* is
+            where that is easiest to believe: a refusal reads as a judgement
+            about the notes somebody has just written. The notice above the
+            list is rendered from the stored entry, which on a failure is null,
+            so this is the same admission rendered from what failed.
+          */}
+          <AssistFixtureNotice
+            prefix="brainstorm"
+            provider={view.failure.provider}
+            variant="failure"
+          />
+        </>
       ) : null}
 
       {view.notice ? (
@@ -341,6 +357,7 @@ function Suggestions({
   onUseAsHook: (text: string) => void;
 }) {
   const titles = kind === "titles";
+  const recommendedReason = entry.recommendedReason;
 
   return (
     <div className="flex flex-col gap-3">
@@ -357,7 +374,7 @@ function Suggestions({
             type="button"
             data-testid="brainstorm-add-all"
             onClick={onAddAll}
-            disabled={candidateRoom <= 0}
+            disabled={candidateRoom <= 0 || entry.suggestions.length === 0}
             className="rounded-button border border-border bg-background px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
             Add all as candidates
@@ -373,57 +390,68 @@ function Suggestions({
           const overLong = suggestion.text.length > TITLE_WARN_LENGTH;
 
           return (
-            <li
-              key={`${index}-${suggestion.text}`}
-              data-testid="brainstorm-suggestion"
-              data-recommended={recommended ? "true" : "false"}
-              data-duplicate={alreadyCandidate ? "true" : "false"}
-              className={[
-                "flex flex-col gap-1 rounded-input border border-dashed px-3 py-2",
-                recommended
-                  ? "border-accent bg-accent/[0.06]"
-                  : "border-border bg-background/40",
-              ].join(" ")}
-            >
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="rounded-button border border-border px-1 text-[10px] uppercase tracking-wide text-muted">
-                  Proposal
-                </span>
-                {recommended ? (
-                  <span
-                    data-testid="brainstorm-pick-badge"
-                    className="rounded-button border border-accent px-1 text-[10px] uppercase tracking-wide text-accent"
-                  >
-                    Its pick
-                  </span>
-                ) : null}
-                <span data-testid="suggestion-text" className="min-w-0 text-sm">
-                  {suggestion.text}
-                </span>
-                {titles ? (
-                  <span
-                    data-testid="suggestion-length"
-                    title={
-                      overLong
-                        ? `Over ${TITLE_WARN_LENGTH} characters — the feed may cut it. Not a refusal: a long title that works still works.`
-                        : undefined
-                    }
-                    className={[
-                      "font-mono text-[11px]",
-                      overLong ? "text-attention" : "text-muted",
-                    ].join(" ")}
-                  >
-                    {suggestion.text.length}
-                  </span>
-                ) : null}
-              </div>
+            /*
+              Drawn through `Proposal` rather than beside it.
 
+              This panel used to repeat the frame by hand — the same dashed
+              border, the same accent wash, its own chip and its own pick badge
+              — while the concept and critique panels used the component. Two
+              copies of a rule that exists so the line between a proposal and
+              the person's own writing "cannot be drawn differently twice"
+              agreed only by hand, which is the kind of agreement that stops
+              being true. The two test ids this panel's suite named first are
+              props on the component for exactly this case.
+            */
+            <Proposal
+              key={`${index}-${suggestion.text}`}
+              testId="brainstorm-suggestion"
+              picked={recommended}
+              pickedTestId="brainstorm-pick-badge"
+              data-duplicate={alreadyCandidate ? "true" : "false"}
+              badge={
+                <>
+                  <span data-testid="suggestion-text" className="min-w-0 text-sm">
+                    {suggestion.text}
+                  </span>
+                  {titles ? (
+                    <span
+                      data-testid="suggestion-length"
+                      title={
+                        overLong
+                          ? `Over ${TITLE_WARN_LENGTH} characters — the feed may cut it. Not a refusal: a long title that works still works.`
+                          : undefined
+                      }
+                      className={[
+                        "font-mono text-[11px]",
+                        overLong ? "text-attention" : "text-muted",
+                      ].join(" ")}
+                    >
+                      {suggestion.text.length}
+                    </span>
+                  ) : null}
+                </>
+              }
+            >
               <p data-testid="suggestion-rationale" className="text-xs text-muted">
-                {recommended ? (
-                  <strong className="text-foreground">Why it picked this one: </strong>
-                ) : null}
                 {suggestion.rationale}
               </p>
+
+              {/*
+                The comparison, and only when there is one.
+
+                This label used to sit over the picked row's *own* rationale,
+                which says why that one works — not why it beats the others.
+                Nothing had ever asked why, so the label was an invitation to
+                read a generic sentence as a judgement. `recommended_reason` is
+                now a field of the answer, and where the model gave nothing
+                usable the badge carries the pick on its own.
+              */}
+              {recommended && recommendedReason ? (
+                <p data-testid="brainstorm-pick-reason" className="text-xs text-muted">
+                  <strong className="text-foreground">Why it picked this one: </strong>
+                  {recommendedReason}
+                </p>
+              ) : null}
 
               <div className="flex flex-wrap items-center gap-2">
                 {titles ? (
@@ -449,7 +477,7 @@ function Suggestions({
                   {alreadyHook ? "Already a hook" : "Use as hook"}
                 </button>
               </div>
-            </li>
+            </Proposal>
           );
         })}
       </ul>

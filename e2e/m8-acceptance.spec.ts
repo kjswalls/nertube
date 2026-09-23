@@ -235,7 +235,9 @@ test('the runnable: ten to twenty titles, a rationale on every one, exactly one 
   const picked = page.locator('[data-testid="brainstorm-suggestion"][data-recommended="true"]');
   await expect(picked).toHaveCount(1);
   await expect(picked.getByTestId('brainstorm-pick-badge')).toBeVisible();
-  await expect(picked.getByTestId('suggestion-rationale')).toContainText(
+  // Its own sentence, and a comparative one: `recommended_reason` is a field
+  // of the answer rather than the picked item's rationale wearing a label.
+  await expect(picked.getByTestId('brainstorm-pick-reason')).toContainText(
     'Why it picked this one',
   );
 

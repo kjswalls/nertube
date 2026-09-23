@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useActionState,
@@ -302,6 +303,16 @@ export function CaptureForm({
     outcome?.ok && !confirmationHidden
       ? `Captured “${outcome.title}” in ${outcome.channelName}.`
       : "";
+  /**
+   * Where that idea now lives, so the page variant can offer it.
+   *
+   * The `c` modal's toast has carried this link since M8 — capture stays
+   * assist-free on purpose, and the agreed compensation is that the
+   * confirmation puts the controls that *can* act on the idea one press away.
+   * The standalone page said the same sentence with nowhere to go.
+   */
+  const capturedHref =
+    outcome?.ok && !confirmationHidden ? `/videos/${outcome.id}` : null;
   const current = channels.find((channel) => channel.id === channelId);
 
   const field =
@@ -590,8 +601,21 @@ export function CaptureForm({
         </button>
 
         {variant === "page" ? (
-          <p role="status" aria-live="polite" className="text-sm text-muted">
-            {confirmation}
+          <p
+            role="status"
+            aria-live="polite"
+            className="flex flex-wrap items-center gap-2 text-sm text-muted"
+          >
+            <span>{confirmation}</span>
+            {capturedHref ? (
+              <Link
+                data-testid="capture-open-it"
+                href={capturedHref}
+                className="rounded-button border border-border px-2 py-0.5 text-sm text-foreground outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Open it
+              </Link>
+            ) : null}
           </p>
         ) : null}
       </div>

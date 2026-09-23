@@ -151,7 +151,7 @@ export function TitleCandidates({
             setDraft(event.target.value);
             if (notice) setNotice(null);
           }}
-          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none placeholder:font-sans placeholder:text-sm focus-visible:ring-2 focus-visible:ring-accent"
         />
         <button
           type="submit"
@@ -215,7 +215,7 @@ export function TitleCandidates({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1 py-1 text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
+                  className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
                 />
 
                 <button

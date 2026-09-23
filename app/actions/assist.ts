@@ -23,12 +23,10 @@ import {
   visionMediaTypeFor,
   type ThumbnailRole,
 } from "@/lib/storage";
-import { CONCEPTS_WANT, HOOKS_MAX, TITLES_WANT } from "@/lib/assist/clamp";
+import { CONCEPTS_WANT, TITLES_WANT } from "@/lib/assist/clamp";
 import { assistFallbackWarning, selectAssistProvider } from "@/lib/assist/select";
 import { requireUser } from "@/lib/supabase/require-user";
 import {
-  readStoredBrainstorm,
-  withEntry,
   STORED_ASSIST_KINDS,
   type StoredAssistEntryValue,
   type StoredAssistKind,
@@ -76,17 +74,24 @@ const DEADLINE_MS = 45_000;
 /**
  * How many of each to ask for.
  *
- * PLAN.md: 10–20 title candidates; three hooks is the column's ceiling
- * (`jsonb_array_length(hooks) <= 3`). Concepts are four, which is
+ * PLAN.md: 10–20 title candidates. Concepts are four, which is
  * `CONCEPTS_WANT` in `lib/assist/clamp.ts` and the number this panel is built
  * around: the concept is a *single* field, so the job is to give somebody
  * three or four genuinely different pictures to choose between, not twenty
  * paragraphs to read.
+ *
+ * **Hooks are not in here**, and that is the fix for a review finding. This
+ * used to pin them at `HOOKS_MAX`, which made `wantedFor`'s hooks branch in
+ * `lib/assist/clamp.ts` unreachable from the app — that branch only runs when
+ * `want` is left undefined. So a video with two hooks written was offered
+ * three proposals, two of which the column has no room for: the person paid
+ * for three hooks of generation and could use one. Leaving `want` out is what
+ * makes "ask for how many are missing" — the rule both that function's doc
+ * comment and this milestone's notes describe — the rule that actually ships.
  */
-const WANT: Record<StoredAssistKind, number> = {
+const WANT: Record<"titles" | "concepts", number> = {
   titles: TITLES_WANT,
   concepts: CONCEPTS_WANT,
-  hooks: HOOKS_MAX,
 };
 
 /**
@@ -95,9 +100,16 @@ const WANT: Record<StoredAssistKind, number> = {
  * Deliberately field-for-field the shape `useAssistRun` consumes
  * (`AssistAttempt<T>` in `components/assist/run.ts`), which is why the answer
  * is called `data` rather than `entry`: a control asks with
- * `run.ask(() => assist({ videoId, kind }))` and translates nothing. The one
- * extra field, `kind`, is the question this answer is about — carried so a
- * late reply can be matched to what was asked, never re-mapped.
+ * `run.ask(() => assist({ videoId, kind }))` and translates nothing.
+ *
+ * The two extra fields are for the panel rather than for the machine. `kind`
+ * echoes the question this answer is about — nothing *matches* on it today,
+ * and the comment here used to claim it did; it is there so a reply can be
+ * read on its own, in a log or a network tab, without the request beside it,
+ * and so the rejection branch below can say what was actually asked for.
+ * `provider` is which implementation answered, or would have: a failure
+ * sentence from the fixtures must not read as a sentence from a model, and
+ * until it was carried here the panel had no way to say so on a failure.
  *
  * `critiqueThumbnails` below returns the same shape for the same reason. Two
  * questions, one result contract, one error contract, and no call site that
@@ -121,6 +133,8 @@ export type AssistState =
       message: string;
       retryable: boolean;
       retryAfterSeconds: number | null;
+      /** Which implementation produced this failure, for the fixtures notice. */
+      provider: string;
     };
 
 const Input = z.object({
@@ -169,23 +183,89 @@ export async function assist(input: {
 }): Promise<AssistState> {
   const parsed = Input.safeParse(input);
   if (!parsed.success) {
+    /*
+      Echo what was asked for rather than always saying "titles".
+
+      The kind is the only part of a rejected input that may still be sound —
+      a malformed id with a perfectly good kind is the common case — and a
+      reply that renames the question makes a rejected ask unreadable on its
+      own. Anything that is not one of the three falls back to titles, because
+      then there genuinely is no question to name.
+      */
     return {
       ok: false,
-      kind: "titles",
+      kind: requestedKind(input.kind),
       code: "rejected",
       message: "That is not a video this panel can ask about.",
       retryable: false,
       retryAfterSeconds: null,
+      provider: providerName(),
     };
   }
   const { videoId, kind } = parsed.data;
 
-  const { supabase } = await requireUser();
+  const { supabase, user } = await requireUser();
+
+  /*
+    One ask of one question about one video at a time.
+
+    `assist()` authenticates the caller and RLS scopes the read, and until this
+    guard nothing else bounded it: the same POST replayed twenty-five times in
+    parallel with one session's cookies produced twenty-five live model calls,
+    each carrying the voice guide and fifty past titles, each writing the
+    column. The same question asked twice at once is waste in every case — the
+    second answer replaces the first before anybody reads it — so it is
+    refused with the code the panel already knows how to render.
+
+    Deliberately narrow. It is keyed by *question*, not by user, because two
+    different questions in flight at once is the design ("Generate 20" then
+    "Draft a third" is two panels' worth of work, not a mistake). And it is
+    process-local, so on a platform that runs more than one instance it bounds
+    a tight loop rather than a determined one. The residual — an authenticated
+    session can still spend the key faster than a person could — is written
+    down in docs/MILESTONES.md under "The honest limit" rather than left for
+    somebody to discover from a bill.
+  */
+  const lane = `${user.id}:${videoId}:${kind}`;
+  if (IN_FLIGHT.has(lane)) {
+    return failure(
+      kind,
+      new AssistError("rate_limited", {
+        message:
+          "That same brainstorm is already running. Wait for the answer rather than asking twice.",
+        detail: `A ${kind} ask for video ${videoId} is already in flight for this user.`,
+      }),
+    );
+  }
+  IN_FLIGHT.add(lane);
+  try {
+    return await askFor(supabase, videoId, kind);
+  } finally {
+    IN_FLIGHT.delete(lane);
+  }
+}
+
+/** The questions currently in flight, as `user:video:kind`. See `assist()`. */
+const IN_FLIGHT = new Set<string>();
+
+/** The `kind` an input asked for, when it asked for one this panel knows. */
+function requestedKind(value: unknown): StoredAssistKind {
+  return STORED_ASSIST_KINDS.includes(value as StoredAssistKind)
+    ? (value as StoredAssistKind)
+    : "titles";
+}
+
+/** The ask itself, once the caller and the question are known to be sound. */
+async function askFor(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  videoId: string,
+  kind: StoredAssistKind,
+): Promise<AssistState> {
 
   const { data: video, error: videoError } = await supabase
     .from("videos")
     .select(
-      "id, title, one_line_hook, notes, tags, thumbnail_concept, title_candidates, hooks, brainstorm_last, channel_id",
+      "id, title, one_line_hook, notes, tags, thumbnail_concept, title_candidates, hooks, channel_id",
     )
     .eq("id", videoId)
     .maybeSingle();
@@ -249,8 +329,8 @@ export async function assist(input: {
   const request: AssistRequest =
     kind === "hooks"
       ? {
+          // No `want`: `wantedFor` asks for the hooks that are missing.
           kind: "hooks",
-          want: WANT.hooks,
           existing,
           video: videoContext(video),
           channel: channelContext,
@@ -289,27 +369,35 @@ export async function assist(input: {
       rationale: suggestion.rationale,
     })),
     recommended: result.recommended,
+    recommendedReason: result.recommendedReason,
   };
 
   /*
-    Persist, without letting a failed write lose the answer.
+    Persist, without letting a failed write lose the answer — and without
+    letting *this* answer lose somebody else's.
 
-    `brainstorm_last` is in the column grants (`0001_init.sql`), so this is an
-    ordinary update through the request's RLS-scoped client. Nothing is
-    revalidated: no other view reads the column, and re-rendering the detail
-    route underneath an open panel would move the page while somebody is
-    reading it.
+    This used to be an ordinary column update carrying a whole envelope
+    rebuilt from `video.brainstorm_last`, which was read at the top of this
+    function, before a call PLAN.md budgets at ten to forty seconds. Two asks
+    overlapping meant the slower one committed an envelope that had never seen
+    the faster one's key: twenty titles somebody waited for, gone, with the
+    call still answering `persisted: true` because the UPDATE succeeded.
+
+    So the read and the write are one statement now, in
+    `merge_brainstorm_entry` (migration 0009), and this sends one kind's entry
+    rather than the envelope. `brainstorm_last` left the client's column grant
+    in the same migration, so there is no second way to write it and no
+    snapshot that can go stale.
+
+    Nothing is revalidated: no other view reads the column, and re-rendering
+    the detail route underneath an open panel would move the page while
+    somebody is reading it.
   */
-  const { error: writeError } = await supabase
-    .from("videos")
-    .update({
-      brainstorm_last: withEntry(
-        readStoredBrainstorm(video.brainstorm_last),
-        kind,
-        entry,
-      ),
-    })
-    .eq("id", videoId);
+  const { error: writeError } = await supabase.rpc("merge_brainstorm_entry", {
+    p_video: videoId,
+    p_kind: kind,
+    p_entry: entry,
+  });
 
   return { ok: true, kind, data: entry, meta: result.meta, persisted: !writeError };
 }
@@ -347,7 +435,27 @@ function failureOf(error: unknown): {
 
 /** The same, carrying the kind the panel asked about. */
 function failure(kind: StoredAssistKind, error: unknown): AssistState {
-  return { ok: false, kind, ...failureOf(error) };
+  return { ok: false, kind, provider: providerName(), ...failureOf(error) };
+}
+
+/**
+ * Which implementation answered, or would have.
+ *
+ * Read from the environment rather than from the provider instance, because a
+ * failure can happen before one is ever built — bad input, a video the caller
+ * cannot see — and the panel's question is the same either way: *was a model
+ * asked anything at all?* `selectAssistProvider` is the one rule, so this
+ * cannot disagree with what actually ran.
+ *
+ * The reason the answer has to travel with a failure is the one the fixtures
+ * notice exists for. `lib/assist/fake.ts` can refuse, rate-limit and time out,
+ * and every sentence for those used to name the vendor: a keyless deployment
+ * told people "Claude declined to answer this one" about notes no model had
+ * ever seen. The sentences are neutral now, and this is what lets the panel
+ * add the rest of the truth underneath.
+ */
+function providerName(): string {
+  return selectAssistProvider(process.env);
 }
 
 /** The video, as the module's `VideoContext`. */
@@ -462,6 +570,8 @@ export type CritiqueState =
       message: string;
       retryable: boolean;
       retryAfterSeconds: number | null;
+      /** Which implementation produced this failure. See `AssistState`. */
+      provider: string;
     };
 
 const CritiqueInput = z.object({ videoId: z.uuid() });
@@ -495,6 +605,7 @@ export async function critiqueThumbnails(input: {
       message: "That is not a video this panel can ask about.",
       retryable: false,
       retryAfterSeconds: null,
+      provider: providerName(),
     };
   }
   const { videoId } = parsed.data;
@@ -510,11 +621,12 @@ export async function critiqueThumbnails(input: {
     .maybeSingle();
 
   if (videoError) {
-    return { ok: false, ...failureOf(new AssistError("unreachable", { detail: videoError.message })) };
+    return { ok: false, provider: providerName(), ...failureOf(new AssistError("unreachable", { detail: videoError.message })) };
   }
   if (!video) {
     return {
       ok: false,
+      provider: providerName(),
       ...failureOf(
         new AssistError("rejected", {
           message: "That video is not one you can ask about.",
@@ -595,6 +707,7 @@ export async function critiqueThumbnails(input: {
   if (images.length === 0) {
     return {
       ok: false,
+      provider: providerName(),
       ...failureOf(
         new AssistError("rejected", {
           message:
@@ -638,7 +751,7 @@ export async function critiqueThumbnails(input: {
     }
     result = answered;
   } catch (error) {
-    return { ok: false, ...failureOf(error) };
+    return { ok: false, provider: providerName(), ...failureOf(error) };
   }
 
   return {

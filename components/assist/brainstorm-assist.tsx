@@ -125,8 +125,17 @@ export function BrainstormAssist({
    */
   const askedAlready = useCallback(
     (kind: PanelKind) => {
-      const { data, pending, failure } = kind === "hooks" ? hooksState : titlesState;
-      return data !== null || pending || failure !== null;
+      const { data, pending, failure, outstanding } =
+        kind === "hooks" ? hooksState : titlesState;
+      /*
+        `outstanding` is the one the review found missing, and it was the
+        expensive one. Cancel and closing the panel both left `data` null while
+        the request carried on, so reopening took this branch and bought a
+        second answer to a question already answered — the opposite of what the
+        cancel notice promises and of what `videos.brainstorm_last` is for.
+        A request still on its way is a reason not to ask, not a reason to.
+      */
+      return data !== null || pending || failure !== null || outstanding;
     },
     [hooksState, titlesState],
   );
@@ -219,19 +228,44 @@ export function BrainstormAssist({
 }
 
 /**
+ * What the hooks pill says, given how many hooks are already written.
+ *
+ * "Draft a third" is right at two and wrong everywhere else, and a freshly
+ * captured idea — the commonest state this pill is seen in, and the one
+ * BRIEF.md's packaging checklist addresses with *"Hook drafted in 3 versions,
+ * strongest picked"* — has none, so the control was offering to draft a third
+ * of nothing. The column stops at three (`MAX_HOOKS`), and at three the ask is
+ * still worth offering: another to compare against, not a fourth to keep.
+ */
+export function hookPillLabel(written: number): string {
+  if (written <= 0) return "Draft hooks";
+  if (written === 1) return "Draft a second";
+  if (written === 2) return "Draft a third";
+  return "Another hook to compare";
+}
+
+/**
  * The same panel, asked for from the hooks list.
  *
  * It opens the panel that already exists rather than a second one: one answer,
  * one `brainstorm_last`, one place to accept a hook. The component that owns
  * the state is the one beside the candidate list; this only aims it.
+ *
+ * `verb` stays "Draft a third" whatever the label says, because the verb is
+ * the control's *identity* — it is what `data-assist` carries and what every
+ * spec locates this pill by — and a control whose identity changed as the
+ * person worked would be a different control depending on how far along they
+ * were. `label` is the seam the integration pass added for exactly this.
  */
 export function BrainstormHookPill() {
   const panel = useAssistPanel();
+  const target = useAssistTarget();
   if (!panel) return null;
 
   return (
     <AssistPillButton
       verb="Draft a third"
+      label={hookPillLabel(target?.hooks.length ?? 0)}
       title="Opens the brainstorm on the spoken hooks it proposes."
       onClick={() => panel.request("hooks")}
     />

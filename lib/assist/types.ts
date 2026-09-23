@@ -193,8 +193,16 @@ export interface ThumbnailVerdict {
  * panel reopened tomorrow can still explain itself.
  */
 export interface AssistMeta {
-  /** Which implementation answered. */
-  readonly provider: "anthropic" | "fake";
+  /**
+   * Which implementation answered, by its own `name`.
+   *
+   * A plain string rather than a union of the two that ship today: the point
+   * of this seam is that a third implementation is a new file, and a closed
+   * union would make it an edit to *this* file as well. Readers that care
+   * compare against `"fake"`, which is the one value with a meaning attached —
+   * an answer nobody asked a model for, which the panel must say out loud.
+   */
+  readonly provider: string;
   /** The model id, or `"fixtures"` for the fake. */
   readonly model: string;
   /** What the prompt asked for. */
@@ -232,6 +240,18 @@ export interface SuggestionsResult extends ResultBase {
    * nothing to recommend (an empty list after clamping). Always in range.
    */
   readonly recommended: number | null;
+  /**
+   * Why that one beats the others — a *comparative* sentence, which is a
+   * different datum from the per-item `rationale` beside every proposal.
+   *
+   * The panel used to label the picked row's own rationale "Why it picked this
+   * one:", which read as a comparison and was not one: nothing in the schema
+   * or the prompt had ever asked why. Either the question gets asked or the
+   * label goes; this is the question being asked. `null` when the model gave
+   * nothing usable, or when the pick did not survive the clamp — in which case
+   * the panel shows no such label rather than one over borrowed prose.
+   */
+  readonly recommendedReason: string | null;
 }
 
 export interface ThumbnailCritiqueResult extends ResultBase {
@@ -250,9 +270,20 @@ export type AssistResult = SuggestionsResult | ThumbnailCritiqueResult;
 /** Per-call knobs. Both matter to the UI, and neither belongs in the request. */
 export interface AssistCallOptions {
   /**
-   * Aborts the call. The panel passes the signal it aborts when the person
-   * closes it, so a brainstorm nobody is waiting for stops costing money.
-   * An aborted call rejects with `code: "cancelled"`.
+   * Aborts the call, rejecting it with `code: "cancelled"`.
+   *
+   * **No caller in this app supplies one, and today none can.** The only
+   * callers are the two server actions in `app/actions/assist.ts`, and an
+   * `AbortSignal` does not cross the server-action boundary: by the time
+   * somebody presses Cancel the request is already running on the server and
+   * nothing in the browser can recall it. `components/assist/run.ts` says the
+   * same thing from the other side — cancelling is *stop waiting for this
+   * answer*, not *stop the model* — and it is the accurate account of what
+   * closing a panel costs: the waiting ends, the spending does not.
+   *
+   * So this is a seam, honoured by both implementations and exercised by the
+   * unit tests, kept for a caller that can abort — a route handler, a queue
+   * worker, a provider wrapper — rather than a cost control the app has.
    */
   readonly signal?: AbortSignal;
   /**
@@ -273,8 +304,14 @@ export interface AssistCallOptions {
  * that chooser; nothing that renders changes.
  */
 export interface AssistProvider {
-  /** Which implementation this is. Ends up in `meta.provider`. */
-  readonly name: "anthropic" | "fake";
+  /**
+   * Which implementation this is. Ends up in `meta.provider`.
+   *
+   * Deliberately `string`. A closed union here would mean that the "new file
+   * plus one line in the chooser" promise above was false — every third
+   * provider would also have to edit this interface to be allowed to exist.
+   */
+  readonly name: string;
   /**
    * Ask for one assist. Resolves with a result whose `kind` matches the
    * request's, or rejects with an {@link AssistError} — never with anything
@@ -326,26 +363,47 @@ export type AssistErrorCode =
   /** A well-formed answer with nothing in it. */
   | "empty";
 
-/** The default sentence for each code. Plain, second person, no jargon. */
+/**
+ * The default sentence for each code. Plain, second person, no jargon.
+ *
+ * ## Why none of them names the vendor, and none of them names a variable
+ *
+ * **No vendor.** This file is the seam, and a sentence that says "Claude" is a
+ * sentence the *fixtures* would also show — the provider that answers when
+ * there is no key is `lib/assist/fake.ts`, which never asks anybody anything.
+ * "Claude declined to answer this one" under a fixture refusal is the one lie
+ * this feature is capable of telling, and it was telling it on every failure
+ * path. A provider that wants its own name in a sentence passes `message`;
+ * these are what is said when it does not.
+ *
+ * **No variable name.** `unauthorized` used to read "Check ANTHROPIC_API_KEY
+ * in the deployment's environment", which put an infrastructure variable in
+ * front of whoever happened to be using the app and contradicted this
+ * milestone's own recorded decision to keep PLAN.md's build-output grep a
+ * bright line. The variable name lives in {@link AssistError.detail}, which is
+ * logged on the server and never rendered.
+ */
 const MESSAGES: Record<AssistErrorCode, string> = {
   not_configured:
-    "The brainstorm has no API key configured, so there is nothing to ask.",
+    "This deployment has no API key for the brainstorm, so there is nothing to ask.",
   refused:
-    "Claude declined to answer this one. Rewording the notes usually clears it.",
+    "The assistant declined to answer this one. Rewording the notes usually clears it.",
   timeout:
     "The brainstorm took too long and was stopped. Trying again usually works.",
   cancelled: "The brainstorm was cancelled.",
   rate_limited:
     "Too many brainstorms too quickly — wait a moment and ask again.",
-  upstream: "Claude is having trouble right now. Try again in a minute.",
-  unreachable: "Could not reach Claude — check the connection and try again.",
+  upstream:
+    "The assistant is having trouble right now. Try again in a minute.",
+  unreachable:
+    "Could not reach the assistant — check the connection and try again.",
   unauthorized:
-    "The API key was rejected. Check ANTHROPIC_API_KEY in the deployment's environment.",
+    "This deployment's credentials were rejected. Nothing was changed — the key needs attention before the brainstorm will work.",
   rejected:
-    "Claude rejected the request as malformed. That is a bug in this app, not something you did.",
-  malformed: "Claude's answer was not readable. Try again.",
-  wrong_shape: "Claude answered in a shape this panel cannot read. Try again.",
-  empty: "Claude came back with nothing this time. Try again.",
+    "The request was rejected as malformed. That is a bug in this app, not something you did.",
+  malformed: "The answer was not readable. Try again.",
+  wrong_shape: "The answer came back in a shape this panel cannot read. Try again.",
+  empty: "Nothing came back this time. Try again.",
 };
 
 /**

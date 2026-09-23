@@ -64,6 +64,58 @@ describe("the voice guide", () => {
     expect(beta.suggestions).not.toEqual(alpha.suggestions);
   });
 
+  it("changes what is said, not only the order it is said in", async () => {
+    /*
+      The review's sharpest fixture finding. `seedOf` included the guide, so
+      two opposite guides started the same pool at a different index — and a
+      set assertion passes on a reordering. Measured, sixteen of twenty titles
+      were word-for-word identical between two guides written to be as
+      different as two guides can be. The guide now picks which of each
+      shape's two phrasings is used, so the *texts* differ rather than their
+      positions.
+
+      This still proves nothing about a model. It proves the fixture is
+      conditioned on the guide rather than shuffled by it, which is what a
+      reviewer with no key can actually see.
+    */
+    const alpha = await titles();
+    const beta = await titles({ channel: { voiceGuide: VOICE_GUIDE_BETA } });
+
+    const alphaTexts = new Set(alpha.suggestions.map((s) => s.text));
+    const shared = beta.suggestions.filter((s) => alphaTexts.has(s.text)).length;
+
+    // The two guides hash to different registers, so no line is shared even
+    // though both lists are drawn from the same twenty-four shapes.
+    expect(shared).toBe(0);
+  });
+
+  it("gives every proposal a rationale that is about that proposal", async () => {
+    /*
+      Rationales used to come from a second pool rotated independently of the
+      texts, so a title with no number sat under "…and the number gives it a
+      spine", and eight sentences were spread over twenty rows. They are
+      paired now, which also means a twenty-item list carries twenty different
+      reasons rather than the same eight three times over.
+    */
+    const answer = await titles();
+    const rationales = answer.suggestions.map((s) =>
+      s.rationale.replace(/ Keeps the channel's ".*$/, ""),
+    );
+
+    expect(new Set(rationales).size).toBe(answer.suggestions.length);
+  });
+
+  it("recommends with a comparison rather than the pick's own rationale", async () => {
+    const answer = await titles();
+
+    expect(answer.recommended).not.toBeNull();
+    expect(answer.recommendedReason).toBeTruthy();
+    // Not a copy of any per-item rationale: it answers a different question.
+    expect(
+      answer.suggestions.some((s) => s.rationale === answer.recommendedReason),
+    ).toBe(false);
+  });
+
   it("leaves a visible fingerprint, so a keyless run can show it working", async () => {
     const withGuide = await titles();
     const without = await titles({ channel: { voiceGuide: null } });
@@ -220,5 +272,47 @@ describe("bad answers on demand", () => {
 
     expect(result.meta.droppedUnusable).toBe(2);
     expect(result.suggestions.every((s) => s.text.trim() !== "")).toBe(true);
+  });
+});
+
+describe("the scenarios the clamp needs", () => {
+  it("never recommends a variant its own verdict calls illegible", async () => {
+    /*
+      `critiqueFor` used to pick `variants[seed % length]` independently of the
+      verdicts it had just written, so roughly one critique in three drew
+      "WOULD SHIP" over "Does not read at tile size". `clampCritique` refuses
+      such an answer now; a fixture that can still produce one is a fixture
+      modelling something the app has decided is incoherent.
+    */
+    const answer = (await provider.run(
+      critiqueRequest(),
+    )) as ThumbnailCritiqueResult;
+
+    if (answer.recommendedRole !== null) {
+      const verdict = answer.verdicts.find((v) => v.role === answer.recommendedRole);
+      expect(verdict).toBeDefined();
+      expect(verdict?.readsAtTileSize).toBe(true);
+    }
+  });
+
+  it("turns an answer that is nothing but repeats into the empty failure", async () => {
+    /*
+      The blocker this scenario exists to hold shut. An answer whose every
+      suggestion is already on the video used to resolve as a *success* with
+      zero proposals — which the panel drew as "0 proposals" with no retry, and
+      which then overwrote `videos.brainstorm_last` with an entry that reads
+      back as absent. Reached by the ordinary route: "Add all as candidates",
+      then "Ask again".
+    */
+    process.env.ASSIST_FAKE_SCENARIO = "all_duplicates";
+
+    const error = (await provider
+      .run(titlesRequest({ existing: ["Already mine", "Also mine"] }))
+      .catch((e) => e)) as AssistError;
+
+    expect(error).toBeInstanceOf(AssistError);
+    expect(error.code).toBe("empty");
+    expect(error.retryable).toBe(true);
+    expect(error.message).toContain("already on this video");
   });
 });

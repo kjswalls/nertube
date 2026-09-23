@@ -569,6 +569,16 @@ export type Database = {
         Args: { p_video: string; p_archived: boolean };
         Returns: VideosRow;
       };
+      /**
+       * 0009. The only write path to `videos.brainstorm_last`: it merges one
+       * kind's entry into whatever the column holds, in one statement, so two
+       * brainstorms in flight at once cannot overwrite each other's answer
+       * with a snapshot taken before either of them ran.
+       */
+      merge_brainstorm_entry: {
+        Args: { p_video: string; p_kind: string; p_entry: Json };
+        Returns: boolean;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

@@ -190,6 +190,19 @@ export function CaptureCell({
               setOpen(false);
               toast.push({
                 message: `Captured “${saved.title}” as ${vertical.name} · ${horizontal.name}.`,
+                /*
+                  The same link the `c` modal's toast carries.
+
+                  M8 kept capture deliberately assist-free — it is the fastest
+                  thing in the app and there is no row yet to ask about — and
+                  the compensation recorded for that decision is that the
+                  confirmation carries the way to the four controls that *can*
+                  do something with the idea. That was only ever true on one of
+                  the three capture surfaces; from an empty matrix cell the
+                  person had to go and find the idea, which is the friction the
+                  note says was removed.
+                */
+                links: [{ label: "Open it", href: `/videos/${saved.id}` }],
               });
               // The cell this was captured into is no longer empty, and the
               // grid is server-rendered: without this the hole stays drawn
