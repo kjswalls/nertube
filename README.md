@@ -171,7 +171,7 @@ anything but a loopback `PGHOST`.
 | `npm run lint` | ESLint. |
 | `npm test` | Vitest: the ranking rules, the date helper, the assist provider against a stubbed transport, the schemas. |
 | `npm run db:verify [dbname]` | The Docker-free database check: drops and recreates a database on local Postgres, applies `supabase/tests/shim.sql` (the Supabase pieces a plain Postgres lacks: the `auth` and `storage` schemas, `auth.uid()`, the roles and default grants), every migration in order, then every `supabase/tests/*.test.sql`. Exits non-zero on the first failure. |
-| `npm run e2e` | Playwright, against the real app and the harness. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. A `next dev` already running in the directory also blocks it (Next allows one per directory), and the suite says so in one sentence. |
+| `npm run e2e` | Playwright, against the real app and the harness. `e2e/m9-week.spec.ts` is the whole week — capture to thumbnail swap — once with a mouse and keyboard at 1440×900 and once by touch at 390×844, with a screenshot of every step under `test-results/m9-week/`. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. A `next dev` already running in the directory also blocks it (Next allows one per directory), and the suite says so in one sentence. |
 | `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
 The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
@@ -341,8 +341,18 @@ found.
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
 - **No real phone and no touchscreen.** Every phone measurement is Chromium at a
-  phone-sized viewport driven by a mouse; the on-screen keyboard is simulated
-  by a short viewport; `pointer: coarse` is never true in the suite (M9).
+  phone-sized viewport. `e2e/m9-week.spec.ts` walks the whole week at 390×844
+  as an emulated touch device (`hasTouch`, `isMobile`, so `pointer: coarse` is
+  true and every press is a tap), and the rest of the suite uses a mouse. The
+  on-screen keyboard is simulated by a short viewport; iOS Safari's own
+  behaviour (the visual viewport, zoom on focus) has not been seen on a device
+  (M9).
+- **The error page's "You're offline" sentence and `app/global-error.tsx`**
+  are exercised by no spec; `app/error.tsx` is proved with an induced read
+  failure, not a dropped connection (M9).
+- **The YouTube preview's geometry is transcribed, not measured** against a
+  live YouTube page (no egress to youtube.com). Every number carries a comment
+  saying what it represents, so checking them is a reading exercise (M3).
 - **No real non-US keyboard.** The AltGr case for `[`/`]` is proved with a
   synthetic event (M9).
 
@@ -363,6 +373,9 @@ found.
   none of them.
 - **A thumbnail variant has no note of its own.** The brief's "each with a
   note" became the role's fixed description plus the swap reason (M4).
+- **The calendar does not colour target dates per channel.** PLAN.md's route
+  table asks for it; the design system reserves colour for state, so each
+  chip carries its channel as a text tag instead (M6).
 
 ### Things it does, with a catch
 
@@ -390,11 +403,44 @@ found.
 - **The board and the calendar are desktop views.** On a phone the board's
   strip scrolls sideways and the card arrows work; nothing drags. The calendar
   shows a date and a chip per day at 390px and says so (M9).
+- **An existing idea is filed on its own page, not in the matrix.** The
+  matrix's empty cells capture a *new* idea straight into that cell; an idea
+  captured without its pillar and format is filed from the Packaging tab of its
+  video page (the Filing block, below the packaging fields). The bank row and
+  the matrix's "not on the grid" line say it is unfiled and cannot fix it in
+  place (M5). The week walk in M9 found this the longest detour of the week.
+- **Checklist items do not tick themselves.** Publish Prep's "3 thumbnail
+  variants ready" stays unticked when the three are uploaded, and Published's
+  "Check first 24h" stays unticked when the numbers are logged — so the Publish
+  tab can read 1/2 while its checklist reads 0/2. Auto-ticking was left out of
+  v1 on purpose (PLAN.md review item 21): a checklist is the person's own
+  record, and a tick the app wrote would be one they did not make.
+- **Capture's tag box does not suggest tags**; it is the comma-separated box,
+  deliberately, on the fastest path in the product. The video page's tag
+  editor does suggest (M5).
+- **A calendar day holding one or two videos has no link to its day panel**;
+  its chips link to the videos. The panel is reachable for every day by
+  `?day=` (M6).
+- **Reordering is read-then-write.** Stages, template items and buckets are
+  reordered by reading the rows and writing them back; a row removed in another
+  tab in between can be re-inserted. One user, one session (M7).
+- **The Repurposed switch on a video page is pre-disabled when the lane holds
+  videos**, where the stage editor in Settings leaves its switch live and lets
+  the database refuse. Same rule, same sentence, two behaviours (M7).
+- **On a phone, some views are usable rather than comfortable.** `/now` and
+  `/capture` were designed for 390px (M9). Elsewhere: the matrix shows two of
+  its eight format columns at a time and scrolls sideways inside itself; the
+  video page's Packaging tab is long, with Filing and the YouTube preview below
+  every packaging field; an assist panel opens below the button that asked for
+  it, partly under the fold; the 24-hour form's "New viewers" field sits below
+  its save button. None of these scrolls the page sideways or hides a control.
 - **The first click on a freshly loaded video page can be swallowed** while it
   hydrates — it is the heaviest page, with five sections and three assist
   panels mounted. The remedy on record is to make the sections lighter, not to
   unmount the hidden ones, which would trade a lost click for a lost draft (M4,
   M8).
+- **The critique is the most expensive call in the app** (three images plus
+  a prompt) and nothing on screen shows what a call costs (M8).
 - **The assist has no spending ceiling.** It refuses the same question twice at
   once, per server instance, but there is no per-hour or per-day cap, and
   closing a panel stops the waiting, not the call, which runs to completion and
@@ -413,8 +459,10 @@ found.
   database read, so it is not drawn there (M9).
 - **Fonts are fetched from Google at build time.** A build machine without
   egress to `fonts.googleapis.com` fails the build rather than falling back.
-- **Scale.** PostgREST caps a read at 1000 rows; every list pages past it, then
-  counts and filters in memory. That is right for PLAN.md's sizing (one user,
+- **Scale.** Every signed-in route pays for `/now`'s reads, because the
+  sidebar's Now count is the same number as the page (M3). PostgREST caps a
+  read at 1000 rows; every list pages past it, then counts and filters in
+  memory. That is right for PLAN.md's sizing (one user,
   hundreds of videos) and would want server-side aggregation at tens of
   thousands.
 
@@ -422,9 +470,13 @@ found.
 
 - **Controls that are busy are `disabled`, not `aria-disabled`.** A disabled
   control leaves the tab order, so focus can jump while a save is in flight.
-  M6's review deferred the application-wide change to M9; M9 did not make it
-  (it touches every in-flight control in the app, in files three M9 slices were
-  editing at once).
+  M6's review deferred the application-wide change to M9; M9 did not make it.
+  The application has about eighty `disabled` props in thirty-five files;
+  each would need sorting into "busy for a moment" (which should become
+  `aria-disabled` with a no-op handler) and "genuinely unavailable" (which
+  should stay `disabled`), and nothing in this environment (no screen reader,
+  no real keyboard user) could check the result. The harm is real but recoverable: focus drops to the page while
+  a save is in flight, and Tab starts again from the top.
 - **The add-a-stage and add-a-bucket forms are still two components.** M7's
   review offered to merge them in M9; they differ by a quota box and share a
   dozen lines, and M9 left them as two.

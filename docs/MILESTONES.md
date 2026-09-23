@@ -8738,3 +8738,320 @@ runs were made with `E2E_REUSE=1` against another agent's stack, because its
 `next dev` held the directory's dev lock, which is why the failing-read test
 makes the read fail for its own account only.
 
+
+---
+
+## M9 — Integration: one tool, one week, and every debt accounted for
+
+> The last pass of the last milestone. Three slices landed at once (the
+> responsive shell, the keyboard, the empty and error states). This pass read
+> them together, walked the whole week on a laptop and on a phone as PLAN.md:200
+> asks, fixed what the walk found, and went through every deferral in this file
+> from M0 to M8. It adds no feature.
+
+### What was checked rather than trusted
+
+Each slice's report was read against the tree, not taken as given.
+
+- **One keyboard mechanism.** `grep` for `addEventListener("keydown"` across
+  `app/`, `components/` and `lib/` finds one: `lib/shortcuts.ts`. Every other
+  keyboard path is a React `onKeyDown` on the field it belongs to (Enter to
+  commit, Escape to revert a settings row, Tab for the modal's trap).
+- **One modal.** `createPortal`, `role="dialog"` and `aria-modal` appear in
+  `components/modal.tsx` and nowhere else. Its six callers: the capture box,
+  the swap reason, the schedule-a-day dialog, the matrix's capture cell, the
+  `?` sheet and the phone menu. **The collapsed sidebar did not become a second
+  modal.** `AppSidebarMenu` is a button, an open flag and
+  `<Modal placement="start">`, and nothing more.
+- **One dismissal order.** The modal (and so the sheet and the phone menu) is
+  an overlay through `useDismiss`, and the assist panel is a region through
+  `useDismiss(…, { within })`. The four settings fields that revert on Escape
+  call `preventDefault()`. No other Escape handler exists. The order is
+  written once, in the header of `lib/shortcuts.ts`.
+- **One empty-state presentation.** Every view-level empty, missing or failed
+  state goes through `components/state-panel.tsx`: the board, `/now`, the bank,
+  the matrix, the calendar, the four `not-found.tsx` files and `app/error.tsx`.
+  Two seams were left, and this pass closed both:
+  - `app/global-error.tsx` drew its own "problem" layout. It now renders
+    `StatePanel`, which is plain markup with no data, so the reason it gave for
+    standing apart ("the less this page depends on, the better") does not
+    apply.
+  - The two lists' filtered-empty lines disagreed. The bank's had "Clear the
+    filters" and `/now`'s said "Turn one off". `/now` now has the same button
+    (`now-clear-filters`).
+
+  Section-level empties are deliberately not panels: "No image yet" in a
+  thumbnail slot, "No tags yet" and similar are one line inside a block that
+  is otherwise full.
+- **The docs the slices wrote.** The responsive slice's gates table had landed
+  inside the keyboard section, because the two edited the file at the same time.
+  It is moved back. The responsive section's note that the bar mounts
+  `ChannelShortcuts` is annotated: the bar now mounts `KeyboardShortcuts`,
+  which contains it. The same stale name in `components/app-sidebar-menu.tsx`'s
+  header is corrected.
+
+### The week, walked on a laptop and on a phone
+
+`e2e/m9-week.spec.ts` is the walk, made repeatable. One idea goes from capture
+to a swapped thumbnail by the controls a person would use, twice:
+
+- at **1440×900 with a mouse and the keyboard**;
+- at **390×844 as an emulated touch device** (`hasTouch`, `isMobile`). There
+  `pointer: coarse` is really true (the spec asserts it) and every press is
+  a `tap()`. The responsive slice could not say this of any spec.
+
+After the walk starts, no SQL moves anything. The fixture sets up only what a
+real Monday already has: three pillars, two videos from another channel
+waiting on a camera, and two earlier published videos whose click-through is
+the swap prompt's bar. Every step saves a screenshot under
+`test-results/m9-week/`, and every screenshot was looked at. The account below
+comes from those screenshots and from the run, not from reading code.
+
+| Step | Laptop: what it took | Phone: what it took |
+|---|---|---|
+| Capture | `c`, type, Enter. 1 key + the title | Tap Capture on the bar, type, tap Capture beside the field |
+| File it in the matrix | Bank → the idea → scroll to Filing → two selects → back to the matrix | Same, with a long scroll: Filing sits below every packaging field |
+| Promote | `j`, `p` | Tap Promote |
+| Package | Generate 20 → Add all → Choose one → type the concept → three hooks, Enter each → Choose | Same taps |
+| Through the gate | Click the card, `]` | Tap → on the card |
+| Script it | Read the script the template wrote; 9 checklist ticks on `/now` (`j` then `x` ×9), then Move | 9 taps on the sentences, then Move |
+| Filming day from the badge | Board → badge → date → Schedule the day | Same |
+| Film it, edit it | 4 + 4 ticks with Moves, on `/now` | Same, by tap |
+| Publish Prep | Three uploads, Ship the wild card, target date on Schedule, 5 ticks, Move | Same |
+| Publish | Paste the URL into `/now`'s row, Confirm live | Same |
+| First 24 hours | Video → Publish tab → impressions, CTR, views → Log | Same |
+| Swap a thumbnail | `/now`'s Swap row → Thumbnails → Ship moderate → reason → Swap | Same |
+
+Both walks pass: laptop 44–48 s, phone 52 s. The first phone run took 3.1
+minutes because of a fixture mistake, since fixed. The two earlier videos had
+no packaging, so they filled `/now` with "Complete packaging" rows. That was
+the fixture's fault, not the app's.
+
+**What the phone walk found broken, and fixed here:**
+
+1. **A hook was cut off mid-sentence.** Each hook is a two-row textarea beside
+   its Choose and Remove buttons. At 390px, two rows hold about forty
+   characters, so "Nine hours a night for a month changed one" was all you
+   could read of the hook you were choosing. It now grows with its text
+   (`field-sizing: content`, with `rows` as the floor where that is
+   unsupported). Below `md` it takes the full width and the buttons wrap under
+   it (`components/packaging/hooks-editor.tsx`).
+2. **The schedule-a-day dialog ran off its own edge.** A fieldset's default
+   `min-width` is `min-content`, so one long title pushed every candidate row
+   past the dialog's right border. Adding `min-w-0` to the fieldset lets
+   `truncate` work (`schedule-day-dialog.tsx`).
+3. **On a phone the board opened on an empty column, with the badge three
+   swipes away.** The strip showed Idea first. For a channel whose ideas live
+   in the bank that column is empty, and the Filming badge (principle 4's
+   whole signal) was off screen to the right. Below `md` the strip now opens
+   at the first column that holds a card or the badge. At desktop widths
+   nothing moves (`components/board/board.tsx`). The week spec asserts the
+   badge is in the viewport.
+4. **A toast covered the control it was reporting on.** "Ticked: …" sits at
+   the bottom of the screen, which on `/now` is where the next row's Move
+   button lands after a tick. Below `md` toasts now sit under the 56px bar,
+   away from the thumb (`components/toast.tsx`).
+5. **The capture box showed keyboard digits to a thumb.** Each channel chip
+   carries its Alt+1–9 digit. On a coarse pointer the digit is now hidden, the
+   same rule the responsive slice already applied to the hint's keyboard
+   sentences (`capture-form.tsx`).
+
+**What was awkward and is not fixed,** because fixing it would be a feature or
+a redesign. Each is in the README's limits.
+
+- *Both:* **"Script it" is ticking a checklist.** The Script tab shows what
+  the template wrote, with the chosen hook spliced in, and says it is
+  read-only. This is the largest gap between the week BRIEF.md describes and
+  the week the app supports (see the closing account below).
+- *Both:* **Filing an existing idea is the longest detour of the week.** The
+  matrix files only new ideas, through its empty cells. The bank row cannot
+  file. The Filing block is at the bottom of the video page's Packaging tab.
+- *Both:* **Checklist items do not follow facts the app already has.** After
+  three uploads, "3 thumbnail variants ready" is still unticked. After the
+  numbers are logged, "Check first 24h" is still unticked, so the Publish tab
+  reads 1/2 while its checklist reads 0/2. Auto-tick was left out of v1 on
+  purpose (PLAN.md review item 21). The walk shows what that costs: five
+  ticks on facts the page already knew.
+- *Laptop:* **nine `x` presses make three stacked toasts.** They are polite
+  and they clear themselves, but a quick run through a checklist is noisier
+  than it needs to be.
+- *Phone:* **the matrix shows two of its eight formats at a time**, with the
+  pillar column taking about 40% of the width. The idea just filed
+  ("self-experiment", the fourth column) was off screen until the grid was
+  swiped. The legend still says "Click it to capture one".
+- *Phone:* **an assist panel opens below the button that asked for it**,
+  partly under the fold.
+- *Phone:* **the 24-hour form's "New viewers" field sits below its save
+  button**, so the natural top-to-bottom order logs the numbers before the
+  note is seen.
+- *Both, dev only:* **Next's development indicator sits over the sidebar's
+  account line** at the bottom left. It is not in a production build.
+
+### Every deferral in this file, and where it went
+
+Every "deferred", "left for", "still M9" and "the integration pass should"
+in the M0–M8 sections, including items deferred to a milestone that then did
+not take them. **Fixed** means fixed in code, by the milestone named.
+**README** means it is written into the README's honest-limits section.
+
+| # | From | Item | Disposition |
+|---|---|---|---|
+| 1 | M0 | Everything M1+ "deliberately not built yet" | Fixed, M1–M8 |
+| 2 | M1 | The deploy to Vercel, and an upload to a hosted bucket | **README** ("It has never been deployed"). It cannot be done from this environment |
+| 3 | M1 review 18 | Reconsider the hint bar once the `?` sheet exists | Fixed, M9 keyboard slice: the bar is kept, and its last item opens the sheet |
+| 4 | M1 | The packaging editor and the gate-refusal links | Fixed, M2 |
+| 5 | M1 | The checklist ratio on the card | Fixed, M3 |
+| 6 | M1 | `?`, `g n/b/i/k`, `p`, `x` | Fixed (`p` M5, `x` M3, `g` and `?` M9). `g k` became `g c` (deviation, M9 keyboard) |
+| 7 | M3 | `/` lands on the board, not `/now` | Fixed, M3 integration |
+| 8 | M3 | A Scheduled video with no target date gets no `/now` row | **README** |
+| 9 | M3 | The swap row's second answer (the swap itself) | Fixed, M4 |
+| 10 | M3 | Rules 3 and 5-Ready not walked in a browser | Fixed, M4 acceptance, and again from `/now` in `m9-week` |
+| 11 | M3 | `/now` does not write views or the new-viewers note | Fixed, M4 (the Publish section) |
+| 12 | M3 | The script editor ("the field and its save path should arrive together") | **README**, prominently. Not built |
+| 13 | M3 | No description field | **README** (description, chapters, end screen and tags are checklist items) |
+| 14 | M3 review 32 | No responsive breakpoint | Fixed, M9 responsive slice |
+| 15 | M3 | The preview's metrics are transcribed, not measured | **README** (added here) |
+| 16 | M3 | Every signed-in route pays for `/now`'s reads | **README**, "Scale" (added here) |
+| 17 | M4 review | `npm run e2e` reuses a stack by default | Fixed, M9 empty-states slice |
+| 18 | M4 | `channels.expected_ctr` has no UI | Fixed, M7 |
+| 19 | M4 | The first click on the video page can be swallowed | **README** |
+| 20 | M4 | A shipped role cannot be un-shipped | **README** |
+| 21 | M4 | `confirmLive` is two writes | **README** |
+| 22 | M4 | The disable-an-occupied-stage rule lives in app code | Fixed, M7 (`0007`/`0008`: `occupied:<n>` raised in SQL) |
+| 23 | M4 | A thumbnail variant has no note | **README** |
+| 24 | M5 matrix | A populated cell should link into the bank's filters ("the integration pass can add it") | Fixed, M5 integration (`cell-bank-link`) |
+| 25 | M5 | No way to create a bucket | Fixed, M7 |
+| 26 | M5 | Buckets set only at capture | Fixed on the video page (M5 filing slice). The bank row and the matrix still cannot file: **README** (added here) |
+| 27 | M5 | Back does not undo a filter change | **README** |
+| 28 | M5 | Archive has no undo after a reload | **README** |
+| 29 | M5 | Twelve formats will scroll; mobile is M9 | Fixed at page level, M9 (the matrix no longer scrolls the page sideways). At 390 it shows two formats at a time: **README** (added here) |
+| 30 | M5 | Capture's tag box does not suggest tags | **README** (added here) |
+| 31 | M6 | Colour per channel on the calendar | **README** (added here). Recorded as a deviation in M6 |
+| 32 | M6 | `g k` is still M9 | Fixed, M9, as `g c` |
+| 33 | M6 → M7 → M9 | The timezone question ("today" is the UTC day) | **README**. Not built: it needs a profile table and a settings screen, which is a feature |
+| 34 | M6 | No mobile pass on the calendar | M9 says on the page that a month needs a wider screen. **README** |
+| 35 | M6 | A day with one or two videos has no link to its `?day=` panel | **README** (added here) |
+| 36 | M6 | `FilmingDayPanel` should render on `/calendar` | Fixed, M6 integration |
+| 37 | M6 review | `aria-disabled` in place of `disabled`, application-wide | **README**. Not done: about 80 `disabled` props in 35 files to sort into busy and unavailable, and nothing here can check the result with a screen reader. Reason updated here |
+| 38 | M6 review | `board.m1.spec.ts`'s literal "3 in Filming" | Fixed, M9 empty-states slice |
+| 39 | M7 review 13 | Merge the add-stage and add-bucket forms | **README**. Kept as two by decision (M9) |
+| 40 | M7 review | The video page's text fields and the NUL byte | Fixed, M9 empty-states slice |
+| 41 | M7 | `RepurposedLane` pre-disables where Settings leaves the switch live | **README** (added here) |
+| 42 | M7 | Reorders are read-then-write | **README** (added here) |
+| 43 | M7 | The voice guide is stored and nothing reads it | Fixed, M8 |
+| 44 | M8 | No live call to Anthropic has ever been made | **README** ("No request has ever been sent to Anthropic"), with the first four things to check in Vercel |
+| 45 | M8 | The packaging panel's own in-flight machine, "the first thing to do to this directory" | Fixed, M8 integration (`useAssistRun` twice, in `brainstorm-assist.tsx`) |
+| 46 | M8 | The critique's cost is not shown | **README** (added here) |
+| 47 | M8 review | No per-user or per-day spending cap; cancel does not stop the bill | **README** |
+| 48 | M9 responsive | `pointer: coarse` never true in the suite | Fixed here: `m9-week`'s phone walk runs with it true. README updated |
+| 49 | M9 keyboard | The sheet cannot be reached by touch; no key moves a video from its own page; no remapping; AltGr proved only synthetically | **README** |
+| 50 | M9 states | Signed-out diagnosis in four callers only; the offline branch and `global-error.tsx` are untested | **README** (the second half added here) |
+
+Nothing on this list simply lapsed. Items 8, 12, 33, 37 and 39 are decisions
+not to build or not to change. Each one's reason is in the README, and this
+file says where it was argued.
+
+### No key, and the fake provider
+
+This container has no `ANTHROPIC_API_KEY` and no egress. Verified directly,
+not assumed:
+
+- `env | grep ANTHROPIC_API_KEY` is empty. `.env.local` holds the Supabase
+  pair, the seed credentials and `ASSIST_PROVIDER` (names only were read).
+- The app was started with `ASSIST_PROVIDER=` set empty, which overrides
+  `.env.local`. Under `selectAssistProvider` that counts as unset, and with no
+  key and `NODE_ENV` not `production` it selects the fixtures. Against that
+  server, `e2e/m8-acceptance.spec.ts` (5/5) and the laptop week walk (whose
+  packaging step is "Generate 20", then "Add all") passed. **That is the state
+  the app is verified in here, and it works.**
+- `npm run build` succeeds and `grep -rl` over `.next/static` for
+  `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` finds 0 files.
+
+### Decisions taken without the user
+
+1. **The week walk is a committed spec, not a one-off session.** PLAN.md
+   names it as M9's review; a walk that cannot be repeated cannot be checked
+   by the next person. It runs as part of `npm run e2e` and costs about 1m40s.
+2. **The phone walk is a touch device, not a narrow mouse.** 390×844 with
+   `hasTouch` and `isMobile`, so the `thumb:` and `pointer-coarse:` rules the
+   responsive slice wrote are on in at least one spec.
+3. **Below `md` the board opens at the first column with work in it.** A
+   board that opens on an empty column hides the one signal it exists to
+   give. At desktop widths it still opens where M3 left it.
+4. **Below `md` toasts go under the bar, not at the bottom.** On a phone the
+   bottom is where the thumb and the next control are. On a desktop they stay
+   where they were.
+5. **The hook field grows with its text,** everywhere and not only on a
+   phone. A hook is read in full before it is chosen, and a fixed two rows cut
+   off any hook longer than two lines at any width; the phone only made it
+   happen to ordinary ones.
+6. **Auto-tick stays out,** even though the walk shows it costing five ticks
+   a week on facts the app already knows. PLAN.md decided it and it is a
+   feature. It is written down so the next version can decide it with the
+   evidence.
+7. **`aria-disabled` stays undone.** The reason on record ("three slices
+   editing at once") was no longer true for this pass, so it was re-argued on
+   its merits and the README's reason was replaced.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md:199 scopes the mobile pass to `/now` and `/capture`. This pass also
+  changed the board (opening position), the hooks editor and the filming-day
+  dialog at phone width, because the phone walk crossed them and they were
+  broken rather than merely dense.
+- PLAN.md:200's walkthrough is a Playwright spec in Chromium, with touch
+  emulated. It is not a person with a phone. See "Never proven" in the README.
+
+### What nine milestones shipped against BRIEF.md's v1 scope
+
+**Built and walked:**
+
+- **Multi-channel:** channels with a switcher. Stages, checklist templates and
+  buckets are per channel (M0, M3, M7).
+- **Idea bank:** quick capture (`c`, `/capture`, one input, Enter), with hook,
+  notes, tags and buckets behind the disclosure. Verticals and horizontals
+  with monthly quotas. The matrix, where every empty cell captures. Promote
+  (M1, M5, M7).
+- **Pipeline board:** drag and drop, keyboard moves and card arrows. Stages
+  editable per channel, and the Repurposed lane can be switched off. Count and
+  WIP warning per column. The Filming badge at 3+, which books a day.
+  Time-in-stage and a stale flag. The card face (title, channel, target date,
+  concept sketch, checklist ratio) (M1, M3, M6, M7).
+- **The gate:** title, thumbnail concept and chosen hook, checked by the
+  database at move time. Skipping it needs a typed reason and leaves a badge
+  (M2).
+- **Video detail:** working title with the 55-character warning. Title
+  candidates with notes and a chosen flag. The concept in text plus a sketch
+  upload. Up to three hooks with one chosen. Three thumbnail roles with a
+  shipped role and a swap log. The per-stage checklist, editable per video.
+  Target date and final URL. Notes. The post-publish block, where impressions
+  and CTR are always together and the swap prompt appears (M2, M3, M4).
+- **Seed checklists:** the brief's seven lists, verbatim, with minute
+  estimates, editable per channel (M0, M7).
+- **Calendar:** target dates across channels, with filming days as their own
+  event type (M6).
+- **"What can I move right now?":** `/now`, derived, sorted by staleness, with
+  every row completable in place (M3).
+- **Brainstorm:** 10–20 titles, each with a rationale and one recommended
+  pick. Hooks. Conditioned on a per-channel voice guide and the past titles.
+  Behind one swappable provider interface. Also concepts and a thumbnail
+  critique (M8).
+- **Working style:** keyboard shortcuts for new idea, move stage and quick
+  capture, and the full set with a `?` sheet (M1, M9). Minimal dependencies:
+  four runtime packages beyond Next and React.
+
+**In v1 scope and NOT built, or not done:**
+
+- **The script editor.** BRIEF.md asks for a markdown script editor, per-video
+  notes on the chosen structure, and a B-roll plan per section. The per-channel
+  script template exists and fills the script on entry to Scripting, but the
+  script is **read-only**. `script_structure` and `end_screen_target` are
+  columns with no UI. This is the biggest gap against the brief.
+- **Deploy on Vercel.** Never done. There are no credentials and no egress.
+  There is a runbook.
+- **The brainstorm against Claude itself.** Built and unit-tested against a
+  stubbed transport, and never sent to the live API.
+- **The one-line hook after capture:** set at capture and editable nowhere
+  after.
+- **Per-thumbnail notes:** the brief's "each with a note" became the role's
+  description plus the swap reason.
