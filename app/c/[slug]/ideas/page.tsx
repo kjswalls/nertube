@@ -9,11 +9,14 @@ import {
   readIdeaFilters,
 } from "@/components/ideas/list/url";
 import { MatrixView } from "@/components/ideas/matrix/matrix-view";
+import { formatInstant, type TimeZone } from "@/lib/calendar-dates";
+import { readTimeZone } from "@/lib/time-zone-data";
 import { IdeasViewSwitch } from "@/components/ideas/matrix/view-switch";
 import { formatAge } from "@/components/video-detail/age";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 import { channelPageTitle } from "@/lib/page-title";
+import { readClock } from "@/lib/request-clock";
 
 export async function generateMetadata({
   params,
@@ -242,8 +245,10 @@ export default async function IdeasPage({
       route (it reads cookies through `requireUser`), so it runs once per
       request and every age on the page is measured from the same instant.
     */
-    // eslint-disable-next-line react-hooks/purity
-    const now = Date.now();
+    const now = await readClock();
+    // And the zone the capture dates are shown in, once (M10). Ages are
+    // durations and do not use it.
+    const { zone } = await readTimeZone();
 
     ideas = videoRows.map((video) => ({
       id: video.id,
@@ -261,7 +266,7 @@ export default async function IdeasPage({
           ? null
           : (bucketName.get(video.horizontal_id) ?? null),
       ageLabel: formatAge(video.stage_entered_at, now),
-      capturedLabel: formatCaptureDate(video.created_at),
+      capturedLabel: formatCaptureDate(video.created_at, zone),
       archivedAt: video.archived_at,
       capturedMs: Date.parse(video.created_at),
     }));
@@ -296,16 +301,9 @@ export default async function IdeasPage({
 }
 
 /**
- * `created_at` as a date, in UTC with a fixed locale, so the server's string
- * and the browser's are the same string.
+ * `created_at` as a date in the user's zone (M10) — an idea captured at 23:30
+ * in Los Angeles was captured that day, not the next UTC one.
  */
-function formatCaptureDate(value: string): string | null {
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+function formatCaptureDate(value: string, zone: TimeZone): string | null {
+  return formatInstant(value, zone);
 }

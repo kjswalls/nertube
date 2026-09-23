@@ -18,6 +18,7 @@ import {
   shiftMonth,
   toDateColumn,
   todayColumn,
+  UTC,
   weekdayIndex,
 } from "./calendar-dates";
 
@@ -107,26 +108,26 @@ describe("toDateColumn", () => {
 /* Midnight                                                                    */
 /* -------------------------------------------------------------------------- */
 
-describe("todayColumn", () => {
+describe("todayColumn in UTC", () => {
   it("holds the day across it, and turns over one millisecond later", () => {
     const midnight = Date.UTC(2026, 2, 3, 0, 0, 0, 0);
-    expect(todayColumn(midnight)).toBe("2026-03-03");
-    expect(todayColumn(midnight - 1)).toBe("2026-03-02");
-    expect(todayColumn(midnight + 86_400_000 - 1)).toBe("2026-03-03");
-    expect(todayColumn(midnight + 86_400_000)).toBe("2026-03-04");
+    expect(todayColumn(midnight, UTC)).toBe("2026-03-03");
+    expect(todayColumn(midnight - 1, UTC)).toBe("2026-03-02");
+    expect(todayColumn(midnight + 86_400_000 - 1, UTC)).toBe("2026-03-03");
+    expect(todayColumn(midnight + 86_400_000, UTC)).toBe("2026-03-04");
   });
 
   it("is the same answer at every hour of a day", () => {
     for (let hour = 0; hour < 24; hour += 1) {
-      expect(todayColumn(Date.UTC(2026, 2, 3, hour, 30))).toBe("2026-03-03");
+      expect(todayColumn(Date.UTC(2026, 2, 3, hour, 30), UTC)).toBe("2026-03-03");
     }
   });
 
   it("turns the year over", () => {
-    expect(todayColumn(Date.UTC(2026, 11, 31, 23, 59, 59, 999))).toBe(
+    expect(todayColumn(Date.UTC(2026, 11, 31, 23, 59, 59, 999), UTC)).toBe(
       "2026-12-31",
     );
-    expect(todayColumn(Date.UTC(2027, 0, 1, 0, 0, 0, 0))).toBe("2027-01-01");
+    expect(todayColumn(Date.UTC(2027, 0, 1, 0, 0, 0, 0), UTC)).toBe("2027-01-01");
   });
 });
 
@@ -493,9 +494,9 @@ describe("the sweep", () => {
     const late = Date.UTC(2026, 8, 30, 23, 30);
     const early = Date.UTC(2026, 8, 1, 0, 30);
     inEveryZone(() => {
-      expect(todayColumn(late)).toBe("2026-09-30");
-      expect(todayColumn(early)).toBe("2026-09-01");
-      expect(monthKey(monthOf(todayColumn(late))!)).toBe("2026-09");
+      expect(todayColumn(late, UTC)).toBe("2026-09-30");
+      expect(todayColumn(early, UTC)).toBe("2026-09-01");
+      expect(monthKey(monthOf(todayColumn(late, UTC))!)).toBe("2026-09");
       expect(formatMonth({ year: 2026, month: 9 })).toBe("September 2026");
       // en-GB abbreviates September to "Sept", not "Sep" — the point of the
       // assertion is that the *day* does not shift, and the word is the

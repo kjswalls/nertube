@@ -88,7 +88,7 @@ export type SectionReadiness =
   | { readonly kind: "ratio"; readonly done: number; readonly total: number; readonly why: string }
   /** A tick: everything this section wants is there. */
   | { readonly kind: "done"; readonly why: string }
-  /** A lock: the video has not reached this stage, or the section is not built. */
+  /** A lock: the video has not reached the stage this section belongs to. */
   | { readonly kind: "locked"; readonly why: string }
   /** Nothing to say. No mark, no colour, no noise. */
   | { readonly kind: "quiet"; readonly why: string };
@@ -102,7 +102,10 @@ export interface SectionFacts {
   readonly conceptFilled: boolean;
   readonly chosenHooks: number;
   readonly packagingSkipped: boolean;
-  /** `videos.script` — filled by `move_video` on first entry to Scripting. */
+  /**
+   * `videos.script` — filled by `move_video` on first entry to Scripting and
+   * written on the Script tab from then on.
+   */
   readonly scriptFilled: boolean;
   /** `videos.target_publish_date`. */
   readonly targetDateSet: boolean;
@@ -176,14 +179,21 @@ export function sectionReadiness(
           why: `${gateDone} of the gate's three fields are filled in.`,
         };
 
+  /*
+    Script: locked before Scripting, because that is where it is written
+    (M10). The lock here is not only a "not yet": the tab holds no editor
+    until then, and `updateVideo` refuses the column — BRIEF.md's first
+    principle, decided in `scriptIsEditable` (`lib/script.ts`), whose rule is
+    this `reached()` call; `sections.test.ts` pins the two together.
+  */
   const script: SectionReadiness = !reached(facts.stageKind, "scripting")
     ? {
         kind: "locked",
-        why: "Not at Scripting yet — the script is written from the channel's template on the way in.",
+        why: "Written from Scripting on — title, thumbnail concept and hook come first. It starts from the channel's template on the way in.",
       }
     : facts.scriptFilled
       ? { kind: "done", why: "The script has something in it." }
-      : { kind: "quiet", why: "No script yet." };
+      : { kind: "quiet", why: "No script yet — Reset from template starts one." };
 
   /*
     Thumbnails: how many of the three slots are filled, and whether one is live.

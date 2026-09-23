@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { TimeZoneNotice } from "@/components/time-zone";
 import { DayPanel } from "@/components/calendar/grid/day-panel";
 import { EmptyMonth, type NearestMonth } from "@/components/calendar/grid/empty-month";
 import { MonthGrid } from "@/components/calendar/grid/month-grid";
@@ -18,6 +19,8 @@ import {
   todayColumn,
 } from "@/lib/calendar-dates";
 import { readFilmingVideos } from "@/lib/filming-data";
+import { readTimeZone } from "@/lib/time-zone-data";
+import { readClock } from "@/lib/request-clock";
 
 export async function generateMetadata({
   searchParams,
@@ -34,7 +37,8 @@ export async function generateMetadata({
     part of "a month can be shared" that was not true. It goes through the same
     two functions the page does, so the title and the heading cannot disagree.
   */
-  const { month, openDay } = resolveView(await searchParams, Date.now());
+  const { zone } = await readTimeZone();
+  const { month, openDay } = resolveView(await searchParams, todayColumn(await readClock(), zone));
   const parsed = parseMonthKey(month);
   const where = openDay
     ? (formatDateColumn(openDay, "full") ?? month)
@@ -60,14 +64,14 @@ export async function generateMetadata({
  */
 function resolveView(
   query: Record<string, string | string[] | undefined>,
-  now: number,
+  today: string,
 ): { month: string; openDay: string | null } {
   const openDay = dayFromQuery(first(query.day));
   const dayMonth = openDay === null ? null : monthOf(openDay);
   return {
     month: dayMonth
       ? monthKey(dayMonth)
-      : monthFromQuery(first(query.month), now),
+      : monthFromQuery(first(query.month), today),
     openDay,
   };
 }
@@ -103,13 +107,15 @@ function resolveView(
  *
  * ## One clock, one calendar day
  *
- * The request reads `Date.now()` exactly once and turns it into a calendar day
- * exactly once, through `todayColumn` in `lib/calendar-dates.ts`. Every "is
- * this late", "is this today" and "which month is this" on the page descends
- * from that one value, so no two parts of the page can land on opposite sides
- * of midnight — and because the helper is UTC, the server's render and the
- * browser's hydration agree about which cell is today whatever zone either is
- * in. The cost of that choice is recorded in `docs/MILESTONES.md`.
+ * The request reads the clock exactly once (`readClock()`) and turns it into a calendar day
+ * exactly once, through `todayColumn` in `lib/calendar-dates.ts`, in the
+ * user's zone (`readTimeZone()`, also read once per request). Every "is this
+ * late", "is this today" and "which month is this" on the page descends from
+ * that one value, so no two parts of the page can land on opposite sides of
+ * midnight — and because the zone is the stored one rather than whichever the
+ * browser is in, the server's render and the browser's hydration agree about
+ * which cell is today. Until a zone is recorded it is UTC, and the page says
+ * so (`TimeZoneNotice`).
  */
 export default async function CalendarPage({
   searchParams,
@@ -120,12 +126,12 @@ export default async function CalendarPage({
 
   // The page's one clock read: a dynamic route (it reads cookies through
   // `requireUser`), so this runs once per request.
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = await readClock();
+  const { zone } = await readTimeZone();
 
-  const today = todayColumn(now);
+  const today = todayColumn(now, zone);
   const currentMonth = monthKey(monthOf(today) ?? { year: 1970, month: 1 });
-  const { month, openDay } = resolveView(query, now);
+  const { month, openDay } = resolveView(query, today);
 
   const { channels, events, filming, counts } = await readCalendarMonth(
     month,
@@ -174,6 +180,8 @@ export default async function CalendarPage({
           currentMonth={currentMonth}
           summary={summarise(counts, channels.length)}
         />
+
+        <TimeZoneNotice />
 
         {/*
           Booking a day from the calendar.
@@ -257,19 +265,15 @@ export default async function CalendarPage({
         ) : null}
 
         {/*
-          M9: said in the view rather than left to be discovered. Seven columns
-          of a 350px column are 50px a day, which holds a date and a chip's
-          channel tag and not a title. The grid still works — every chip is
-          still the link to its video, and nothing scrolls the page sideways —
-          but reading a month is a desktop job, and the page says so where the
-          phone is.
+          Below `md` the month is a list of days rather than a grid (M10; the
+          reasoning is on `MonthGrid`), and this line says how to use it.
         */}
         <p
           data-testid="calendar-phone-note"
           className="text-[12px] text-muted md:hidden"
         >
-          A month needs a wider screen to read titles. Here, tap a chip to open
-          its video.
+          The days with something on them. Tap a title to open its video, a
+          date to open the day.
         </p>
 
         <MonthGrid

@@ -31,7 +31,7 @@ import {
 } from '../../lib/defaults.js';
 import { slugify } from '../../lib/slug.js';
 
-import { SEED_CHANNELS, SEED_EMAIL, SEED_PASSWORD } from './config.mjs';
+import { SEED_CHANNELS, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from './config.mjs';
 import { asAuthenticatedUser, query, queryOne } from './db.mjs';
 
 export interface SeedResult {
@@ -55,6 +55,7 @@ const SEED_IDEAS: Record<string, readonly string[]> = {
 
 export async function seed(): Promise<SeedResult> {
   const userId = await createUser(SEED_EMAIL, SEED_PASSWORD);
+  await chooseTimeZone(userId, SEED_EMAIL, SEED_TIME_ZONE);
 
   const channels: SeedResult['channels'] = [];
   for (const name of SEED_CHANNELS) {
@@ -103,6 +104,16 @@ async function createUser(email: string, password: string): Promise<string> {
 
   if (!row) throw new Error(`could not create the seed user ${email}`);
   return row.id;
+}
+
+/**
+ * The account's zone, through `set_time_zone` as the user — the call Settings
+ * makes — so it is recorded as chosen and a sign-in's detection leaves it be.
+ */
+async function chooseTimeZone(userId: string, email: string, zone: string): Promise<void> {
+  await asAuthenticatedUser(userId, email, (client) =>
+    client.query('select set_time_zone($1::text, false)', [zone]),
+  );
 }
 
 /**

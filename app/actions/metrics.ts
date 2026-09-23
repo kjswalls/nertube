@@ -12,6 +12,8 @@ import {
 import { GATE_WORDING, readGateField } from "@/lib/packaging";
 import { CHANGED_ELSEWHERE, YoutubeUrlSchema } from "@/lib/video-fields";
 import { requireUser } from "@/lib/supabase/require-user";
+import { startOfDay } from "@/lib/calendar-dates";
+import { readTimeZone } from "@/lib/time-zone-data";
 
 /**
  * The post-publish writes: the first-24-hours numbers, the decision that
@@ -434,14 +436,19 @@ export async function confirmLive(
   );
   if (!saved.ok) return { ok: false, error: saved.error, conflict: saved.conflict };
 
+  // A `date` with no time and no zone becomes the first instant of that day
+  // **in the user's zone** (M10) — their midnight, which is when rule 5 turned
+  // the row Ready and the day `published_at` is then shown on. It was midnight
+  // UTC before, which is the evening before in Los Angeles; the 24-hour
+  // metrics window counts from this instant.
+  const { zone } = await readTimeZone();
+  const publishedAt =
+    video.target_publish_date === null ? null : startOfDay(video.target_publish_date, zone);
+
   const { data: moved, error: moveError } = await supabase.rpc("move_video", {
     p_video: videoId,
     p_stage: published.id,
-    // A `date` with no time and no zone becomes midnight UTC. One user, one
-    // zone; `lib/next-action.ts` makes the same conversion for the same reason.
-    ...(video.target_publish_date === null
-      ? {}
-      : { p_published_at: `${video.target_publish_date}T00:00:00.000Z` }),
+    ...(publishedAt === null ? {} : { p_published_at: new Date(publishedAt).toISOString() }),
   });
 
   if (moveError) {

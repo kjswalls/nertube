@@ -84,7 +84,7 @@ export function BucketSelect({
           [describedBy, empty ? emptyId : null].filter(Boolean).join(" ") ||
           undefined
         }
-        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+        className="w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
       >
         {/* Always first, always available: unfiling is as ordinary a decision
             as filing, and a picker you cannot back out of is one people stop

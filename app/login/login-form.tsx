@@ -1,8 +1,17 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 
 import { signIn, type SignInState } from "@/app/actions/auth";
+
+/** The browser's own zone, or "" when it will not say. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export function LoginForm({ next }: { next: string }) {
   const [state, formAction, pending] = useActionState<SignInState, FormData>(
@@ -10,9 +19,31 @@ export function LoginForm({ next }: { next: string }) {
     null,
   );
 
+  /*
+    The browser's zone rides along with the sign-in (M10), so "today" is the
+    user's day from the first page after it, with no page drawn in UTC first.
+    `signIn` records it only if the account has none yet — a zone chosen in
+    Settings, or recorded from another device, is never replaced.
+
+    Written into the hidden field after hydration and again on submit (React
+    resets a form's uncontrolled fields after an action), never during render:
+    the server cannot know it, so rendering it would not hydrate.
+  */
+  const zoneRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (zoneRef.current) zoneRef.current.value = browserTimeZone();
+  });
+
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form
+      action={formAction}
+      onSubmit={() => {
+        if (zoneRef.current) zoneRef.current.value = browserTimeZone();
+      }}
+      className="flex flex-col gap-4"
+    >
       <input type="hidden" name="next" value={next} />
+      <input ref={zoneRef} type="hidden" name="timeZone" defaultValue="" />
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="email" className="text-[13px] font-medium">

@@ -29,23 +29,44 @@
  * change.** The unit suite runs it under `TZ=America/Los_Angeles` as well as
  * under UTC for exactly that reason (`lib/calendar-dates.test.ts`).
  *
- * ## "Today", and the one honest limitation
+ * ## "Today" is the user's day (M10)
  *
- * `todayColumn(ms)` reads the clock in **UTC**, not in the viewer's zone. That
- * is a decision, not an oversight, and it is recorded in `docs/MILESTONES.md`
- * under M6's "Decisions taken without the user":
+ * A `date` column has no zone, but *today* does: it is whichever square of the
+ * calendar the person looking at it is standing in. So `todayColumn(ms, zone)`
+ * takes the zone as well as the clock, and answers with the calendar day that
+ * instant falls on **in that zone** — turning over at the user's local
+ * midnight, on both sides of a DST change, including in zones whose offset is
+ * not a whole hour (Asia/Kolkata) and zones a day ahead of UTC
+ * (Pacific/Auckland). `lib/calendar-dates.zone.test.ts` pins all of that.
  *
- * - The alternative — the browser's local day — cannot be computed on the
- *   server, so the server render and the hydrated render would disagree about
- *   which cell is today, which React reports as a hydration error and which a
- *   user sees as the highlight jumping.
- * - The app has no timezone setting yet. Settings is M7, and a `profiles.tz`
- *   there is the one-line fix: this function takes the millisecond clock and
- *   nothing else, so the change is confined to its callers.
+ * The zone is the user's, stored per user in `public.profiles` (migration
+ * 0010) so the phone and the laptop agree, and read **once per request** on
+ * the server by `readTimeZone()` in `lib/time-zone-data.ts` — the same
+ * discipline as the clock. The server passes both down; a client component
+ * reads the zone from `useTimeZone()` (`components/time-zone.tsx`), which is
+ * the server's value handed over, and never asks its own browser during
+ * render. That is what keeps the server's HTML and the hydrated render
+ * byte-identical: both format with the same zone string, not with "whatever
+ * zone this machine is in".
  *
- * What it costs: a viewer west of UTC sees "today" advance in the late evening.
- * Nothing *stored* depends on it — a filming day is scheduled by picking a date
- * — so the cost is confined to the "today" ring and the past/upcoming split.
+ * Until a user's zone is known (a session that predates M10, or a browser
+ * whose zone the server's tz database does not know), the zone is `UTC` — the
+ * behaviour of M6–M9 — and the calendar, `/now` and Settings say so.
+ *
+ * Two things stay zoneless on purpose:
+ *
+ * - **Date columns.** Everything below the clock section — parsing, adding
+ *   days, month grids, formatting a `date` — is arithmetic on calendar days and
+ *   uses UTC only as an internal representation. A target date of 3 March is
+ *   3 March in every zone.
+ * - **Durations.** "Days in stage", "waiting 3 days" and "24 hours after
+ *   publish" are elapsed time (`now - then`), not calendar days, so they do not
+ *   depend on the zone and do not call anything here.
+ *
+ * Instants shown as dates (published at, the swap log, a capture date) are
+ * formatted in the user's zone by `formatInstant`, and a date column turned
+ * into an instant (the target date `confirmLive` stamps as `published_at`) is
+ * the user's local midnight, by `startOfDay`.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -155,28 +176,271 @@ function pad(value: number, width: number): string {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Which calendar day `ms` falls on, in UTC. See the note at the top about why
- * it is UTC and what that costs.
+ * A time zone: an IANA name such as `"Europe/London"`, or exactly `"UTC"`.
+ *
+ * Only `canonicalTimeZone` makes one from outside input. A plain string alias
+ * for the reason `DateColumn` is one: every value arrives from the database or
+ * a form as a string, so a brand would be cast on at the boundary.
+ */
+export type TimeZone = string;
+
+/** The zone every "today" used before M10, and the one used until a user's is known. */
+export const UTC: TimeZone = "UTC";
+
+/**
+ * What an IANA name looks like, strictly: an area and one or more parts, or
+ * exactly `UTC`. The database's CHECK on `profiles.time_zone` is the same
+ * expression (migration 0010). It refuses offsets (`+05:30` has no DST, so it
+ * is not a zone), POSIX rules (`EST5EDT`) and tzdata's housekeeping entries.
+ */
+const ZONE_SHAPE = /^(UTC|[A-Z][A-Za-z_-]*(\/[A-Za-z0-9_+-]+)+)$/;
+
+/** The same, before `Intl` has fixed the case: `asia/kolkata` is a zone too. */
+const LOOSE_ZONE_SHAPE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/;
+
+/**
+ * CLDR's canonical names that are not IANA's.
+ *
+ * `Intl` canonicalises a zone to the name CLDR prefers, and for these eighteen
+ * that is the *old* IANA name — Node 22 answers `"Asia/Calcutta"` for
+ * `"Asia/Kolkata"` — while Postgres's catalogue on a current tzdata (Ubuntu
+ * 24.04's, which the harness runs on) only knows the new one, so
+ * `set_time_zone` would refuse what `Intl` just produced. Every name here is
+ * accepted by `Intl` in both spellings, so mapping to the current IANA name
+ * loses nothing on the formatting side. The list is exactly the entries of
+ * Node 22's `Intl.supportedValuesOf("timeZone")` that were missing from
+ * `pg_timezone_names` on the harness (M10); a zone this misses is refused by
+ * the database with a sentence, not stored wrongly.
+ */
+const IANA_NAME: Readonly<Record<string, TimeZone>> = {
+  "Africa/Asmera": "Africa/Asmara",
+  "America/Buenos_Aires": "America/Argentina/Buenos_Aires",
+  "America/Catamarca": "America/Argentina/Catamarca",
+  "America/Cordoba": "America/Argentina/Cordoba",
+  "America/Godthab": "America/Nuuk",
+  "America/Indianapolis": "America/Indiana/Indianapolis",
+  "America/Jujuy": "America/Argentina/Jujuy",
+  "America/Louisville": "America/Kentucky/Louisville",
+  "America/Mendoza": "America/Argentina/Mendoza",
+  "Asia/Calcutta": "Asia/Kolkata",
+  "Asia/Katmandu": "Asia/Kathmandu",
+  "Asia/Rangoon": "Asia/Yangon",
+  "Asia/Saigon": "Asia/Ho_Chi_Minh",
+  "Atlantic/Faeroe": "Atlantic/Faroe",
+  "Europe/Kiev": "Europe/Kyiv",
+  "Pacific/Enderbury": "Pacific/Kanton",
+  "Pacific/Ponape": "Pacific/Pohnpei",
+  "Pacific/Truk": "Pacific/Chuuk",
+};
+
+/** `Intl`'s names for UTC itself, all stored as `UTC`. */
+const UTC_ALIASES = new Set(["UTC", "Etc/UTC", "Etc/GMT", "GMT", "Etc/UCT", "Etc/Universal", "Etc/Zulu"]);
+
+/**
+ * A zone name from outside — a form, a browser's
+ * `Intl.DateTimeFormat().resolvedOptions().timeZone`, a database row — as the
+ * one spelling this application stores and formats with, or `null` when it is
+ * not a zone at all.
+ *
+ * Valid means `Intl` can format with it (so both the server and the browser
+ * can) *and* it has the IANA shape. The database checks the third thing, that
+ * its own tz catalogue knows the name, in `set_time_zone`.
+ */
+export function canonicalTimeZone(value: unknown): TimeZone | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed.length > 64 || !LOOSE_ZONE_SHAPE.test(trimmed)) {
+    return null;
+  }
+  let resolved: string;
+  try {
+    resolved = new Intl.DateTimeFormat("en-US", { timeZone: trimmed }).resolvedOptions()
+      .timeZone;
+  } catch {
+    return null;
+  }
+  if (UTC_ALIASES.has(resolved)) return UTC;
+  const name = IANA_NAME[resolved] ?? resolved;
+  return ZONE_SHAPE.test(name) ? name : null;
+}
+
+/** True when `value` is already the stored spelling of a zone. */
+export function isTimeZone(value: unknown): value is TimeZone {
+  return typeof value === "string" && canonicalTimeZone(value) === value;
+}
+
+/** A wall clock reading: what a clock on the wall in `zone` shows at an instant. */
+interface WallClock {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+  readonly hour: number;
+  readonly minute: number;
+  readonly second: number;
+}
+
+const wallFormatters = new Map<TimeZone, Intl.DateTimeFormat>();
+
+/**
+ * One formatter per zone, cached for the life of the process: constructing an
+ * `Intl.DateTimeFormat` is the expensive part, and a server serves one user's
+ * zone over and over.
+ *
+ * `en-US` with the Gregorian calendar and Latin digits, because the parts are
+ * read as numbers, not shown; `hourCycle: "h23"` because some ICU versions
+ * print midnight as hour 24 under `hour12: false`.
+ */
+function wallFormatter(zone: TimeZone): Intl.DateTimeFormat {
+  const existing = wallFormatters.get(zone);
+  if (existing) return existing;
+  const made = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    calendar: "gregory",
+    numberingSystem: "latn",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hourCycle: "h23",
+  });
+  wallFormatters.set(zone, made);
+  return made;
+}
+
+function wallClock(ms: number, zone: TimeZone): WallClock {
+  const parts: Record<string, number> = {};
+  for (const part of wallFormatter(zone).formatToParts(ms)) {
+    if (part.type !== "literal") parts[part.type] = Number(part.value);
+  }
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: parts.hour === 24 ? 0 : parts.hour,
+    minute: parts.minute,
+    second: parts.second,
+  };
+}
+
+/**
+ * How far `zone`'s clocks are ahead of UTC at the instant `ms`, in ms.
+ * Negative west of Greenwich. Seconds are floored away on both sides, so a
+ * zone with a seconds offset (none since 1972) cannot produce a fraction.
+ */
+function offsetAt(ms: number, zone: TimeZone): number {
+  const wall = wallClock(ms, zone);
+  const asUtc = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
+  return asUtc - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * Which calendar day `ms` falls on in `zone`.
  *
  * The clock is a parameter, never read here: a module that called `Date.now()`
  * itself could not be unit-tested around midnight, and a component that called
  * it during render would produce a different answer on each side of hydration.
- * The server reads the clock once per request and passes the answer down —
- * which is the same discipline `app/c/[slug]/board/page.tsx` already applies to
- * "days in stage".
+ * The zone is a parameter for the same reason — the server reads the clock and
+ * the user's zone once per request and passes both down, which is the same
+ * discipline `app/c/[slug]/board/page.tsx` applies to "days in stage".
+ *
+ * `zone` must be a zone `canonicalTimeZone` accepted; anything else throws
+ * `RangeError` from `Intl`, loudly, rather than quietly answering in UTC.
  */
-export function todayColumn(ms: number): DateColumn {
-  return columnOfStamp(startOfUtcDay(ms));
+export function todayColumn(ms: number, zone: TimeZone): DateColumn {
+  const wall = wallClock(ms, zone);
+  return toDateColumn({ year: wall.year, month: wall.month, day: wall.day });
 }
 
-/** `ms` floored to UTC midnight. */
-function startOfUtcDay(ms: number): number {
-  const date = new Date(ms);
-  return Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-  );
+/**
+ * The first instant of a calendar day in `zone`, as epoch milliseconds —
+ * normally local midnight.
+ *
+ * This is how a zoneless `date` becomes an instant when one is needed:
+ * `confirmLive` stamps `published_at` with the start of the target date, and
+ * "24 hours after publish" is then measured from the user's midnight rather
+ * than from UTC's.
+ *
+ * DST-safe. The offset is looked up twice, because the offset *at* UTC
+ * midnight can differ from the offset at local midnight; and where the clocks
+ * jump forward *at* midnight (so 00:00 does not exist that day) the day starts
+ * at the jump, which is the earliest instant whose local date is `value`.
+ */
+export function startOfDay(value: DateColumn, zone: TimeZone): number | null {
+  const utcMidnight = stampOf(value);
+  if (utcMidnight === null) return null;
+  const first = utcMidnight - offsetAt(utcMidnight, zone);
+  const second = utcMidnight - offsetAt(first, zone);
+  const candidates = [...new Set([first, second])].sort((a, b) => a - b);
+  for (const candidate of candidates) {
+    if (todayColumn(candidate, zone) === value) return candidate;
+  }
+  // Neither guess lands on the day: only possible across a transition larger
+  // than a day (Samoa skipped 30 December 2011). The later guess is the
+  // closest instant that exists.
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * `GMT+13`, `GMT-7`, `GMT+5:30`, `GMT` — how far ahead of UTC `zone` is at
+ * `ms`, in the short form a select option can carry. Taken from `offsetAt`
+ * rather than from `Intl`'s `shortOffset`, whose output differs between ICU
+ * versions (and therefore between Node and a browser).
+ */
+export function offsetLabel(zone: TimeZone, ms: number): string {
+  const minutes = Math.round(offsetAt(ms, zone) / 60_000);
+  if (minutes === 0) return "GMT";
+  const sign = minutes > 0 ? "+" : "-";
+  const hours = Math.floor(Math.abs(minutes) / 60);
+  const rest = Math.abs(minutes) % 60;
+  return `GMT${sign}${hours}${rest === 0 ? "" : `:${pad(rest, 2)}`}`;
+}
+
+/** One `<optgroup>` of the zone picker. */
+export interface TimeZoneGroup {
+  readonly label: string;
+  readonly zones: readonly { readonly value: TimeZone; readonly label: string }[];
+}
+
+/**
+ * Every zone this runtime can format with, as the Settings picker groups
+ * them: UTC first, then by area (Africa, America, …), each named by its city
+ * with its current offset — `Los Angeles (GMT-7)`.
+ *
+ * Built on the **server** and handed to the picker as data, because
+ * `Intl.supportedValuesOf` is a property of the runtime: Node and a browser
+ * list different names, and a list built during a client render would not
+ * hydrate. `ms` is the request's clock, because an offset depends on the date.
+ */
+export function timeZoneGroups(ms: number): TimeZoneGroup[] {
+  const names = new Set<TimeZone>();
+  for (const raw of Intl.supportedValuesOf("timeZone")) {
+    const zone = canonicalTimeZone(raw);
+    if (zone !== null && zone !== UTC) names.add(zone);
+  }
+
+  const groups = new Map<string, { value: TimeZone; label: string }[]>();
+  for (const zone of [...names].sort()) {
+    const [area, ...rest] = zone.split("/");
+    const city = rest[rest.length - 1].replace(/_/g, " ");
+    const region = rest.length > 1 ? ` (${rest.slice(0, -1).join(", ").replace(/_/g, " ")})` : "";
+    const list = groups.get(area) ?? [];
+    list.push({ value: zone, label: `${city}${region} (${offsetLabel(zone, ms)})` });
+    groups.set(area, list);
+  }
+
+  return [
+    { label: "Universal", zones: [{ value: UTC, label: "UTC (GMT)" }] },
+    ...[...groups.entries()].map(([label, zones]) => ({ label, zones })),
+  ];
+}
+
+/** `America/Los_Angeles` → `Los Angeles`, for a sentence that names a zone. */
+export function timeZoneCity(zone: TimeZone): string {
+  if (zone === UTC) return "UTC";
+  const parts = zone.split("/");
+  return parts[parts.length - 1].replace(/_/g, " ");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -346,11 +610,12 @@ export function monthGrid(month: CalendarMonth): GridCell[][] {
  * forty-two of them; one instance per style is the documented way to avoid
  * paying for it per cell.
  *
- * `en-GB` and `timeZone: "UTC"`, fixed, for the same reason every other
- * formatted date in this codebase is (`app/c/[slug]/board/page.tsx`,
- * `components/video-detail/flow-fields.tsx`): the server and the browser must
+ * `en-GB` and `timeZone: "UTC"`, fixed: these format *date columns*, which
+ * have no zone, so UTC here is the neutral representation the arithmetic above
+ * uses and not a claim about where anybody is. The server and the browser must
  * produce byte-identical text or hydration reports it, and the machine's locale
- * is not something either end agrees about.
+ * is not something either end agrees about. Instants — which do depend on the
+ * user's zone — go through `formatInstant` below.
  */
 const FORMATS: Record<string, Intl.DateTimeFormatOptions> = {
   /** `3 Mar` — a cell, a chip, a card. */
@@ -399,6 +664,58 @@ export function formatDateColumn(
 /** `March 2026`, from a month rather than from a day. */
 export function formatMonth(month: CalendarMonth): string {
   return formatterFor("month").format(Date.UTC(month.year, month.month - 1, 1));
+}
+
+/**
+ * The ways an *instant* is shown to the user: `3 Mar 2026`,
+ * `3 Mar 2026, 14:05` (24-hour, the swap log's form) and `14:05`.
+ */
+export type InstantStyle = "date" | "dateTime" | "time";
+
+const INSTANT_FORMATS: Record<InstantStyle, Intl.DateTimeFormatOptions> = {
+  date: { day: "numeric", month: "short", year: "numeric" },
+  dateTime: {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  },
+  time: { hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+};
+
+const instantFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * A timestamp (`published_at`, a swap, a capture, a skip) as the user reads
+ * it: in **their** zone, in `en-GB`.
+ *
+ * Unlike `formatDateColumn`, which formats a zoneless day and so uses UTC as
+ * a neutral representation, this formats an instant, and which day an instant
+ * falls on depends on where you are — a video published at 01:00 UTC on the
+ * 4th went out on the 3rd in Los Angeles. The zone is the server's value
+ * handed down (`useTimeZone()` on the client), never the machine's, so the
+ * server's render and the browser's hydration produce the same string.
+ *
+ * `null` for anything that is not a timestamp, so a caller renders nothing
+ * (or its own fallback) rather than "Invalid Date".
+ */
+export function formatInstant(
+  value: string | number | null | undefined,
+  zone: TimeZone,
+  style: InstantStyle = "date",
+): string | null {
+  if (value === null || value === undefined) return null;
+  const stamp = typeof value === "number" ? value : Date.parse(value);
+  if (Number.isNaN(stamp)) return null;
+  const key = `${style}|${zone}`;
+  let formatter = instantFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", { ...INSTANT_FORMATS[style], timeZone: zone });
+    instantFormatters.set(key, formatter);
+  }
+  return formatter.format(stamp);
 }
 
 /**

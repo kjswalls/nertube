@@ -1,62 +1,79 @@
+import { ScriptEditor } from "@/components/script/script-editor";
+import type { ScriptStructure } from "@/lib/script";
+import { SCRIPT_STRUCTURE_LABEL } from "@/lib/script";
+
 /**
- * The Script section: `videos.script`, as it stands.
+ * The Script section: `videos.script`, its structure and its end-screen
+ * target.
  *
- * ## Where the text comes from, and why there is no editor here
+ * ## Where it is written, and where it is not
  *
- * `move_video` fills this column on a video's **first** entry to a Scripting
- * stage, from `channels.script_template` with the chosen hook spliced into the
- * `{{hook}}` placeholder. That already works — it is M0's plpgsql, exercised by
- * the SQL suite — so by the time this section has anything to show, the
- * structure of the script is there and the hook is verbatim at the top of it.
+ * From Scripting onward it is an editor (`components/script/script-editor.tsx`):
+ * the script as a growing markdown textarea that saves as it is typed, the
+ * structure and the end-screen target beside it, and Reset from template.
  *
- * What is *not* here is a way to write into it. `script` is not in
- * `lib/video-fields.ts`'s patch vocabulary and `updateVideo` has no branch for
- * it, so there is no write path to bind a textarea to. Shipping a textarea over
- * a column that cannot be saved would be the worst version of this section: it
- * would accept a whole evening's work and lose it on the next render, silently.
- * So it shows the column and says plainly that it is not edited here.
+ * Before Scripting it is not, and the reason is BRIEF.md's first principle,
+ * not an unfinished feature: title, thumbnail concept and hook are decided
+ * before the script is written, and the app makes skipping that awkward. The
+ * rule is `scriptIsEditable` in `lib/script.ts`, which `updateVideo` enforces
+ * for the same three columns and the Script tab's lock is drawn from.
  *
- * M9 was the last milestone and built no editor (the README's limits say so,
- * prominently), so the sentence no longer promises one "for now": it says
- * where the script is actually written, and that the copy here is written
- * once — a hook chosen or a template changed afterwards never reaches it,
- * because `move_video` fills the column only while it is null, and PLAN.md's
- * "reset script from template" was not built (M9 review).
+ * `move_video` still writes the first draft: on a video's first entry to
+ * Scripting it copies the channel's template in with the chosen hook where
+ * `{{hook}}` is (only while the column is empty). The editor opens on that.
  *
- * ## Why a `<pre>` and not prose
+ * ## A video that went back
  *
- * The column holds markdown *source* — `## Hook (verbatim)`, `B-roll:` lines,
- * a `Structure:` line. Rendering it as formatted prose would need a markdown
- * renderer, which PLAN.md's dependency ceiling does not allow and which would
- * also hide exactly the scaffolding the template is made of. It is shown as
- * what it is, wrapped, in the tool's own face — this is not the user's prose
- * being read, it is a document being worked on.
+ * A video moved back to Packaging keeps its script. It is shown here as it
+ * stands, in the reading face, and opens for editing again when the video
+ * comes forward — nothing is thrown away by a move in either direction.
+ *
+ * ## Why no rendered markdown
+ *
+ * The column holds markdown *source* — `## Hook (verbatim)`, `B-roll:` lines —
+ * and PLAN.md reads BRIEF.md's "markdown" as markdown text: no renderer, which
+ * would also hide the scaffolding the template is made of.
  */
 export function ScriptSection({
+  videoId,
   script,
-  reachedScripting,
+  structure,
+  endScreenTarget,
+  editable,
   stageName,
   scriptingName,
 }: {
-  /** `videos.script`, or null when the video has never entered Scripting. */
+  videoId: string;
+  /** `videos.script`, or null when nothing has been written. */
   script: string | null;
-  /** Has the video reached a Scripting stage? */
-  reachedScripting: boolean;
-  /** The current stage's name, for the sentence explaining an empty script. */
+  structure: ScriptStructure | null;
+  endScreenTarget: string | null;
+  /** `scriptIsEditable(stage kind)` — the one rule, computed by the page. */
+  editable: boolean;
+  /** The current stage's name, for the sentence explaining why it is closed. */
   stageName: string;
-  /**
-   * What this channel calls its scripting-kind stage. The sentence below
-   * names both the column the video is in and the one it is going to, and
-   * naming the first by its label and the second by the seed's word was one
-   * sentence with two vocabularies (M7's review).
-   */
+  /** What this channel calls its scripting-kind stage. */
   scriptingName: string;
 }) {
-  const text = script?.trim() ?? "";
+  if (editable) {
+    return (
+      <ScriptEditor
+        videoId={videoId}
+        initialScript={script}
+        initialStructure={structure}
+        initialEndScreenTarget={endScreenTarget}
+        scriptingName={scriptingName}
+      />
+    );
+  }
+
+  const text = script ?? "";
+  const hasText = text.trim() !== "";
 
   return (
     <section
       data-testid="script-section"
+      data-editable="false"
       aria-labelledby="script-heading"
       className="flex flex-col gap-3 rounded-card border border-border p-4"
     >
@@ -65,27 +82,39 @@ export function ScriptSection({
           Script
         </h2>
         <p data-testid="script-note" className="text-xs text-muted">
-          Your starting draft: the channel&rsquo;s template with the chosen hook
-          spliced in, written once, when this video first moved into {scriptingName}.{" "}
-          <strong className="font-medium">It is not edited here</strong> — write the
-          script in your own editor, starting from this copy. A hook or template
-          changed after that first move does not reach it.
+          Written from {scriptingName} on — the title, thumbnail concept and hook
+          are decided first.
         </p>
       </div>
 
-      {text === "" ? (
-        <p data-testid="script-empty" className="text-xs text-muted">
-          {reachedScripting
-            ? `This video is past ${scriptingName} and its script column is empty — it was cleared, or it entered the stage before the template existed.`
-            : `Nothing here yet. The script is filled in when this video moves from ${stageName} into ${scriptingName}.`}
-        </p>
+      {hasText ? (
+        <>
+          <p data-testid="script-kept" className="text-xs text-muted">
+            This video is back in {stageName}. Its script is kept exactly as it
+            was, and opens for editing again when the video returns to{" "}
+            {scriptingName}.
+            {structure || endScreenTarget ? (
+              <>
+                {" "}
+                {structure ? `Structure: ${SCRIPT_STRUCTURE_LABEL[structure]}.` : ""}
+                {structure && endScreenTarget ? " " : ""}
+                {endScreenTarget ? `End screen: ${endScreenTarget}.` : ""}
+              </>
+            ) : null}
+          </p>
+          <div
+            data-testid="script-text"
+            className="rounded-input border border-border bg-surface px-4 py-3 font-display text-base leading-relaxed whitespace-pre-wrap break-words"
+          >
+            {text}
+          </div>
+        </>
       ) : (
-        <pre
-          data-testid="script-text"
-          className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-input border border-border bg-surface p-3 font-sans text-sm leading-relaxed"
-        >
-          {text}
-        </pre>
+        <p data-testid="script-empty" className="text-xs text-muted">
+          Nothing here yet. When this video moves from {stageName} into{" "}
+          {scriptingName}, its script starts from the channel&rsquo;s template with
+          the chosen hook written in, and opens here for editing.
+        </p>
       )}
     </section>
   );

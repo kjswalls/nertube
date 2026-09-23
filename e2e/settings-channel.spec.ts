@@ -16,6 +16,7 @@ import {
   PG,
   SEED_EMAIL,
   SEED_PASSWORD,
+  SEED_TIME_ZONE,
 } from '../scripts/dev-stack/shared';
 
 const ANON_KEY = apiKey('anon', API_KEY_IAT, API_KEY_EXP);
@@ -263,10 +264,14 @@ async function readChannel(): Promise<ChannelRow> {
 
 /** A date in the current month, so it counts towards this month's quota. */
 function midMonth(): string {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15))
-    .toISOString()
-    .slice(0, 10);
+  // This month where the seed account is (M10), read with `Intl` directly.
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SEED_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  return `${today.slice(0, 7)}-15`;
 }
 
 /* -------------------------------------------------------------------------- */

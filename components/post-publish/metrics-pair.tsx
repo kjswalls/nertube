@@ -162,7 +162,7 @@ export function MetricsPair({
       // type below `md` (anything smaller and iOS zooms the page on focus) and
       // a 44px target wherever a thumb is likely.
       "rounded-input border border-border bg-background px-2 py-1 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
-    : "rounded-input border border-border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    : "rounded-input border border-border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11";
   const labelClass = compact
     ? "text-[11px] text-muted"
     : "text-xs font-medium text-muted";
@@ -173,6 +173,30 @@ export function MetricsPair({
       submit();
     }
   }
+
+  /*
+    Where the save goes (M10). Without the note — `/now`'s compact row — it
+    ends the row of numbers, as it always did. With the note it comes after
+    the note, at every width: the Publish tab used to put it between the
+    numbers and "New viewers", so reading top to bottom logged the numbers
+    before the note was seen (M9's phone walk found it; on a desktop the note
+    was merely beside the point of the button rather than under the fold).
+  */
+  const saveButton = (
+    <button
+      type="button"
+      data-testid="metrics-save"
+      onClick={submit}
+      className={[
+        "rounded-button border border-border outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent",
+        compact
+          ? "px-2 py-1 text-[12px] thumb:min-h-11 thumb:px-3 thumb:text-sm"
+          : "px-3 py-2 text-sm thumb:min-h-11",
+      ].join(" ")}
+    >
+      {submitLabel}
+    </button>
+  );
 
   return (
     <fieldset
@@ -257,19 +281,7 @@ export function MetricsPair({
           </div>
         ) : null}
 
-        <button
-          type="button"
-          data-testid="metrics-save"
-          onClick={submit}
-          className={[
-            "rounded-button border border-border outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent",
-            compact
-              ? "px-2 py-1 text-[12px] thumb:min-h-11 thumb:px-3 thumb:text-sm"
-              : "px-3 py-2 text-sm",
-          ].join(" ")}
-        >
-          {submitLabel}
-        </button>
+        {withNote ? null : saveButton}
       </div>
 
       {withNote ? (
@@ -291,6 +303,8 @@ export function MetricsPair({
           />
         </div>
       ) : null}
+
+      {withNote ? <div>{saveButton}</div> : null}
 
       {error ? (
         <p

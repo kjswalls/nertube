@@ -45,28 +45,36 @@ function video(input: Partial<MatrixVideo> & { id: string }): MatrixVideo {
 
 describe("monthWindow", () => {
   it("is the calendar month the instant falls in, in UTC", () => {
-    const month = monthWindow(Date.UTC(2026, 8, 18, 11, 30));
+    const month = monthWindow(Date.UTC(2026, 8, 18, 11, 30), "UTC");
     expect(month.start).toBe("2026-09-01");
     expect(month.next).toBe("2026-10-01");
     expect(month.label).toBe("September 2026");
   });
 
   it("rolls the year over in December rather than producing month 13", () => {
-    const month = monthWindow(Date.UTC(2026, 11, 31, 23, 59));
+    const month = monthWindow(Date.UTC(2026, 11, 31, 23, 59), "UTC");
     expect(month.start).toBe("2026-12-01");
     expect(month.next).toBe("2027-01-01");
     expect(month.label).toBe("December 2026");
   });
 
+  it("is the user's month, not UTC's, at a month end (M10)", () => {
+    // 20:00 UTC on 30 September: already 1 October in Auckland.
+    const instant = Date.UTC(2026, 8, 30, 20, 0);
+    expect(monthWindow(instant, "Pacific/Auckland").start).toBe("2026-10-01");
+    expect(monthWindow(instant, "America/Los_Angeles").start).toBe("2026-09-01");
+    expect(monthWindow(instant, "UTC").start).toBe("2026-09-01");
+  });
+
   it("zero-pads, so the strings still sort as dates", () => {
-    const month = monthWindow(Date.UTC(2026, 0, 5));
+    const month = monthWindow(Date.UTC(2026, 0, 5), "UTC");
     expect(month.start).toBe("2026-01-01");
     expect(month.next).toBe("2026-02-01");
   });
 });
 
 describe("inMonth", () => {
-  const month = monthWindow(Date.UTC(2026, 8, 18));
+  const month = monthWindow(Date.UTC(2026, 8, 18), "UTC");
 
   it("includes both ends of the month", () => {
     expect(inMonth("2026-09-01", month)).toBe(true);
@@ -89,7 +97,7 @@ describe("buildTally", () => {
     bucket("h1", "tutorial", 1),
     bucket("h2", "review", 2, 2),
   ];
-  const month = monthWindow(Date.UTC(2026, 8, 18));
+  const month = monthWindow(Date.UTC(2026, 8, 18), "UTC");
 
   it("counts a cell, and says how many of it have been published", () => {
     const tally = buildTally({

@@ -97,7 +97,7 @@ export interface FilmingDaySummary {
  * The day, in one sentence and six numbers.
  *
  * `today` is passed in rather than read: the server computes it once per
- * request (`todayColumn(Date.now())`) so the summary is identical on both sides
+ * request (`todayColumn(Date.now(), zone)`, in the user's zone) so the summary is identical on both sides
  * of hydration, and the unit suite can stand on either side of midnight.
  */
 export function summarise(

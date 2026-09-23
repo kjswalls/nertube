@@ -67,6 +67,7 @@ export function FilingBlock({
 }) {
   return (
     <section
+      id="video-filing"
       data-testid="filing-block"
       aria-labelledby="filing-heading"
       className="flex flex-col gap-4 border-t border-border pt-6"

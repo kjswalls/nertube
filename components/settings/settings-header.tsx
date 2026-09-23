@@ -28,8 +28,12 @@ export function SettingsHeader({
   children,
 }: {
   section: SettingsSection;
-  channel: { readonly id: string; readonly name: string; readonly slug: string };
-  channels: readonly { id: string; name: string; slug: string }[];
+  /**
+   * The channel this screen is about. Absent on the account page (M10), which
+   * is about the user, so it has no switch and names no channel.
+   */
+  channel?: { readonly id: string; readonly name: string; readonly slug: string };
+  channels?: readonly { id: string; name: string; slug: string }[];
   /** The sentence or two under the heading: what this screen changes, and where. */
   children?: ReactNode;
 }) {
@@ -41,17 +45,21 @@ export function SettingsHeader({
         Settings
       </p>
 
-      <SettingsNav current={section} slug={channel.slug} />
+      <SettingsNav current={section} slug={channel?.slug} />
 
-      <ChannelSwitch channels={channels} currentSlug={channel.slug} section={section} />
+      {channel && channels ? (
+        <ChannelSwitch channels={channels} currentSlug={channel.slug} section={section} />
+      ) : null}
 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="font-display text-[22px] leading-tight font-semibold tracking-tight">
           {meta.title}
         </h1>
-        <p data-testid="settings-channel-name" className="text-[12px] text-muted">
-          {channel.name}
-        </p>
+        {channel ? (
+          <p data-testid="settings-channel-name" className="text-[12px] text-muted">
+            {channel.name}
+          </p>
+        ) : null}
       </div>
 
       {children ? (

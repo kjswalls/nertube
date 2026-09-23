@@ -12,6 +12,8 @@ import {
 } from "@/app/actions/metrics";
 import { SaveStatus, useSaveQueue, type SaveState } from "@/components/autosave";
 import { useVideoVersion } from "@/components/video-version";
+import { useTimeZone } from "@/components/time-zone";
+import { formatInstant, type TimeZone } from "@/lib/calendar-dates";
 import type { ThumbnailRole } from "@/lib/storage";
 import type { Expectation } from "@/lib/metrics";
 import type { StageKind } from "@/lib/defaults";
@@ -112,6 +114,7 @@ type PostPublishPatch =
 export function PostPublishBlock(props: PostPublishProps) {
   const router = useRouter();
   const version = useVideoVersion();
+  const zone = useTimeZone();
 
   /*
     The server render is authoritative; what is kept is only the delta a write
@@ -147,16 +150,16 @@ export function PostPublishBlock(props: PostPublishProps) {
 
   /*
     Both stamps are formatted here rather than handed down from the server,
-    because `formatStamp` is deterministic: a fixed locale and UTC, so this
-    component's server render and its browser render produce the same string
+    because `formatStamp` is deterministic: a fixed locale and the zone the
+    server read (M10), so this component's server render and its browser render produce the same string
     for the same input, and so does a stamp that arrives from a write a moment
     later. (The page still formats `published_at` and the target date itself —
     those strings are used outside this block too.)
   */
   const dismissedLabel =
-    swapDismissedAt === null ? null : formatStamp(swapDismissedAt);
+    swapDismissedAt === null ? null : formatStamp(swapDismissedAt, zone);
   const loggedLabel =
-    metricsLoggedAt === null ? null : formatStamp(metricsLoggedAt);
+    metricsLoggedAt === null ? null : formatStamp(metricsLoggedAt, zone);
 
   /*
     Which sub-block the queue's current state belongs to.
@@ -410,17 +413,10 @@ export function PostPublishBlock(props: PostPublishProps) {
 }
 
 /**
- * A timestamp as a date, in UTC with a fixed locale — the same formatting the
- * server render uses, so a label recomputed after a write reads identically to
- * one that came down with the page.
+ * A timestamp as a date in the user's zone (M10) — the same formatter and the
+ * same zone the server render used, so a label recomputed after a write reads
+ * identically to one that came down with the page.
  */
-function formatStamp(value: string): string {
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return value;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+function formatStamp(value: string, zone: TimeZone): string {
+  return formatInstant(value, zone) ?? value;
 }

@@ -2,7 +2,7 @@ import {
   isDateColumn,
   monthKey,
   parseMonthKey,
-  todayColumn,
+  type DateColumn,
 } from "@/lib/calendar-dates";
 
 /**
@@ -29,20 +29,20 @@ export function calendarHref({
 }
 
 /**
- * `?month=` → the month to draw, falling back to the month containing `now`.
+ * `?month=` → the month to draw, falling back to the month containing `today`.
  *
  * A typo in a pasted link lands on this month rather than on a 404: there is
  * nothing at `/calendar` that can be "not found", and a calendar is the most
  * link-pasted page in a product like this.
  */
-export function monthFromQuery(value: string | undefined, now: number): string {
+export function monthFromQuery(value: string | undefined, today: DateColumn): string {
   const parsed = parseMonthKey(value);
   if (parsed !== null) return monthKey(parsed);
-  // The fallback goes through the same helper as everything else: the clock
-  // becomes a calendar day once, in `todayColumn`, and the month is that day's
-  // month. Slicing an ISO string here would be a second interpretation of
-  // "which month is it", which is the one thing this milestone must not grow.
-  const current = parseMonthKey(todayColumn(now));
+  // The fallback is the month of the page's one `today` — the clock turned into
+  // a calendar day once, in the user's zone, by `todayColumn` (M10: it used to
+  // take the clock and compute its own UTC day here). Slicing an ISO string
+  // would be a second interpretation of "which month is it".
+  const current = parseMonthKey(today);
   return current === null ? "1970-01" : monthKey(current);
 }
 

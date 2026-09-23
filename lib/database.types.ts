@@ -346,6 +346,37 @@ export type Database = {
           },
         ];
       };
+      /**
+       * 0010. One row per user: the zone "today" is computed in. Readable by
+       * its owner; written only by `set_time_zone()`.
+       */
+      profiles: {
+        Row: {
+          id: string;
+          user_id: string;
+          created_at: string;
+          updated_at: string;
+          time_zone: string;
+          time_zone_source: "detected" | "chosen";
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          created_at?: string;
+          updated_at?: string;
+          time_zone: string;
+          time_zone_source: "detected" | "chosen";
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          created_at?: string;
+          updated_at?: string;
+          time_zone?: string;
+          time_zone_source?: "detected" | "chosen";
+        };
+        Relationships: [];
+      };
       thumbnail_swaps: {
         Row: {
           id: string;
@@ -578,6 +609,15 @@ export type Database = {
       merge_brainstorm_entry: {
         Args: { p_video: string; p_kind: string; p_entry: Json };
         Returns: boolean;
+      };
+      /**
+       * 0010. Records the user's zone. `p_detected` never overwrites an
+       * existing row; a choice always does. Refuses (22023) a name the
+       * database's tz catalogue does not know.
+       */
+      set_time_zone: {
+        Args: { p_zone: string; p_detected?: boolean };
+        Returns: Database["public"]["Tables"]["profiles"]["Row"];
       };
     };
     Enums: { [_ in never]: never };

@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import { parseDateColumn } from "./calendar-dates";
+import {
+  MAX_END_SCREEN_TARGET_LENGTH,
+  MAX_SCRIPT_LENGTH,
+  SCRIPT_STRUCTURES,
+  scriptForColumn,
+} from "./script";
 import { cleanProse } from "./text";
 import {
   HookListSchema,
@@ -290,6 +296,45 @@ export const PackagingSkipSchema = z.union([
 ]);
 
 /* -------------------------------------------------------------------------- */
+/* The script                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `videos.script`: the Script tab's editor, which saves while it is typed in.
+ *
+ * Not trimmed — see `scriptForColumn` in `lib/script.ts` for why a document
+ * keeps its trailing newline when every other field on the page loses it.
+ * Blank is `null`, like everywhere else.
+ */
+export const ScriptSchema = z
+  .union([z.string(), z.null()])
+  .transform(scriptForColumn)
+  .refine((value) => value === null || value.length <= MAX_SCRIPT_LENGTH, {
+    message: `The script is capped at ${MAX_SCRIPT_LENGTH.toLocaleString("en-US")} characters — hours of reading aloud. This is longer, so it was not saved; it is all still in the box.`,
+  });
+
+/**
+ * `videos.script_structure`: one of the three BRIEF.md names, or not chosen.
+ *
+ * `""` is what an unset `<select>` posts, and means `null`, the same as the
+ * bucket slots. The CHECK in `0001_init.sql` holds the same three values.
+ */
+export const ScriptStructureSchema = z
+  .union([z.enum(SCRIPT_STRUCTURES, "That is not one of the three structures."), z.literal(""), z.null()])
+  .transform((value) => (value === "" ? null : value));
+
+/** `videos.end_screen_target`: the specific video the end screen points at. */
+export const EndScreenTargetSchema = NullableText.refine(
+  (value) => value === null || value.length <= MAX_END_SCREEN_TARGET_LENGTH,
+  {
+    message: `Keep the end-screen target to ${MAX_END_SCREEN_TARGET_LENGTH} characters — the name of one video, not a note.`,
+  },
+);
+
+/** The three keys the Script tab writes. `updateVideo` checks the stage for them. */
+export const SCRIPT_PATCH_KEYS = ["script", "scriptStructure", "endScreenTarget"] as const;
+
+/* -------------------------------------------------------------------------- */
 /* The patch                                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -323,6 +368,13 @@ const FIELDS = {
    * already end in `.is("archived_at", null)`.
    */
   archived: z.boolean().optional(),
+  /**
+   * The Script tab (M10). Written from Scripting onward only — `updateVideo`
+   * refuses them on a video that has not got there (`scriptIsEditable`).
+   */
+  script: ScriptSchema.optional(),
+  scriptStructure: ScriptStructureSchema.optional(),
+  endScreenTarget: EndScreenTargetSchema.optional(),
 } as const;
 
 /** The keys a caller may send. Used to check that a patch is not empty. */

@@ -242,7 +242,7 @@ export function VideoFilmingDay({
           disabled={busy}
           value={current ?? ""}
           onChange={(event) => choose(event.target.value)}
-          className="min-w-52 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+          className="min-w-52 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 thumb:min-h-11"
         >
           <option value="">Not on a filming day</option>
           {known.map((day) => (
@@ -256,7 +256,7 @@ export function VideoFilmingDay({
           <Link
             href={calendarLinkTo(currentDay.onDate)}
             data-testid="filming-day-open"
-            className="rounded-button px-2 py-1 text-[12px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button px-2 py-1 text-[12px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             See the day
           </Link>
@@ -284,7 +284,7 @@ export function VideoFilmingDay({
             data-testid="new-filming-day-save"
             disabled={busy}
             onClick={scheduleNew}
-            className="rounded-button bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+            className="rounded-button bg-foreground px-3 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 thumb:min-h-11"
           >
             Schedule and attach
           </button>
@@ -292,7 +292,7 @@ export function VideoFilmingDay({
             type="button"
             disabled={busy}
             onClick={() => setCreating(false)}
-            className="rounded-button px-2 py-2 text-[13px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button px-2 py-2 text-[13px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             Cancel
           </button>
@@ -303,7 +303,7 @@ export function VideoFilmingDay({
           data-testid="new-filming-day"
           disabled={busy}
           onClick={() => setCreating(true)}
-          className="self-start rounded-button px-1 py-1 text-[12px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          className="self-start rounded-button px-1 py-1 text-[12px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
         >
           Schedule a new day…
         </button>

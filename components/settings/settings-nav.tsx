@@ -1,7 +1,9 @@
 import Link from "next/link";
 
 /**
- * The four settings screens, as one row of links, for one channel.
+ * The settings screens, as one row of links: four for one channel, and the
+ * user's own time zone (M10), which belongs to the account rather than to any
+ * channel and so has one address with no slug (`/settings/account`).
  *
  * Settings is one area with four pages — stages, checklist templates,
  * buckets and the channel's own fields — because BRIEF.md makes every one of
@@ -24,13 +26,21 @@ export const SETTINGS_SECTIONS = [
   },
   { key: "buckets", label: "Buckets", title: "Buckets", path: "/settings/buckets" },
   { key: "channel", label: "Channel", title: "Channel", path: "/settings/channel" },
+  { key: "account", label: "Time zone", title: "Time zone", path: "/settings/account" },
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["key"];
 
-/** The one place a settings address is spelled. */
-export function settingsPath(section: SettingsSection, slug: string): string {
+/** The per-user section: not about a channel, so its address has no slug. */
+export const ACCOUNT_SECTION = "account" satisfies SettingsSection;
+
+/**
+ * The one place a settings address is spelled. With no slug, a channel
+ * section's bare path, which redirects to the first channel's page.
+ */
+export function settingsPath(section: SettingsSection, slug?: string): string {
   const meta = SETTINGS_SECTIONS.find((candidate) => candidate.key === section)!;
+  if (section === ACCOUNT_SECTION || slug === undefined) return meta.path;
   return `${meta.path}/${encodeURIComponent(slug)}`;
 }
 
@@ -39,7 +49,8 @@ export function SettingsNav({
   slug,
 }: {
   current: SettingsSection;
-  slug: string;
+  /** The channel the channel sections open on; none on the account page. */
+  slug?: string;
 }) {
   return (
     <nav
@@ -57,7 +68,7 @@ export function SettingsNav({
             data-testid="settings-nav-link"
             data-section={section.key}
             className={[
-              "rounded-button px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+              "rounded-button px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center thumb:px-3 thumb:text-[14px]",
               isCurrent
                 ? "bg-surface font-medium text-foreground shadow-[inset_0_0_0_1px_var(--hairline)]"
                 : "text-muted hover:text-foreground",

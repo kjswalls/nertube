@@ -8,7 +8,8 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { startOfDay, todayColumn } from '../lib/calendar-dates';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 import { makePng } from './png';
 
 /**
@@ -201,7 +202,8 @@ async function capture(title: string): Promise<string> {
  */
 async function scheduledForToday(title: string): Promise<{ id: string; target: string }> {
   const id = await capture(title);
-  const target = new Date().toISOString().slice(0, 10);
+  // Today in the seed account's zone (M10), which is what `/now` counts from.
+  const target = todayColumn(Date.now(), SEED_TIME_ZONE);
 
   await db.query(
     `update public.videos
@@ -433,7 +435,11 @@ test('the Thursday scenario: live, logged, under the bar, swapped with a reason'
   // ticked: `published_at + 24h` is what the metrics prompt counts from, so the
   // whole post-publish loop is a day late if this is wrong.
   expect(live.published_at).not.toBeNull();
-  expect(new Date(live.published_at as string).toISOString().slice(0, 10)).toBe(target);
+  // The first instant of that day in the account's zone (M10: the user's
+  // midnight, which is midnight UTC for this account).
+  expect(new Date(live.published_at as string).getTime()).toBe(
+    startOfDay(target, SEED_TIME_ZONE),
+  );
 
   // Live, nothing written down: step 0 of BRIEF.md principle 8's two.
   await expectTabMark(page, 'publish', '0/2');

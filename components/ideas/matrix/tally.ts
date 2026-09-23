@@ -26,6 +26,7 @@ import {
   monthOf,
   shiftMonth,
   todayColumn,
+  type TimeZone,
 } from "@/lib/calendar-dates";
 
 /* -------------------------------------------------------------------------- */
@@ -36,7 +37,7 @@ import {
  * The half-open window `[start, next)` over `YYYY-MM-DD` strings, plus a label
  * for the heading.
  *
- * ## Why strings, and why UTC
+ * ## Why strings, and whose month
  *
  * `videos.target_publish_date` is a Postgres `date`: a calendar day with no
  * time and no zone, which supabase-js hands back as `"2026-09-30"`. Parsing it
@@ -46,9 +47,10 @@ import {
  * Greenwich. Comparing the strings lexicographically is exact, because
  * zero-padded ISO dates sort as dates.
  *
- * UTC is then the one arbitrary choice left, and it is the same one the board
- * already makes when it formats a target date (`timeZone: "UTC"`), so the
- * matrix and the card cannot disagree about which month a date is in.
+ * Which month *this* month is depends on where the user is: at 20:00 UTC on
+ * the 30th it is already the 1st in Auckland. So the window is the month of
+ * `todayColumn(now, zone)` in the user's zone (M10; it was the UTC month
+ * before), the same "today" the calendar and the board use.
  */
 export interface MonthWindow {
   /** First day of the month, inclusive: `YYYY-MM-01`. */
@@ -59,14 +61,14 @@ export interface MonthWindow {
   readonly label: string;
 }
 
-export function monthWindow(now: number): MonthWindow {
+export function monthWindow(now: number, zone: TimeZone): MonthWindow {
   // M6 note: this used to do its own `getUTC*` arithmetic and its own
   // zero-padding, which made it the *second* interpretation of a date column in
   // the codebase — correct, but independently correct, which is the state that
   // decays. `lib/calendar-dates.ts` is the one interpretation now, and the
   // month boundary M5's reviewers attacked is the helper's `shiftMonth`, tested
   // there against year ends, leap Februaries and both clock-change months.
-  const month = monthOf(todayColumn(now));
+  const month = monthOf(todayColumn(now, zone));
 
   // `todayColumn` cannot produce a day that `monthOf` rejects; the branch is
   // here because the types say it can, and a matrix that renders the epoch is

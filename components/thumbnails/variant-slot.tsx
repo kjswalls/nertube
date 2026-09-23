@@ -239,7 +239,7 @@ export function VariantSlot({
           aria-label={live ? undefined : `Ship the ${label.toLowerCase()}`}
           disabled={busy !== null || live}
           onClick={(event) => onShip(event.currentTarget)}
-          className="rounded-button border border-border bg-background px-2.5 py-1.5 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-button border border-border bg-background px-2.5 py-1.5 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 thumb:min-h-11"
         >
           {live ? "Shipped" : "Ship this one"}
         </button>
@@ -250,7 +250,7 @@ export function VariantSlot({
             data-testid="variant-remove"
             disabled={busy !== null}
             onClick={onRemove}
-            className="rounded-button px-2 py-1.5 text-xs text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-button px-2 py-1.5 text-xs text-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60 thumb:min-h-11"
           >
             Remove
           </button>

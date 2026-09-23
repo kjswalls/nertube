@@ -9470,3 +9470,353 @@ user created the hosted Supabase and Vercel projects on 17 September, and all
 nine migrations are applied to the hosted database, which runs Postgres 17.6.
 `package.json` is unchanged since M8, so M9 added no runtime dependency. It also
 added no migration.
+
+## M10 — The script, editable in the app
+
+The user's second request after reviewing M5–M9: the script editable in the
+app, with a reset from the template. It closes the two README limits "The
+script cannot be edited in the app" and "The script is written once, and
+nothing rewrites it" (both removed in this change), PLAN.md's review item 19
+("reset script from template" on detail), which M9 left unbuilt as a
+decision, and M3's note that "the field and its save path should arrive
+together" — they arrive together here.
+
+### What was built
+
+- **The patch vocabulary** (`lib/video-fields.ts`) gains `script`,
+  `scriptStructure` and `endScreenTarget`. The script is **not trimmed**
+  (`scriptForColumn` in the new `lib/script.ts`): it saves mid-sentence, and a
+  trim would remove the newline just typed and, via the server's answer, jump
+  the caret. Blank (nothing that draws) is `NULL`, as everywhere else, and
+  U+0000 is removed. `MAX_SCRIPT_LENGTH` is 100,000 characters — a
+  twenty-minute script is about 18,000 — and a longer one is refused with the
+  text left in the box. Structure is the CHECK's three values or `''`/`null`;
+  the end-screen target is `NullableText`, capped at 300. A unit test reads the
+  CHECK out of `0001_init.sql` and compares it with `SCRIPT_STRUCTURES`.
+- **`updateVideo`** writes the three columns and reads them back with every
+  other column (`VideoState` now carries them). A patch that touches any of
+  them is refused before Scripting (below) with a sentence naming the stage.
+- **The editor** (`components/script/script-editor.tsx`): a plain textarea in
+  Newsreader at 16px with a relaxed line height, that grows with its text
+  (an invisible copy of the text in the same grid cell sets the height — no
+  measuring in JavaScript, which collapses the box for a frame and jumps the
+  page; `field-sizing: content` is not in Safari or Firefox), never shorter
+  than most of a screen (`svh`, so the phone keyboard does not resize it
+  mid-sentence), with no scrollbar of its own. Structure (a select) and "End
+  screen points at" (a text field) sit in a row above it. A sticky toolbar —
+  under the 57px phone bar below `md`, at the top of the window above it —
+  holds the heading, a word count in the mono face, the one save line and
+  Reset, so the save state is never a scroll away from the line being typed.
+- **Saving.** One `useSaveQueue` for all three fields (three queues would put
+  two writes with the same version precondition on the wire, and this page
+  would refuse its own second save as "changed somewhere else"). The draft is
+  diffed against what the row will hold once everything on the wire lands,
+  the packaging block's pattern. The script saves after a 1.2-second pause in
+  typing, on blur, and on leaving the page; structure saves on change; the
+  end-screen field on blur and Enter. The version check is the page's one
+  token (`components/video-version.tsx`), so a second tab is refused with the
+  existing `CHANGED_ELSEWHERE` line and a Reload, and what it typed stays in
+  its box. A failed save keeps the text and offers Retry (the queue's own).
+- **Leaving with unsaved text.** The two guards `useAutosave` has had since
+  M7 — flush on unmount, ask on `beforeunload` — were extracted from it into
+  `useUnsavedGuard` in `components/autosave.tsx` and `useAutosave` now calls
+  that, unchanged in behaviour. The editor calls the same hook. One mechanism,
+  now reachable by an editor that owns several fields on one queue.
+- **Reset from template.** `scriptFromTemplate(videoId)` in
+  `app/actions/videos.ts` reads the channel's current template and the
+  video's hooks *as stored* and returns what `move_video` would write, built by
+  `buildScriptFromTemplate` (`lib/script.ts`). The button asks first in the
+  one modal (`components/script/reset-dialog.tsx`), saying how many words are
+  about to be replaced, which channel's template replaces them, and what goes
+  where `{{hook}}` is: the chosen hook verbatim, "no hook is chosen, so the
+  Hook section will be empty", or "the template has no `{{hook}}`". Focus
+  starts on "Keep my script". On yes, the text goes into the box and saves
+  like a keystroke; the line under the toolbar says "Replaced with the
+  template." with **Undo** beside it (the accepted-concept notice's shape),
+  which sends the previous text back the same way. A script that is empty is
+  simply started, with no question (nothing to replace); one that already
+  matches says so and changes nothing.
+- **The Script tab and its copy.** Locked before Scripting, with the reason
+  ("Written from Scripting on — title, thumbnail concept and hook come
+  first"); a tick when the script has text; quiet when empty ("Reset from
+  template starts one"). The read-only view before Scripting says what will
+  happen on the way in; a video moved back to Packaging shows its kept script
+  in the reading face and says it opens again when the video returns. The
+  M3–M9 sentences ("It is not edited here", "write the script in your own
+  editor", "written once") are gone from the app; `e2e/script-editor.spec.ts`
+  asserts two of them are absent. The channel settings' template note now
+  names Reset.
+
+### Decisions taken without the user
+
+1. **The script is editable from Scripting onward, not in every stage.**
+   BRIEF.md's first principle is that title, thumbnail concept and hook come
+   *before* the script, and that skipping that is structurally awkward. A
+   script box on an idea would be a way round the gate with no reason typed
+   and no badge. The deliberate way to script early still exists: skip the
+   gate with a reason and move into Scripting. It stays editable after
+   Scripting (scripts are revised while filming and cut in the edit). A video
+   moved back keeps its text read-only. *Alternative:* editable everywhere,
+   like the Thumbnails slots (M9 review made those quiet rather than locked);
+   rejected because the thumbnail files have no principle saying "not
+   before", and the script does. The rule is `scriptIsEditable` in
+   `lib/script.ts`; the tab uses `reached()`, and `sections.test.ts` pins the
+   two together for every kind and the inert stage.
+2. **A video in a user-added (inert) stage can be scripted.** Such a stage has
+   no place in the core order, the section tabs already treat that as "open,
+   say nothing", and locking a script someone may be halfway through on a
+   guess would be worse. Recorded in the README.
+3. **The rule is enforced by `updateVideo`, not by the database.** The three
+   columns have been in the client's UPDATE grant since `0001_init.sql`
+   (line ~337), so a hand-made PostgREST PATCH with a session token could
+   still write a script on an idea. Revoking them would need a migration and
+   a security-definer writer, and 0010 belongs to the timezone slice running
+   alongside this one; the stage rule is a product rule about when to write,
+   not an invariant like the gate, whose enforcement stays in `move_video`.
+   *If wrong:* revoke the three columns and add `set_video_script(p_video,
+   p_expected_updated_at, …)` that checks the stage kind.
+4. **Reset is a read plus an ordinary save, not a write action.** A reset
+   that wrote the column itself would be a second write path racing the
+   editor's queue: a save still on the wire would land after it, or be
+   refused by this page's own version token. So the action answers "what
+   would the template give me?" and the editor writes it. The one write path
+   into `script` is `updateVideo`, with its version check, and Undo is the
+   same save with the old text.
+5. **The template build has two implementations, proved to agree.** The SQL
+   in `move_video` (`0005_checklist_seeded_stages.sql`, from `0001`) stays the
+   source for the first draft; `buildScriptFromTemplate` mirrors it — every
+   occurrence replaced, the replacement taken literally, the *first* chosen
+   hook in array order, `chosen` read with Postgres' boolean rules through the
+   existing `readHooks`, and `''` when none is chosen. Making SQL the one
+   implementation would have meant redefining `move_video` in a migration;
+   see 3. The proof is `e2e/script-editor.spec.ts`: `move_video` writes the
+   script against the real Postgres, the person replaces it, Reset puts back
+   a text compared **byte for byte** with what the SQL wrote, on a hook
+   (`Make $$$ from $& … $1`) chosen to break `String.replaceAll`. The unit
+   tests pin the cases a browser reaches slowly (two chosen hooks, `"y"`,
+   non-object entries, no placeholder). The one known divergence is on data
+   this app never writes: a hook whose `text` is a JSON number.
+6. **Undo lasts until the page is left**, held in memory — the minimum the
+   task set, and the concept assist's precedent. Not stored: the app keeps no
+   history of any field.
+7. **Save after a 1.2-second pause.** The rest of the page saves on blur, but
+   a script is an evening in one box that may never blur. Keystroke saves
+   would put hundreds of rows of nonsense through `updated_at`; a pause is
+   one save per sentence or so.
+8. **The script is not trimmed and the box never adopts the server's copy.**
+   Every other field shows what the server stored after a save; this one
+   compares stored forms instead, so a box and a column that differ only by
+   a trailing blank line are not "unsaved".
+9. **No `maxLength` on the textarea.** The browser truncates a paste over a
+   `maxLength` silently, which is the one outcome this editor must not have.
+   The server refuses an over-long script and the text stays in the box.
+10. **One word on the phone's Reset button.** Below 640px the button reads
+    "Reset" (the accessible name is still "Reset from template"), so the
+    toolbar is one row and the keyboard leaves the script more room.
+
+### Deviations from PLAN.md
+
+- PLAN.md review item 19 is now built, as "Reset from template" on the Script
+  tab — with a confirmation and an Undo that the plan did not specify.
+- PLAN.md puts `script_structure` on the detail page as a "note field"; it is
+  a select of the CHECK's three values, because the column cannot hold
+  anything else.
+
+### What is still true, and in the README
+
+- Reset's Undo does not survive leaving the page.
+- A script save is a whole-page server refresh (`revalidatePath`, as for every
+  other field on the page). Skipping it for script-only saves was considered
+  and rejected: the client router cache would then restore a stale script
+  prop and a stale version token on Back, and the first save after it would
+  be refused as a conflict.
+- The phone measurements are Chromium at 390×844 and 390×420 (the keyboard
+  stand-in), with `hasTouch`/`isMobile`. iOS Safari's visual-viewport
+  behaviour under the keyboard, and whether the sticky toolbar stays in sight
+  there, has not been seen.
+- `docs/OVERNIGHT.md` still says the script is read-only. It is the dated
+  summary of the M5–M9 run and was left as a record.
+
+### Verification
+
+The timezone slice was being built in the same working tree at the same time,
+and its half-finished state did not typecheck, so this slice was verified on
+an isolated copy: `git archive HEAD` plus only this slice's files (and only
+its three hunks of `app/videos/[id]/page.tsx`), with its own stack ports, dev
+database and SQL-test database (`DEV_STACK_PORT=54351`,
+`DEV_STACK_POSTGREST_PORT=54352`, `NERTUBE_DEV_DB=nertube_e2e_script`,
+`NERTUBE_TEST_DB=nertube_test_script`, `E2E_PORT=3131`, `E2E_REUSE=0`).
+The first full run did not start: the stack's `verify-db.sh` shares
+`nertube_test` by default and the other slice's run had just dropped it.
+That is the fifth environment trap, and the reason for the last variable.
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit`, both programs | clean |
+| `eslint .` | clean |
+| `vitest run` | 549 passed, 34 files (`lib/script.test.ts` new, `sections.test.ts` +1) |
+| `playwright test script-editor` | 10 passed |
+| `playwright test` (full, production build) | **317 passed, 0 failed, 1 skipped** (`session-refresh`, as always), 17.9 min, exit 0 |
+
+One existing spec changed: `e2e/m9-week.spec.ts`'s "script it" step read the
+old `<pre>` (`script-text`); it now reads the editor's value.
+
+## M10 — "Today" is the user's day: the time zone
+
+The user's first request after the M5–M9 run. Until now every "today" in the
+application was the UTC calendar day (M6, decision 1), which the README listed
+first among its catches: in Los Angeles the calendar's today, `/now`'s
+"Confirm live" and the board's batch-day date all turned over at five in the
+afternoon. The user's zone is now a setting, per user, in the database, and
+every "today" and every timestamp shown is in it.
+
+### The inventory, taken before anything changed
+
+Every place a date or a time was derived, and what it was:
+
+| Site | What it derived | Now |
+|---|---|---|
+| `lib/calendar-dates.ts` `todayColumn(ms)` | the UTC day | `todayColumn(ms, zone)`: the day in the user's zone |
+| `components/app-shell.tsx` | UTC today for the Calendar count; Now count via rule 5 | the zone from `readTimeZone()` |
+| `app/calendar/page.tsx` (page and metadata) | UTC today, the month it opens on | zone |
+| `components/calendar/grid/url.ts` `monthFromQuery` | its own `todayColumn(now)` | takes the page's `today` |
+| `app/c/[slug]/board/page.tsx` | UTC today for the badge dialog | zone |
+| `app/videos/[id]/page.tsx` | UTC today (linkable days, "is the target here"); `published_at` formatted in UTC | zone; `formatInstant` |
+| `lib/next-action.ts` rule 5 `isFuture` | UTC day | `NowContext.timeZone` |
+| `lib/now-data.ts` `countNowRows` | via rule 5 | takes the zone |
+| `components/now/now-view.tsx` (client re-rank) | via rule 5 | `useTimeZone()` |
+| `components/ideas/matrix/tally.ts` `monthWindow` | UTC month | zone |
+| `components/calendar/filming/summary.ts` | past/upcoming against `today` | unchanged; its `today` is now zoned |
+| `app/actions/metrics.ts` `confirmLive` | `published_at = ${target}T00:00:00Z` | `startOfDay(target, zone)` |
+| `app/c/[slug]/ideas/page.tsx` capture date | `Intl` in UTC | `formatInstant` |
+| `components/thumbnails/swap-log.tsx`, `thumbnails-section.tsx` ("Live since") | `Intl`/`toLocaleDateString` in UTC | `formatInstant` + `useTimeZone()` |
+| `components/packaging/skip-packaging.tsx`, `post-publish-block.tsx`, `video-detail/flow-fields.tsx` | `Intl` in UTC | same |
+| `scripts/seed-demo.ts` `nextTuesday` | `todayColumn(Date.now())` | the machine's zone (a script, not a render) |
+| Days in stage (board, `/now`, `stage-stats`), waiting ages, 24 h metrics window, 30-day card TTL | elapsed milliseconds | **unchanged**: durations, and now commented as such |
+| `lib/calendar-dates.ts` date-column formatters, arithmetic, month grids | UTC as a neutral representation of a zoneless `date` | unchanged, and the header says why |
+| Server actions' `new Date().toISOString()` stamps (`updated_at`, `checked_at`, …) | instants | unchanged: instants, not days |
+| Form date defaults (`nextSaturday(today)`, `<input type="date">`) | from the server's `today` | zoned through `today` |
+
+Seven specs derived a date from the machine's UTC day (`calendar`,
+`filming-days`, `m4-acceptance`, `m6-acceptance`, `m9-week`, `matrix`,
+`settings-channel`).
+
+### What was built
+
+- **`public.profiles`** (migration `0010_time_zone.sql`): one row per user —
+  `id`, `user_id` (unique, references `auth.users`, cascades), `created_at`,
+  `updated_at`, `time_zone`, `time_zone_source` (`detected` | `chosen`). RLS on,
+  a select policy on `auth.uid()`, every client privilege revoked except
+  SELECT. A CHECK holds the IANA shape (`UTC` or `Area/Place…`, ≤ 64).
+- **`set_time_zone(p_zone, p_detected)`**, security definer, the only writer.
+  It refuses (22023) any name not in `pg_timezone_names` or not of the shape —
+  offsets, POSIX rules, `posixrules`/`localtime`/`Factory`, wrong case. A
+  detected zone never replaces an existing row; a chosen one always does.
+- **The helper** (`lib/calendar-dates.ts`): `todayColumn(ms, zone)`,
+  `startOfDay(date, zone)` (the first instant of a day, DST-gap-safe),
+  `formatInstant(value, zone, style)`, `canonicalTimeZone`, `offsetLabel`,
+  `timeZoneGroups` (the picker's list, built on the server) and
+  `timeZoneCity`. `Intl` only; no library.
+- **One read per request**: `readTimeZone()` (`lib/time-zone-data.ts`,
+  `cache()`d, never throws — unknown is UTC) and its twin `readClock()`
+  (`lib/request-clock.ts`), which replaced the eight separate `Date.now()`
+  reads in server components, so the shell and the page share one instant.
+- **To the client**: `AppShell` puts the zone in `TimeZoneProvider`
+  (`components/time-zone.tsx`); client components read `useTimeZone()` — the
+  server's value — and never their own browser's during render.
+- **Detection**: the login form sends `Intl.DateTimeFormat().resolvedOptions()
+  .timeZone` with the sign-in, and `signIn` records it (detected, best effort).
+  A session that predates M10 has no row: the shell mounts `TimeZoneDetector`,
+  which records the browser's zone after hydration and refreshes once, while
+  the calendar and `/now` say "Dates here follow UTC until your time zone is
+  set" with a link to Settings.
+- **Settings → Time zone** (`/settings/account`): the one per-user screen, a
+  fifth entry in the settings nav with no channel switch. It says what today is
+  in the stored zone and what time it is there, and changes it from a native
+  select grouped by area (each city with its current offset) and a Save
+  button; on a device in another zone, a one-press "Use <city>". The write goes
+  through `useSaveQueue`, so its status line and Retry are the ones every other
+  setting has.
+
+### Decisions taken without the user
+
+1. **Detected at sign-in, not in a first-page effect.** A zone detected by an
+   effect after the first page drew would redraw every date on that page — the
+   flash the brief warns about. The sign-in form already runs in the browser,
+   so it carries the zone, and the first page after sign-in is already right.
+   The effect exists only for sessions that were open when M10 shipped.
+2. **Detected never overwrites.** The phone and the laptop must agree, so the
+   account holds one zone; a sign-in from a laptop in another city offers its
+   zone in Settings rather than taking it. Travelling is a choice, made once.
+3. **Save, not save-on-change.** An arrow key on a closed `<select>` fires
+   `change` on Windows and Linux (M9's review, the stage select). Saving on
+   change would write a zone per keypress, and each write redraws every date.
+4. **Where it lives: `/settings/account`.** Every other setting is per channel;
+   this is per person, so it has one address with no slug, and its nav entry
+   says what is there ("Time zone") rather than "Account".
+5. **The zone is stored under its current IANA name.** Node's `Intl` spells
+   18 zones the old way (`Asia/Calcutta`); Ubuntu 24.04's tzdata, and
+   therefore the harness's `pg_timezone_names`, no longer lists those.
+   `canonicalTimeZone` maps them (`IANA_NAME` in the helper); all 419 names the
+   picker offers were checked against the harness catalogue.
+6. **Pre-M10 "Confirm live" stamps are re-read once.** They were the target
+   date at midnight UTC; left alone they would show as the day before
+   everywhere west of UTC the moment the zone was known. `set_time_zone`
+   moves each `published_at` that is exactly a UTC midnight to the same date's
+   midnight in the new zone — the first time a zone is recorded, and never
+   again. A later zone change moves nothing (instants do not move when the
+   viewer does). A drag into Published stamps `now()` to the microsecond, so
+   one landing exactly on a UTC midnight by accident is not a realistic case.
+7. **A server clock the browser suite can set.** "Today" is decided on the
+   server, so `page.clock` alone cannot put the app at an hour where Auckland
+   and Los Angeles disagree. `readClock()` honours a `nertube-test-clock`
+   cookie only when the server was started with `NERTUBE_TEST_CLOCK=1`, which
+   only `playwright.config.ts` does. With it, a request can see its own data as
+   of another moment and nothing more: writes stamp time in SQL, and sessions
+   are checked against the real clock.
+8. **The seed account's zone is recorded by the seed**, as chosen, `UTC`
+   (`SEED_TIME_ZONE`), and the suite pins `timezoneId: 'UTC'`. Every other
+   spec's "today" is computed in `SEED_TIME_ZONE`, so it is right by
+   construction rather than because the machine happens to be in UTC.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md's data model has no profile table; `public.profiles` is new, and the
+  schema-contract test's table list now has nine.
+- `published_at` for "Confirm live" is the target date at the user's midnight,
+  not at UTC's; PLAN.md says "p_published_at = target date" and does not name a
+  zone.
+
+### Honest limits
+
+- A session that was already signed in when M10 was deployed draws one page
+  in UTC (it says so), then records the browser's zone and redraws.
+- The hosted database's tz catalogue has not been read; a name it lacks would
+  be refused with a sentence, not stored.
+- Changing zone does not move stamps recorded under the previous one, so a
+  video confirmed at Auckland's midnight shows as the day before in Los
+  Angeles. That is the correct reading of an instant, and it is in the README.
+- No real phone and no real zone change: every zone in the browser suite is
+  Chromium's `timezoneId`.
+- Seen in the server's log during both browser runs, and not investigated:
+  "The destination stream closed early", printed while specs navigate away
+  from a page still streaming (calendar, buckets, brainstorm, board specs as
+  well as this one). No spec fails on it; whether it predates M10 was not
+  checked against the M9 build.
+- `e2e/m2-review.spec.ts:515` still reads a `date` column through `pg`, which
+  parses it to *the test runner's* local midnight, then prints it in UTC; east
+  of UTC that assertion would fail. It is about the runner's zone, not the
+  app's, and was left alone.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npx tsc --noEmit` and `-p tsconfig.harness.json` | clean |
+| `npx eslint .` | clean |
+| `npm test` | 35 files, 598 tests passed; also under `TZ=Pacific/Auckland` (598) and `TZ=America/Los_Angeles` for the date, ranking and matrix files (195) |
+| `./scripts/verify-db.sh` | 18 SQL files passed, including `85_time_zone.test.sql` (RLS, tenant isolation, direct writes refused, ten invalid names refused with 22023, detected-never-overwrites, the one-time re-stamp) |
+| `E2E_REUSE=0 npx playwright test timezone` | 4 passed |
+| Full browser suite, first run | 320 passed, 1 failed, 1 skipped (`session-refresh`, which only runs under `e2e:refresh`). The failure was `m7-acceptance.spec.ts:225` counting four settings links; there are five now, and the spec counts five and checks the fifth's address |
+| The affected specs again (timezone, m7-acceptance, m4-acceptance, post-publish, now, calendar, settings-stages) | 47 passed |
+| Full browser suite, final run (`E2E_REUSE=0 npx playwright test`, with the script-editor slice's specs in the same tree) | **321 passed, 1 skipped** (`session-refresh`), 14.8 min |

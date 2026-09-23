@@ -8,7 +8,7 @@ begin;
 do $$
 declare
   expected text[] := array['buckets','channels','checklist_items','checklist_templates',
-                           'filming_days','stages','thumbnail_swaps','videos'];
+                           'filming_days','profiles','stages','thumbnail_swaps','videos'];
   actual text[];
   t text;
   n int;
@@ -62,7 +62,8 @@ begin
              from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
             where ns.nspname = 'public'
               and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel',
-                                'reorder_stages','set_stage_enabled','set_video_archived')
+                                'reorder_stages','set_stage_enabled','set_video_archived',
+                                'set_time_zone')
   loop
     n := n + 1;
     if not f.prosecdef then raise exception 'FAILED: %() is not security definer', f.proname; end if;
@@ -70,7 +71,7 @@ begin
       raise exception 'FAILED: %() does not pin search_path (%)', f.proname, f.proconfig;
     end if;
   end loop;
-  if n <> 7 then raise exception 'FAILED: expected 7 SQL functions, found %', n; end if;
+  if n <> 8 then raise exception 'FAILED: expected 8 SQL functions, found %', n; end if;
 end $$;
 
 do $$
@@ -102,6 +103,15 @@ begin
   end if;
   if has_function_privilege('anon', 'public.set_video_archived(uuid,boolean)', 'execute') then
     raise exception 'FAILED: anon can execute set_video_archived';
+  end if;
+  -- profiles (0010): readable by its owner, written only by set_time_zone().
+  if has_function_privilege('anon', 'public.set_time_zone(text,boolean)', 'execute') then
+    raise exception 'FAILED: anon can execute set_time_zone';
+  end if;
+  if has_table_privilege('authenticated', 'public.profiles', 'INSERT')
+     or has_table_privilege('authenticated', 'public.profiles', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.profiles', 'DELETE') then
+    raise exception 'FAILED: a client can write public.profiles directly';
   end if;
 
   -- The policy set: stages has its own delete policy, channels has none.

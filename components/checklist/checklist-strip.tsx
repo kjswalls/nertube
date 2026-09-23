@@ -107,7 +107,13 @@ export function ChecklistStrip({
 
         <p
           data-testid="checklist-next"
-          className="min-w-0 flex-1 truncate text-[13px]"
+          /*
+            Below `md` the sentence takes a line of its own and wraps (M10):
+            in the 160px left beside the ratio and the button it was cut to
+            "Idea has no checklist on th…" and "Generated 10–20 title ca…",
+            which is the one thing this strip is for.
+          */
+          className="min-w-0 flex-1 truncate text-[13px] max-md:order-last max-md:basis-full max-md:whitespace-normal"
         >
           {next ? (
             <>
@@ -142,7 +148,7 @@ export function ChecklistStrip({
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen((current) => !current)}
-          className="shrink-0 rounded-button border border-border px-2 py-0.5 text-[12px] font-medium outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
+          className="shrink-0 rounded-button border border-border px-2 py-0.5 text-[12px] font-medium outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3 max-md:ml-auto"
         >
           {open ? "Hide list" : total > 0 ? `Show list (${total})` : "Show list"}
         </button>
@@ -181,7 +187,7 @@ export function ChecklistStrip({
                   setConfirming(false);
                   reset();
                 }}
-                className="rounded-button border border-over-limit/50 px-2 py-0.5 text-[12px] font-medium text-over-limit outline-none enabled:hover:bg-over-limit/10 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-button border border-over-limit/50 px-2 py-0.5 text-[12px] font-medium text-over-limit outline-none enabled:hover:bg-over-limit/10 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
               >
                 Reset it
               </button>
@@ -189,7 +195,7 @@ export function ChecklistStrip({
                 type="button"
                 data-testid="checklist-reset-cancel"
                 onClick={() => setConfirming(false)}
-                className="rounded-button border border-border px-2 py-0.5 text-[12px] outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
+                className="rounded-button border border-border px-2 py-0.5 text-[12px] outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
               >
                 Keep them
               </button>
@@ -199,7 +205,7 @@ export function ChecklistStrip({
               type="button"
               data-testid="checklist-reset"
               onClick={() => setConfirming(true)}
-              className="rounded-button border border-border px-2 py-0.5 text-[12px] outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button border border-border px-2 py-0.5 text-[12px] outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
             >
               Reset from template
             </button>

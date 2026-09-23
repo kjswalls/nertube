@@ -446,9 +446,11 @@ export function useAutosave({
     a reload or a closed tab, which unmount nothing. M7's review typed a page
     of voice guide and pressed Back, and it was gone with no warning.
 
-    So, two guards on the one save queue, and therefore on every field:
+    So, two guards on the one save queue, and therefore on every field —
+    written once, in `useUnsavedGuard` below, and shared since M10 with the
+    Script tab, which keeps three fields on one queue:
 
-    1. **Unmount commits.** The cleanup below runs on a client-side navigation
+    1. **Unmount commits.** The guard's cleanup runs on a client-side navigation
        away from the page; the action is sent before the component is gone,
        and the screen it lands on is not this one, so no state is set.
     2. **Unload asks.** While the box is dirty or a save is on the wire, a
@@ -459,17 +461,62 @@ export function useAutosave({
        app cannot draw, and its timing is the one moment `components/modal.tsx`
        could not be shown.
   */
-  const commitRef = useRef(commit);
+  useUnsavedGuard({
+    isDirty,
+    flush: commit,
+    busy: () => peekPending() !== null,
+  });
+
+  return { value, setValue, commit, state, pending: state.kind === "saving" };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Leaving with something unsaved                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two guards on leaving a page with an edit that has not been sent.
+ *
+ * Written for `useAutosave` (M7 review) and exported in M10 so an editor that
+ * owns several fields on one queue — the Script tab, whose text, structure
+ * and end-screen target must not race each other with three version checks —
+ * gets the *same* two guards rather than a copy of them:
+ *
+ * 1. **Unmount flushes.** A client-side navigation away (the Back button's
+ *    popstate, a link) unmounts the editor with the text still in it; the
+ *    cleanup sends it first.
+ * 2. **Unload asks.** While anything is dirty or on the wire, `beforeunload`
+ *    makes the browser confirm a reload or a close, and sends the save first,
+ *    so a person who then chooses to stay has already been saved.
+ *
+ * `isDirty`, `flush` and `busy` are read through refs, so the listener is
+ * installed once and always calls this render's functions.
+ */
+export function useUnsavedGuard({
+  isDirty,
+  flush,
+  busy,
+}: {
+  /** Is there an edit that has not been sent? */
+  isDirty: () => boolean;
+  /** Send it. A no-op when there is nothing to send. */
+  flush: () => void;
+  /** Is anything on the wire (`peekPending() !== null`)? */
+  busy: () => boolean;
+}): void {
+  const flushRef = useRef(flush);
   const isDirtyRef = useRef(isDirty);
+  const busyRef = useRef(busy);
   useEffect(() => {
-    commitRef.current = commit;
+    flushRef.current = flush;
     isDirtyRef.current = isDirty;
+    busyRef.current = busy;
   });
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent): void => {
-      if (!isDirtyRef.current() && peekPending() === null) return;
-      commitRef.current();
+      if (!isDirtyRef.current() && !busyRef.current()) return;
+      flushRef.current();
       event.preventDefault();
       // Chromium ignores preventDefault alone; the legacy property is what
       // makes it ask.
@@ -478,11 +525,9 @@ export function useAutosave({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
-      if (isDirtyRef.current()) commitRef.current();
+      if (isDirtyRef.current()) flushRef.current();
     };
-  }, [peekPending]);
-
-  return { value, setValue, commit, state, pending: state.kind === "saving" };
+  }, []);
 }
 
 /* -------------------------------------------------------------------------- */

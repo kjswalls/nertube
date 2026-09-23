@@ -55,16 +55,22 @@ export function Matrix({
           <tr>
             {/* The corner. Empty, and empty on purpose: it is the one cell in
                 the table that is neither a heading nor a count. */}
-            <td className="w-[172px] min-w-[150px]" />
+            {/*
+              Below `md` (M10) the pillar column is 96px and stays put while
+              the formats scroll under it, and a format is 60px: four of the
+              eight columns on a 390px screen instead of two, with the row
+              always named. The desktop sizes are unchanged.
+            */}
+            <td className="w-[172px] min-w-[150px] max-md:sticky max-md:left-0 max-md:z-10 max-md:w-24 max-md:min-w-24 max-md:bg-background" />
             {tally.horizontals.map((column) => (
               <th
                 key={column.bucket.id}
                 scope="col"
                 data-testid="matrix-column"
                 data-bucket={column.bucket.name}
-                className="min-w-[92px] rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-bottom"
+                className="min-w-[92px] rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-bottom max-md:min-w-[60px] max-md:px-1.5"
               >
-                <span className="block font-display text-[13px] leading-tight font-medium break-words">
+                <span className="block font-display text-[13px] leading-tight font-medium break-words max-md:text-[12px] max-md:[overflow-wrap:anywhere]">
                   {column.bucket.name}
                 </span>
                 <BucketCount total={column.total} />
@@ -81,7 +87,7 @@ export function Matrix({
                 scope="row"
                 data-testid="matrix-row"
                 data-bucket={row.bucket.name}
-                className="rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-top"
+                className="rounded-card border border-border bg-sidebar px-2 py-1.5 text-left align-top max-md:sticky max-md:left-0 max-md:z-10 max-md:outline-4 max-md:outline-background"
               >
                 <span className="block font-display text-[14px] leading-tight font-medium break-words">
                   {row.bucket.name}

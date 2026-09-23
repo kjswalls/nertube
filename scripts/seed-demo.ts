@@ -49,7 +49,7 @@ import {
   type StageKind,
 } from "../lib/defaults";
 import { slugify } from "../lib/slug";
-import { addDays, todayColumn, weekdayIndex } from "../lib/calendar-dates";
+import { addDays, canonicalTimeZone, todayColumn, UTC, weekdayIndex } from "../lib/calendar-dates";
 
 /** The two channels PLAN.md's fixture assumes: a main channel and a side one. */
 const MAIN = "Main channel";
@@ -506,7 +506,12 @@ function daysAgo(days: number): string {
  * "strictly after" in "the next Tuesday" when today is one.
  */
 function nextTuesday(): string {
-  const today = todayColumn(Date.now());
+  // "Today" where the person running the seed is (M10): a script is not a
+  // render, so the machine's own zone is the honest answer here, canonicalised
+  // the way the app stores one and UTC when it is not a zone the app accepts.
+  const zone =
+    canonicalTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? UTC;
+  const today = todayColumn(Date.now(), zone);
   const weekday = weekdayIndex(today);
   if (weekday === null) return today;
   const ahead = (1 - weekday + 7) % 7 || 7;

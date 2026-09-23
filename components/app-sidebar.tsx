@@ -179,6 +179,27 @@ export function AppSidebar({
               <nav aria-label="Main" className="flex flex-1 flex-col gap-5">
                 {lists("drawer")}
                 <div className="mt-auto flex flex-col gap-3 border-t border-border pt-3">
+                  {/*
+                    The `?` sheet, by touch (M10). The desktop column has the
+                    hint bar's "all keys" button; a phone had no way to it but
+                    the key itself, which a phone without a keyboard does not
+                    have. Plain markup: `AppSidebarMenu` closes the sheet and
+                    then opens the shortcut sheet, so the two modals never sit
+                    on top of each other and focus comes back to the menu
+                    button when the sheet closes.
+                  */}
+                  <button
+                    type="button"
+                    data-opens-shortcut-sheet=""
+                    data-testid="menu-shortcut-sheet"
+                    aria-keyshortcuts="?"
+                    className="flex w-full items-center justify-between gap-2 rounded-button border border-border px-2 py-1.5 text-[12px] text-muted outline-none transition-colors hover:border-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+                  >
+                    Keyboard shortcuts
+                    <kbd className="rounded-button border border-border px-1 font-mono text-[11px] text-foreground">
+                      ?
+                    </kbd>
+                  </button>
                   <SidebarAccount userEmail={userEmail} />
                 </div>
               </nav>

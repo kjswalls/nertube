@@ -128,7 +128,7 @@ const TALLY = buildTally({
   verticals: VERTICALS,
   horizontals: HORIZONTALS,
   videos: GRID,
-  month: monthWindow(Date.UTC(2026, 8, 18)),
+  month: monthWindow(Date.UTC(2026, 8, 18), "UTC"),
 });
 
 /* -------------------------------------------------------------------------- */

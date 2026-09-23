@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Modal } from "@/components/modal";
+import { openShortcutSheet } from "@/components/shortcuts/keyboard-shortcuts";
 
 /**
  * Where the sidebar goes on a phone: behind one button, in the application's
@@ -57,6 +58,21 @@ const CHOSEN_WINDOW_MS = 10_000;
 export function AppSidebarMenu({ drawer }: { drawer: ReactNode }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  /*
+    The sheet's "Keyboard shortcuts" button asks for the `?` sheet (M10). It
+    is opened only once this sheet has closed: the one modal silences the
+    page's bindings while it is up, and the shortcut sheet lists exactly
+    those bindings, so reading them with the menu still open would list none
+    of the page's keys. The effect below runs after `Modal`'s own cleanup has
+    put focus back on the menu button, which is therefore where the shortcut
+    sheet returns it.
+  */
+  const sheetAfterClose = useRef(false);
+  useEffect(() => {
+    if (open || !sheetAfterClose.current) return;
+    sheetAfterClose.current = false;
+    openShortcutSheet();
+  }, [open]);
 
   useEffect(() => {
     const at = chosenInSheet.at;
@@ -129,8 +145,12 @@ export function AppSidebarMenu({ drawer }: { drawer: ReactNode }) {
               server-rendered and do not know they are in a sheet.
             */
             onClick={(event) => {
-              if ((event.target as Element).closest("a[href]")) {
+              const target = event.target as Element;
+              if (target.closest("a[href]")) {
                 chosenInSheet.at = Date.now();
+                setOpen(false);
+              } else if (target.closest("[data-opens-shortcut-sheet]")) {
+                sheetAfterClose.current = true;
                 setOpen(false);
               }
             }}

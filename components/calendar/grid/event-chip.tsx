@@ -80,6 +80,8 @@ export function EventChip({
         title={`Filming day — ${event.headline}${event.notes ? ` — ${event.notes}` : ""}`}
         className={[
           "flex items-center gap-1 rounded-button border border-dashed px-1.5 py-0.5 text-[11px] leading-4 outline-none focus-visible:ring-2 focus-visible:ring-accent",
+          // The phone's day list (see `MonthGrid`): a full-width row, 44px.
+          "max-md:min-h-11 max-md:gap-2 max-md:px-3 max-md:text-[14px] max-md:leading-5",
           missed
             ? "border-attention/50 bg-attention/10 font-medium text-attention hover:bg-attention/20"
             : "border-border bg-background hover:bg-surface",
@@ -134,6 +136,9 @@ export function EventChip({
         .join(" · ")}
       className={[
         "flex items-center gap-1 rounded-button bg-surface py-0.5 pr-1.5 pl-1 text-[11px] leading-4 outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-accent",
+        // The phone's day list (see `MonthGrid`): a full-width row, 44px,
+        // with the whole title — wrapped, never cut — on the page's ground.
+        "max-md:min-h-11 max-md:gap-2 max-md:bg-background max-md:py-1.5 max-md:pr-3 max-md:pl-2.5 max-md:text-[15px] max-md:leading-5",
         channel ? stripeClass(channel.stripe) : "border-l-2 border-l-border",
       ].join(" ")}
     >
@@ -146,7 +151,9 @@ export function EventChip({
           {channel.tag}
         </span>
       ) : null}
-      <span className="min-w-0 truncate font-display">{event.title}</span>
+      <span className="min-w-0 truncate font-display max-md:whitespace-normal">
+        {event.title}
+      </span>
       {event.state === "late" ? (
         <span
           aria-hidden="true"

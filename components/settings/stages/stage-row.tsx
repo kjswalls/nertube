@@ -258,7 +258,7 @@ export function StageRow({
             onKeyDown={onNameKey}
             // The label is the user's word for the stage, so it is set in the
             // reading face, like a title. Everything else on the row is chrome.
-            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
+            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           />
           <span
             data-testid="stage-kind"
@@ -324,7 +324,7 @@ export function StageRow({
               onChange={(event) => void toggle(event.target.checked)}
               className="size-4 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
-            <label htmlFor={switchId} className="text-[12px]">
+            <label htmlFor={switchId} className="text-[12px] thumb:flex thumb:min-h-11 thumb:items-center thumb:text-[14px]">
               {/* The stage's name is part of the control's name, so nine
                   checkboxes are not nine "On the board"s to a screen reader;
                   the visible word is the state. */}

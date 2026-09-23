@@ -1,3 +1,5 @@
+import { useTimeZone } from "@/components/time-zone";
+import { formatInstant, type TimeZone } from "@/lib/calendar-dates";
 import { isThumbnailRole } from "@/lib/storage";
 
 import { ROLE_LABEL } from "./roles";
@@ -36,24 +38,16 @@ function roleName(value: string | null): string {
 }
 
 /**
- * Fixed locale and UTC, the same treatment the board gives its dates: this is
- * rendered on the server and hydrated in the browser, and a machine-local
- * format would differ between the two.
+ * When a swap happened, in the user's zone (M10) and a fixed locale: this is
+ * rendered on the server and hydrated in the browser, and both format with
+ * the zone the server read, never the machine's.
  */
-function formatWhen(iso: string): string {
-  const parsed = Date.parse(iso);
-  if (Number.isNaN(parsed)) return iso;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(parsed);
+function formatWhen(iso: string, zone: TimeZone): string {
+  return formatInstant(iso, zone, "dateTime") ?? iso;
 }
 
 export function SwapLog({ entries }: { entries: readonly SwapEntry[] }) {
+  const zone = useTimeZone();
   return (
     <section aria-labelledby="swap-log-heading" className="flex flex-col gap-2">
       <h3 id="swap-log-heading" className="text-sm font-semibold">
@@ -81,7 +75,7 @@ export function SwapLog({ entries }: { entries: readonly SwapEntry[] }) {
                   dateTime={entry.swappedAt}
                   className="font-mono text-[11px] text-muted"
                 >
-                  {formatWhen(entry.swappedAt)}
+                  {formatWhen(entry.swappedAt, zone)}
                 </time>
                 <span data-testid="swap-log-roles">
                   {entry.fromRole === null ? (

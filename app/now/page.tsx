@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { NowView } from "@/components/now/now-view";
 import { readNowInputs } from "@/lib/now-data";
+import { readClock } from "@/lib/request-clock";
 
 export const metadata = { title: "Now · NerTube" };
 
@@ -31,7 +32,8 @@ export const metadata = { title: "Now · NerTube" };
  *
  * ## The clock is read once
  *
- * `Date.now()` here, passed down as a number, and used for every age on the
+ * `readClock()` here (`lib/request-clock.ts`, the request's one `Date.now()`),
+ * passed down as a number, and used for every age on the
  * page — including the ones the client recomputes after an interaction. That is
  * what makes the server's HTML and the browser's first render agree, and it is
  * why "3 days in stage" does not silently become "4 days" halfway down the
@@ -46,8 +48,7 @@ export default async function NowPage() {
   }
 
   // The page's one clock read. See the file comment.
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = await readClock();
 
   return (
     <AppShell section="now" now={now}>

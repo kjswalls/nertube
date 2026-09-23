@@ -195,7 +195,7 @@ export function settingNotes(names: StageNames) {
   return {
     voiceGuide:
       "The brainstorm — Generate 20, Draft hooks and Suggest concepts on a video's Packaging tab — is handed this text verbatim and writes in this voice, never a generic YouTuber's.",
-    scriptTemplate: `Copied into a video's script the first time it enters ${n("scripting")}, with ${HOOK_PLACEHOLDER} replaced by the chosen hook. It is your own shape: headings, bullets, prose, a single line — whatever you begin from. Videos already past ${n("scripting")} keep the script they have.`,
+    scriptTemplate: `Copied into a video's script the first time it enters ${n("scripting")}, with ${HOOK_PLACEHOLDER} replaced by the chosen hook. It is your own shape: headings, bullets, prose, a single line — whatever you begin from. Videos already past ${n("scripting")} keep the script they have; "Reset from template" on a video's Script tab rebuilds one from this.`,
     wipThreshold: `The board's column count turns red above this number, on the in-flight stages only — ${n("packaging")} through ${n("scheduled")}. ${n("idea")}, ${n("published")} and ${n("repurposed")} never warn.`,
     staleDays:
       "A card sitting longer than this in one stage is flagged on the board, and the weekly strip flags a column whose median is past it.",

@@ -53,7 +53,7 @@ export function ShortcutHints() {
         data-testid="shortcut-sheet-open"
         aria-keyshortcuts="?"
         onClick={openShortcutSheet}
-        className="whitespace-nowrap rounded-button text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+        className="whitespace-nowrap rounded-button text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
       >
         <kbd className="rounded-button border border-border px-1 font-mono text-[10px]">
           ?

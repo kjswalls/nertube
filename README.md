@@ -42,16 +42,37 @@ decision taken without the user.
 - **The video page** (`/videos/<id>`) — packaging (working title with a 55-
   character warning, title candidates with notes, the written thumbnail concept
   and a sketch, up to three hooks, the gate indicator and a deliberate skip),
-  the checklist for the current stage, the script as the template filled it,
-  three thumbnail variants (wild card / moderate / safe) with a shipped role and
+  the checklist for the current stage, the script editor (below), three
+  thumbnail variants (wild card / moderate / safe) with a shipped role and
   a swap log, and the post-publish block (impressions and CTR always together,
   views, new viewers, "swap thumbnail?").
+- **The script** (the video page's Script tab) — from Scripting onward, the
+  script is a plain markdown textarea in the reading face that grows with the
+  text and saves itself a moment after you stop typing (and on leaving the
+  box, and before the page goes). Beside it: the chosen structure (listicle,
+  3-part, story arc) and the named video the end screen points at. It starts
+  as the channel's template with the chosen hook written in, which
+  `move_video()` copies in on the first move into Scripting. **Reset from
+  template** rebuilds it from the channel's current template and the hook
+  chosen now — it says what it will replace and asks first, and Undo puts the
+  old text back until you leave the page. Before Scripting the tab is locked
+  and shows no editor: the title, thumbnail concept and hook come first.
 - **Calendar** (`/calendar`) — target publish dates for every channel on one
   month, and filming days as their own kind of event.
 - **Settings** (`/settings/…`) — per channel: stages (rename, reorder within the
   core order, switch off, add your own), checklist templates with minute
   estimates, buckets and quotas, the voice guide, the script template, the WIP
-  and stale thresholds, and the CTR the swap prompt measures against.
+  and stale thresholds, and the CTR the swap prompt measures against. For you:
+  your **time zone** (`/settings/account`), below.
+- **Your time zone** — "today" is your day. The calendar's today, the day
+  `/now` offers "Confirm live" on, the board's batch-day date and the matrix's
+  month all turn over at your local midnight, and published, swapped and
+  captured dates are shown in your zone. It is saved to your account (so the
+  phone and the laptop agree) and recorded from your browser the first time you
+  sign in; Settings shows it with today's date there, and changes it from a list
+  grouped by region. A second device in another zone offers its own zone rather
+  than taking it. "Days in stage", waiting ages and the 24-hour metrics window
+  are elapsed time, not calendar days, and do not depend on it.
 - **The brainstorm** — one feature with four buttons on the video page:
   *Generate 20* (titles), *Draft hooks*, *Suggest concepts* and *Critique at
   tile size* (the three variants at feed size), conditioned on the channel's
@@ -228,6 +249,7 @@ this repository.
 | `SEED_EMAIL`, `SEED_PASSWORD` | `scripts/` only | a local shell | The account `seed-demo.ts` creates, and the harness's login. |
 | `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `NERTUBE_DB_URL` | `scripts/` only | a local shell | The local Postgres the harness and `db:verify` use (loopback only). |
 | `E2E_REUSE`, `E2E_PORT`, `DEV_STACK_*` | Playwright and the harness | a local shell | Test plumbing; `scripts/dev-stack/README.md` has the full table. |
+| `NERTUBE_TEST_CLOCK` | `lib/request-clock.ts` | **Unset everywhere but the browser suite** | `1` lets a request's `nertube-test-clock` cookie set the server's "now", so `e2e/timezone.spec.ts` can stand at an hour when two zones disagree about the date. Only `playwright.config.ts` sets it. |
 
 With no Supabase variables at all, the proxy answers every page with a readable
 503 setup page instead of an unexplained 500.
@@ -279,6 +301,9 @@ what makes the invariants enforceable rather than conventional:
   holding videos cannot be switched off" hold against a forged request.
 - `thumbnail_swaps` has no client UPDATE or DELETE (it is an append-only log),
   and TRUNCATE — which RLS does not govern — is revoked on every table.
+- `profiles` (one row per user: the time zone) is readable by its owner and
+  written only by `set_time_zone()`, which refuses a name the database's tz
+  catalogue does not know and never lets a detected zone replace a chosen one.
 
 Storage has one private bucket, `thumbnails`, with stable object paths
 (`{user_id}/{video_id}/{concept|wild_card|moderate|safe}.{ext}`, uploaded with
@@ -394,7 +419,12 @@ found.
   behaviour (the visual viewport, zoom on focus) has not been seen on a device
   (M9). Every text field the M9 review found under 16px — the bank's search
   and filters, the settings rows and add forms, the new-channel name — is 16px
-  below 768px now, which is what should stop that zoom.
+  below 768px now, which is what should stop that zoom. The Script tab's
+  editor was measured the same way (M10): at 390×420, standing in for the
+  keyboard, the line being typed and the sticky save line both stay on
+  screen. iOS Safari pans the visual viewport under its keyboard instead of
+  shrinking the page, and whether a sticky toolbar stays in sight there is
+  unseen.
 - **The error page's "You're offline" sentence and `app/global-error.tsx`**
   are exercised by no spec; `app/error.tsx` is proved with an induced read
   failure, not a dropped connection (M9).
@@ -406,21 +436,6 @@ found.
 
 ### In the brief, and not built
 
-- **The script cannot be edited in the app.** The Script section shows what
-  `move_video()` wrote on first entry to Scripting — the channel's template with
-  the chosen hook spliced in — and says to write the script in your own editor,
-  starting from that copy. `script` has no save path, and a textarea over a
-  column that cannot be saved would lose an evening's work silently (M3, M8).
-  The brief's per-video "chosen structure" and "end-screen target" fields
-  exist as columns (`script_structure`, `end_screen_target`) with no UI at
-  all; the structure is a line in the template instead.
-- **The script is written once, and nothing rewrites it.** `move_video()`
-  fills `script` only while it is empty, on the first entry to Scripting. A
-  hook chosen, or a template edited, after that never reaches it; a video that
-  skipped the gate and entered Scripting with no chosen hook has an empty Hook
-  section for good. PLAN.md's review item 19 promised a "reset script from
-  template" on the video page; it was not built (M9, as a decision: it is a
-  new write path into a column the app otherwise never writes).
 - **The one-line hook is set at capture and never again.** It shows in the bank
   but the video page has no field for it.
 - **Description, chapters, end screen and tags for YouTube are checklist items,
@@ -434,11 +449,41 @@ found.
 
 ### Things it does, with a catch
 
-- **"Today" is the UTC day, everywhere** — on the calendar, the board's dates,
-  `/now`'s go-live check. Far enough west, the calendar's today turns over hours
-  before yours. There is no timezone setting; it was deferred from M6 to M7 to
-  M9 and is still open, because the fix is a per-user profile that does not
-  exist.
+- **A session signed in before the time zone existed draws one page in UTC.**
+  Sign-in records the browser's zone, so a new sign-in never sees it; a session
+  that was already open when M10 was deployed has no zone yet, so its first page
+  is in UTC and says so ("Dates here follow UTC until your time zone is set"),
+  records the browser's zone, and redraws once (M10).
+- **Pre-M10 "Confirm live" dates are re-read once.** Before M10 a confirmed
+  video's `published_at` was its target date at midnight UTC. The first time
+  your zone is recorded, every such stamp (exactly a UTC midnight) is moved to
+  the same date's midnight in your zone, so it still shows on its target date.
+  Changing the zone later moves nothing: those are instants now, and a video
+  published at your midnight in Auckland shows as the previous day if you
+  switch to Los Angeles (M10).
+- **The zone list is Node's.** The picker lists the 419 zones the server's
+  `Intl` knows, under their current IANA names (Node spells 18 of them the old
+  way, `Asia/Calcutta`, and the app stores `Asia/Kolkata`). A name the
+  database's tz catalogue does not know is refused with a sentence rather than
+  stored. All 419 are in the harness's PostgreSQL 16 catalogue; the hosted
+  17.6 catalogue has not been read (M10).
+- **The script is written from Scripting on, not before.** An idea or a
+  Packaging video has no script box, and `updateVideo` refuses the column
+  there too (the rule is the app's: the column is in the client's UPDATE
+  grant, so a hand-made request with a session token could still write it)
+  — BRIEF.md's first principle, and the gate skip is the one
+  deliberate way to script early. A video moved back to Packaging keeps its
+  script, read-only, until it comes forward (M10). A video in a stage you
+  added yourself (which has no place in the order) can be scripted.
+- **Reset's Undo lasts as long as the page.** The text it replaced is held in
+  the page, not stored; leave or reload and Reset cannot be undone. A reset
+  is also only as current as the save behind it: in two tabs, the second
+  tab's reset is refused like any other stale save (M10).
+- **A script save is a whole-page refresh.** The script saves after a
+  1.2-second pause in typing, through the same action as every other field,
+  and that action refreshes the video page on the server, so a long evening
+  of writing is a few hundred page renders. Nothing visible happens; on a
+  slow phone connection it is more data than the words themselves (M10).
 - **Ages on `/now` are frozen for the life of the page.** Leave it open
   overnight and it still says "3 days"; a reload is the refresh (M3).
 - **Two tabs do not merge.** Every save carries the version it was made

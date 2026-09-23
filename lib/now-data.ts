@@ -1,5 +1,6 @@
 import { cache } from "react";
 
+import type { TimeZone } from "@/lib/calendar-dates";
 import { CHECKLIST_COLUMNS, readChecklistItem, type ChecklistItem } from "@/lib/checklist";
 import { isStageKind } from "@/lib/defaults";
 import {
@@ -301,10 +302,10 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
  * the ranking depends on the clock, and a page that read the clock twice could
  * cross a 24-hour boundary between the sidebar and the list.
  */
-export async function countNowRows(now: number): Promise<number> {
+export async function countNowRows(now: number, timeZone: TimeZone): Promise<number> {
   const { channels, videos } = await readNowInputs();
   if (channels.length === 0) return 0;
 
   const byId = new Map(channels.map((channel) => [channel.id, channel]));
-  return rankNow(videos, { channels: byId }, now).length;
+  return rankNow(videos, { channels: byId, timeZone }, now).length;
 }

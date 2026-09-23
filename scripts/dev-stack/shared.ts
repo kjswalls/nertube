@@ -201,6 +201,14 @@ export const API_KEY_EXP = 2_000_000_000;
 export const SEED_EMAIL = envString('SEED_EMAIL', 'dev@nertube.test');
 export const SEED_PASSWORD = envString('SEED_PASSWORD', 'nertube-dev-password');
 
+/**
+ * The seed account's time zone (M10), recorded by the seed as *chosen* so a
+ * sign-in from a browser in another zone never replaces it. The browser suite
+ * derives every "today" it asserts on from this, rather than from whatever
+ * zone the machine running it happens to be in.
+ */
+export const SEED_TIME_ZONE = 'UTC';
+
 /** The two channels the seed creates, in order. */
 export const SEED_CHANNELS = ['Personal', 'Sunday Softworks'] as const;
 

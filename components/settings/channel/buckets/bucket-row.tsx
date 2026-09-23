@@ -201,7 +201,7 @@ export function BucketRow({
             onBlur={name.commit}
             onKeyDown={onNameKey}
             // The user's word for the bucket: the reading face, like a title.
-            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] max-md:basis-full leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
+            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] max-md:basis-full leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           />
 
           <div className="flex shrink-0 items-center gap-1.5">
@@ -227,7 +227,7 @@ export function BucketRow({
               onBlur={quota.commit}
               onKeyDown={onQuotaKey}
               title="Monthly quota: how many videos a month should carry this bucket. Empty means no quota."
-              className="w-16 rounded-input border border-border bg-background px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
+              className="w-16 rounded-input border border-border bg-background px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
             />
           </div>
         </div>

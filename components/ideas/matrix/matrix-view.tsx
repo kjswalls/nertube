@@ -1,6 +1,7 @@
 import { Matrix, MatrixLegend } from "./matrix";
 import { CellPanel } from "./cell-panel";
 import { NoVerticals } from "./no-verticals";
+import { readTimeZone } from "@/lib/time-zone-data";
 import {
   buildTally,
   cellAt,
@@ -10,6 +11,7 @@ import {
 } from "./tally";
 import { readPaged } from "@/lib/paged";
 import type { createClient } from "@/lib/supabase/server";
+import { readClock } from "@/lib/request-clock";
 
 /**
  * `/c/[slug]/ideas?view=matrix` — the content-bucket matrix.
@@ -161,14 +163,15 @@ export async function MatrixView({
     request: the month in the heading, the month the quota bars count and the
     month named in the legend are all the same month by construction.
   */
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = await readClock();
+  // "This month" is the month of the user's today (M10), read once.
+  const { zone } = await readTimeZone();
 
   const tally = buildTally({
     verticals,
     horizontals,
     videos,
-    month: monthWindow(now),
+    month: monthWindow(now, zone),
   });
 
   const header = (

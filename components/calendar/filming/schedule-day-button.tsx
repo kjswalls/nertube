@@ -76,8 +76,8 @@ export function ScheduleFilmingDayButton({
               // the column count. It gains a border and a pointer because it is
               // now a control, and nothing else about it changes — the signal
               // was already right, it simply had nothing behind it.
-              "w-full rounded-button border border-attention/40 bg-attention/15 px-1.5 py-1 text-left text-[11px] leading-4 font-medium text-attention outline-none transition-colors hover:bg-attention/25 focus-visible:ring-2 focus-visible:ring-accent"
-            : "rounded-button border border-border bg-surface px-3 py-1.5 text-[13px] outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
+              "w-full rounded-button border border-attention/40 bg-attention/15 px-1.5 py-1 text-left text-[11px] leading-4 font-medium text-attention outline-none transition-colors hover:bg-attention/25 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:text-[13px]"
+            : "rounded-button border border-border bg-surface px-3 py-1.5 text-[13px] outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         }
       >
         {label}

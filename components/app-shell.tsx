@@ -10,6 +10,9 @@ import { monthKey, monthOf, todayColumn } from "@/lib/calendar-dates";
 import { countIdeas } from "@/lib/ideas-data";
 import { countNowRows, readNowInputs } from "@/lib/now-data";
 import { requireUser } from "@/lib/supabase/require-user";
+import { readTimeZone } from "@/lib/time-zone-data";
+import { TimeZoneProvider } from "@/components/time-zone";
+import { readClock } from "@/lib/request-clock";
 
 /**
  * The frame every signed-in route renders inside — except `/capture` — with the
@@ -84,6 +87,15 @@ import { requireUser } from "@/lib/supabase/require-user";
  * cannot land on opposite sides of midnight. `lib/calendar-data.ts` owns the
  * definition it counts by and returns `null` rather than guessing zero.
  *
+ * ## The time zone (M10)
+ *
+ * The user's zone is read here, once per request (`readTimeZone()`, `cache()`d
+ * so the page's own call is the same query), and put in a context for every
+ * client component below (`components/time-zone.tsx`). "Today" for the
+ * Calendar count is the day in that zone, the same one the calendar page
+ * computes. While no zone is recorded the provider also mounts the detector
+ * that records the browser's.
+ *
  * ## The badge is allowed to fail; the page is not
  *
  * `readNowInputs` throws when any of its reads errors, and every signed-in route
@@ -115,9 +127,9 @@ export async function AppShell({
   children: ReactNode;
 }) {
   const { user } = await requireUser();
+  const timeZone = await readTimeZone();
 
-  // eslint-disable-next-line react-hooks/purity
-  const clock = now ?? Date.now();
+  const clock = now ?? (await readClock());
 
   // Same order as `/`, which redirects to `/now` and falls back to the first
   // channel's board: `readNowInputs` reads `channels` ordered by `created_at`,
@@ -133,7 +145,7 @@ export async function AppShell({
       name: channel.name,
       slug: channel.slug,
     }));
-    nowCount = await countNowRows(clock);
+    nowCount = await countNowRows(clock, timeZone.zone);
   } catch {
     // The chrome degrades; the page does not disappear. See the note above.
   }
@@ -146,7 +158,7 @@ export async function AppShell({
 
   // The month `/calendar` opens on, from this request's one clock read. Its
   // reader swallows its own failures, like the bank's.
-  const thisMonth = monthOf(todayColumn(clock));
+  const thisMonth = monthOf(todayColumn(clock, timeZone.zone));
   const calendarCount =
     thisMonth === null ? null : await countTargetsIn(monthKey(thisMonth));
 
@@ -166,70 +178,72 @@ export async function AppShell({
       A column below `md` — the sidebar is a bar across the top there, see
       `AppSidebar` — and a row from `md` up, which is the layout M3 signed off.
     */
-    <div className="flex min-h-dvh w-full flex-col overflow-x-clip md:flex-row">
-      {/*
-        The bypass block (WCAG 2.4.1). The sidebar is ten tab stops on a
-        two-channel account — wordmark, Capture, Now, Board, Ideas, Calendar,
-        each channel, + New channel, Theme, Sign out — and it renders before
-        the page on every signed-in route, so without this a keyboard user
-        walks all of it to reach the first thing on the page, every time.
+    <TimeZoneProvider zone={timeZone.zone} known={timeZone.known}>
+      <div className="flex min-h-dvh w-full flex-col overflow-x-clip md:flex-row">
+        {/*
+          The bypass block (WCAG 2.4.1). The sidebar is ten tab stops on a
+          two-channel account — wordmark, Capture, Now, Board, Ideas, Calendar,
+          each channel, + New channel, Theme, Sign out — and it renders before
+          the page on every signed-in route, so without this a keyboard user
+          walks all of it to reach the first thing on the page, every time.
 
-        Off-screen until focused rather than `display: none`, because a hidden
-        element is not focusable and a skip link that cannot be focused is not a
-        skip link.
-      */}
-      <a
-        href="#main"
-        data-testid="skip-to-main"
-        /*
-          Off-screen by transform rather than by `sr-only` + `focus:not-sr-only`:
-          that pair toggles `position` in two utilities whose order in the sheet
-          decides the winner, and one property (`transform`) has no such
-          argument. `overflow-x: clip` on the element below clips it while it is
-          parked, so it cannot widen the page either.
-        */
-        className="absolute top-2 left-2 z-50 -translate-x-[200%] rounded-button border border-border bg-surface px-3 py-2 text-[13px] focus-visible:translate-x-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        Skip to content
-      </a>
-
-      <AppSidebar
-        channels={channels}
-        currentSlug={currentSlug}
-        section={section}
-        nowCount={nowCount}
-        ideasCount={ideasCount}
-        calendarCount={calendarCount}
-        userEmail={user.email ?? null}
-      />
-
-      <main
-        id="main"
-        // The skip link's target. `-1` so it can be focused by the jump without
-        // joining the tab order itself.
-        tabIndex={-1}
-        data-testid="app-main"
-        data-gutter={gutter}
-        className={[
+          Off-screen until focused rather than `display: none`, because a hidden
+          element is not focusable and a skip link that cannot be focused is not a
+          skip link.
+        */}
+        <a
+          href="#main"
+          data-testid="skip-to-main"
           /*
-            `relative` is load-bearing, and M9 found it at 390px on the matrix.
-            An `sr-only` span is `position: absolute`; with no positioned
-            ancestor its containing block is the viewport, and overflow
-            clipping does not apply to a box whose containing block is outside
-            the clipping element. So every visually hidden label inside the
-            matrix's sideways-scrolling table sat at its static position, 900px
-            out, and scrolled the whole page 507px — past the `overflow-x:
-            clip` above, which was never asked about it. Positioning `main`
-            makes it their containing block, and then the clip holds.
+            Off-screen by transform rather than by `sr-only` + `focus:not-sr-only`:
+            that pair toggles `position` in two utilities whose order in the sheet
+            decides the winner, and one property (`transform`) has no such
+            argument. `overflow-x: clip` on the element below clips it while it is
+            parked, so it cannot widen the page either.
           */
-          "relative flex min-w-0 flex-1 flex-col outline-none",
-          gutter === "reading"
-            ? "px-gutter-reading py-gutter-reading"
-            : "px-gutter py-gutter",
-        ].join(" ")}
-      >
-        {children}
-      </main>
-    </div>
+          className="absolute top-2 left-2 z-50 -translate-x-[200%] rounded-button border border-border bg-surface px-3 py-2 text-[13px] focus-visible:translate-x-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Skip to content
+        </a>
+
+        <AppSidebar
+          channels={channels}
+          currentSlug={currentSlug}
+          section={section}
+          nowCount={nowCount}
+          ideasCount={ideasCount}
+          calendarCount={calendarCount}
+          userEmail={user.email ?? null}
+        />
+
+        <main
+          id="main"
+          // The skip link's target. `-1` so it can be focused by the jump without
+          // joining the tab order itself.
+          tabIndex={-1}
+          data-testid="app-main"
+          data-gutter={gutter}
+          className={[
+            /*
+              `relative` is load-bearing, and M9 found it at 390px on the matrix.
+              An `sr-only` span is `position: absolute`; with no positioned
+              ancestor its containing block is the viewport, and overflow
+              clipping does not apply to a box whose containing block is outside
+              the clipping element. So every visually hidden label inside the
+              matrix's sideways-scrolling table sat at its static position, 900px
+              out, and scrolled the whole page 507px — past the `overflow-x:
+              clip` above, which was never asked about it. Positioning `main`
+              makes it their containing block, and then the clip holds.
+            */
+            "relative flex min-w-0 flex-1 flex-col outline-none",
+            gutter === "reading"
+              ? "px-gutter-reading py-gutter-reading"
+              : "px-gutter py-gutter",
+          ].join(" ")}
+        >
+          {children}
+        </main>
+      </div>
+    </TimeZoneProvider>
   );
 }

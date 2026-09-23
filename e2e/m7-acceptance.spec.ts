@@ -248,7 +248,10 @@ test('the sidebar reaches Settings by keyboard, and the four screens are one are
   // without losing the channel, and marks where you are.
   await page.goto(`/settings/stages/${CHANNEL.slug}`);
   await hydrated(page);
-  await expect(settingsNav(page).getByRole('link')).toHaveCount(4);
+  // Four per-channel screens, and (M10) the user's own time zone, which is
+  // about no channel and so has one address with no slug.
+  await expect(settingsNav(page).getByRole('link')).toHaveCount(5);
+  await expect(navLink(page, 'account')).toHaveAttribute('href', '/settings/account');
   await expect(navLink(page, 'stages')).toHaveAttribute('aria-current', 'page');
   await expect(channelName(page)).toHaveText(CHANNEL.name);
 

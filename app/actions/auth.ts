@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { safePath } from "@/lib/safe-path";
 import { createClient } from "@/lib/supabase/server";
+import { writeTimeZone } from "@/lib/time-zone-data";
 
 /** What the login form renders. `null` before the first submit. */
 export type SignInState = { error: string } | null;
@@ -49,6 +50,20 @@ export async function signIn(
       };
     }
     return { error: error.message };
+  }
+
+  // The browser's zone, recorded on first use (M10): only when the account has
+  // none yet, so a zone chosen in Settings or detected on another device is
+  // kept. Best effort — a zone the database does not know, or a failure here,
+  // leaves the account on UTC with the notice that says so, and never stands
+  // between the user and signing in.
+  const zone = formData.get("timeZone");
+  if (typeof zone === "string" && zone !== "") {
+    try {
+      await writeTimeZone(supabase, zone, true);
+    } catch {
+      // See above: never a reason to refuse the sign-in.
+    }
   }
 
   // The signed-out render of every page is now stale.

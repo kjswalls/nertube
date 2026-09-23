@@ -87,7 +87,7 @@ export function WorkingTitle({
           concept) are set in the reading face, so accepting a proposal visibly
           moves it from the tool's voice into yours.
         */
-        className="w-full rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="w-full rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
       />
 
       <p

@@ -112,6 +112,14 @@ export default defineConfig({
 
   use: {
     baseURL: APP_URL,
+    /*
+      The browser's zone, pinned (M10). Sign-in records the browser's zone for
+      an account that has none, so a suite that ran in whatever zone the
+      machine is in would give every account it creates a different "today".
+      The seed account's zone is recorded by the seed itself (`SEED_TIME_ZONE`,
+      as chosen), and `e2e/timezone.spec.ts` sets its own per context.
+    */
+    timezoneId: 'UTC',
     navigationTimeout: 60_000,
     actionTimeout: 20_000,
     trace: 'retain-on-failure',
@@ -166,6 +174,14 @@ export default defineConfig({
           a single suggestion.
         */
         ASSIST_PROVIDER: 'fake',
+        /*
+          The server's clock can be set per request (M10). "Today" is decided
+          on the server, so a spec that has to stand at an instant where two
+          zones disagree about the date — `e2e/timezone.spec.ts` — sends that
+          instant in a cookie, and this is the switch that lets the server read
+          it (`lib/request-clock.ts`). Nothing else in the suite sends one.
+        */
+        NERTUBE_TEST_CLOCK: '1',
       },
     },
   ],

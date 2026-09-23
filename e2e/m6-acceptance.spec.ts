@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
 import { addDays, formatDateColumn, monthOf, monthKey, todayColumn } from '../lib/calendar-dates';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 
 import { untilTaken } from './hydration';
 
@@ -74,7 +74,8 @@ const SPARE = 'M6 week — a spare';
 let db: pg.Client;
 
 /** The clock, read once, through the application's own helper. */
-const TODAY = todayColumn(Date.now());
+// The seed account's today, in the account's zone (M10) — not the machine's.
+const TODAY = todayColumn(Date.now(), SEED_TIME_ZONE);
 /** "Saturday": a free future date inside the month the calendar opens on. */
 const SHOOT = addDays(TODAY, 10) as string;
 /** The month the whole walk happens in, as `?month=` spells it. */

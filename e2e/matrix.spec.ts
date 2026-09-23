@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import pg from 'pg';
 
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 
 /**
  * The content-bucket matrix, walked in a browser.
@@ -48,19 +48,27 @@ const PILLARS = ['money', 'focus', 'craft'] as const;
 /* -------------------------------------------------------------------------- */
 
 /**
- * Four dates around the current month, in UTC.
+ * Four dates around the current month, in the seed account's zone.
  *
- * The application decides "this month" from `Date.now()` in UTC
- * (`components/ideas/matrix/tally.ts`), so the fixture has to mean the same
+ * The application decides "this month" from `Date.now()` in the account's
+ * zone (`components/ideas/matrix/tally.ts`, M10), so the fixture has to mean the same
  * month — a date built from the database's `current_date` would be the
  * *server's* timezone, and the two disagree for an hour a day in half the
  * world. Computed rather than hard-coded, because a quota test pinned to
  * September 2026 passes for a month and then rots.
  */
 function monthDates() {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
+  // Today's year and month where the account is, read with `Intl` directly.
+  const [year, monthNumber] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SEED_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(new Date())
+    .split('-')
+    .map(Number);
+  const month = monthNumber - 1;
   const iso = (date: Date) => date.toISOString().slice(0, 10);
 
   const firstOfThis = new Date(Date.UTC(year, month, 1));

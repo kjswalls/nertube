@@ -82,7 +82,7 @@ export function MoveButton({
           ? `Move ${subject} ${direction}`
           : `Move ${subject} ${direction} — not available. ${verdict.reason}`
       }
-      className="flex size-6 items-center justify-center rounded-button border border-border font-mono text-[11px] leading-none outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30"
+      className="flex size-6 items-center justify-center rounded-button border border-border font-mono text-[11px] leading-none outline-none enabled:hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30 thumb:size-11 thumb:text-[13px]"
     >
       <span aria-hidden="true">{direction === "up" ? "▲" : "▼"}</span>
     </button>

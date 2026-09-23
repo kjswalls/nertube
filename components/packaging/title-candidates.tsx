@@ -151,7 +151,7 @@ export function TitleCandidates({
             setDraft(event.target.value);
             if (notice) setNotice(null);
           }}
-          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none placeholder:font-sans placeholder:text-sm focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 font-display text-base outline-none placeholder:font-sans placeholder:text-sm focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
         />
         <button
           type="submit"
@@ -197,17 +197,33 @@ export function TitleCandidates({
                 candidate.chosen ? "border-ready/60 bg-ready/[0.07]" : "border-border",
               ].join(" ")}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 max-md:flex-wrap max-md:justify-end">
                 <label className="sr-only" htmlFor={`${addId}-text-${candidate.id}`}>
                   Candidate {index + 1}
                 </label>
-                <input
+                {/*
+                  A candidate is read in full before it is chosen, so it wraps
+                  rather than scrolls inside its box (M10) — the hooks' rule
+                  from M9. One line of a text input beside Choose and Remove
+                  was 166px at 390, "Nine hours of sleep, on", the half of the
+                  title that does not decide anything. A one-row textarea that
+                  grows with its text (`field-sizing: content`); Enter still
+                  commits rather than breaking the line, and a pasted line
+                  break becomes a space, because a title is one line. Below
+                  `md` it takes the row and the buttons wrap under it.
+                */}
+                <textarea
                   id={`${addId}-text-${candidate.id}`}
-                  type="text"
+                  rows={1}
                   value={candidate.text}
                   maxLength={MAX_TITLE_LENGTH}
                   data-testid="candidate-text"
-                  onChange={(event) => onEditText(candidate.id, event.target.value)}
+                  onChange={(event) =>
+                    onEditText(
+                      candidate.id,
+                      event.target.value.replace(/[\r\n]+/g, " "),
+                    )
+                  }
                   onBlur={onCommit}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -215,7 +231,7 @@ export function TitleCandidates({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
+                  className="min-w-0 flex-1 resize-none rounded-input border border-transparent bg-transparent px-1 py-1 font-display text-base outline-none field-sizing-content hover:border-border focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full"
                 />
 
                 <button
@@ -288,7 +304,7 @@ export function TitleCandidates({
                 // 16px, like every other field on the page: iOS Safari zooms
                 // the whole page when a field under 16px takes focus, and this
                 // is the one you reach for on a phone to say why this title.
-                className="w-full rounded-input border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent"
+                className="w-full rounded-input border border-transparent bg-transparent px-1 py-1 text-base text-muted outline-none hover:border-border focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
               />
 
               {issue && issue.id === candidate.id ? (

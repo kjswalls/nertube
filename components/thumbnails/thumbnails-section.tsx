@@ -10,6 +10,8 @@ import {
   type ThumbnailState,
 } from "@/app/actions/thumbnails";
 import { useVideoVersion } from "@/components/video-version";
+import { useTimeZone } from "@/components/time-zone";
+import { formatInstant } from "@/lib/calendar-dates";
 import {
   describeSketchRejection,
   sketchExtensionFor,
@@ -106,6 +108,7 @@ export function ThumbnailsSection({
 }) {
   const router = useRouter();
   const version = useVideoVersion();
+  const zone = useTimeZone();
 
   const [busy, setBusy] = useState<{ role: ThumbnailRole; kind: Busy } | null>(null);
   const [messages, setMessages] = useState<
@@ -456,12 +459,7 @@ export function ThumbnailsSection({
               live={live}
               liveNote={
                 live && liveEntry
-                  ? `Live since ${new Date(liveEntry.swappedAt).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                      timeZone: "UTC",
-                    })} — ${liveEntry.reason}`
+                  ? `Live since ${formatInstant(liveEntry.swappedAt, zone) ?? liveEntry.swappedAt} — ${liveEntry.reason}`
                   : null
               }
               title={title}

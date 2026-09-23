@@ -105,13 +105,14 @@ function Row({
         isNext ? "border-l-accent" : "border-l-transparent",
       ].join(" ")}
     >
-      <label className="flex min-w-0 flex-1 items-start gap-2 text-[13px] leading-5">
+      {/* Under a thumb the sentence is the target, 44px tall, as on /now (M10). */}
+      <label className="flex min-w-0 flex-1 items-start gap-2 text-[13px] leading-5 thumb:min-h-11 thumb:items-center thumb:text-[15px]">
         <input
           type="checkbox"
           checked={checked}
           disabled={unsaved}
           onChange={(event) => onToggle(item.id, event.target.checked)}
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:mt-0 thumb:size-5"
         />
         <span
           className={[
@@ -159,7 +160,7 @@ function Row({
         data-testid="checklist-delete"
         disabled={unsaved}
         onClick={() => onDelete(item.id)}
-        className="shrink-0 rounded-button border border-transparent px-1 text-[12px] leading-5 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+        className="shrink-0 rounded-button border border-transparent px-1 text-[12px] leading-5 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:size-11 thumb:text-[16px]"
       >
         <span aria-hidden="true">×</span>
         <span className="sr-only">Delete “{item.text}”</span>
@@ -206,13 +207,13 @@ function AddItem({ onAdd }: { onAdd: (text: string) => void }) {
         maxLength={MAX_ITEM_LENGTH}
         onChange={(event) => setText(event.target.value)}
         placeholder="Add an item — it goes to the top"
-        className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent"
+        className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 text-[13px] outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 max-md:text-[16px]"
       />
       <button
         type="submit"
         data-testid="checklist-add-submit"
         disabled={text.trim() === ""}
-        className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none enabled:hover:border-accent/50 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+        className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none enabled:hover:border-accent/50 disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
       >
         Add
       </button>

@@ -86,7 +86,7 @@ function ViewLink({
       aria-current={current ? "page" : undefined}
       data-testid="ideas-view-link"
       className={[
-        "flex items-center gap-1.5 rounded-button border px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+        "flex items-center gap-1.5 rounded-button border px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3 thumb:text-[14px]",
         current
           ? "border-border bg-surface font-medium text-foreground"
           : "border-transparent text-muted hover:text-foreground",

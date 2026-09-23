@@ -3,6 +3,7 @@ import {
   formatDateColumn,
   isDateColumn,
   todayColumn,
+  type TimeZone,
 } from "./calendar-dates";
 import {
   DEFAULT_EST_MINUTES,
@@ -116,7 +117,14 @@ export const QUICK_MINUTES = 10;
  */
 export const NEEDS_A_BLOCK: readonly StageKind[] = ["filming", "editing"];
 
-/** Rule 2's window: metrics are due 24 hours after publishing. */
+/**
+ * Rule 2's window: metrics are due 24 hours after publishing.
+ *
+ * A **duration**, not a calendar day: 24 elapsed hours from the `published_at`
+ * instant, whatever the zone and across a DST change. (Which instant
+ * `published_at` is — the user's midnight on the target date — is
+ * `confirmLive`'s business; see `startOfDay` in `lib/calendar-dates.ts`.)
+ */
 export const METRICS_DUE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** Rule 3's fallback expectation looks at this many recent published videos. */
@@ -463,6 +471,12 @@ const RULE_7_LABEL: Record<GateField, string> = {
 export interface NowContext {
   /** Every channel that owns one of the videos, by id. */
   readonly channels: ReadonlyMap<string, NowChannel>;
+  /**
+   * The user's zone (M10), which decides what "today" is for rule 5's
+   * go-live check. Read once per request on the server and passed in, like
+   * `now`; the client re-ranks with the value the server rendered with.
+   */
+  readonly timeZone: TimeZone;
 }
 
 /**
@@ -532,6 +546,8 @@ export function nextAction(
     needsABlock: rule === 6 && kind !== null && NEEDS_A_BLOCK.includes(kind),
     stageEnteredAt: video.stageEnteredAt,
     ageMs,
+    // Elapsed whole 24-hour periods, not calendar days crossed: a duration, so
+    // it does not depend on the zone.
     daysInStage: Math.floor(ageMs / 86_400_000),
   });
 
@@ -620,7 +636,7 @@ export function nextAction(
     // With no Published stage enabled there is nowhere to confirm *into*, so
     // the rule cannot fire and the video falls through to its checklist.
     if (published && video.targetPublishDate !== null) {
-      const due = !isFuture(video.targetPublishDate, now);
+      const due = !isFuture(video.targetPublishDate, now, context.timeZone);
       return build(
         5,
         due
@@ -730,28 +746,26 @@ function swappedSince(lastSwapAt: string | null, metricsLoggedAt: string): boole
 /**
  * Is this calendar date still ahead of us?
  *
- * Whole calendar days, both sides: `todayColumn(now)` is the UTC day the clock
- * is on, and the answer is whether the target day is strictly after it — so the
- * day itself counts as on/after and the row is Ready from midnight UTC on the
- * target date. PLAN.md's wording is *in the future → Waiting; on/after →
- * Ready*.
+ * Whole calendar days, both sides: `todayColumn(now, zone)` is the day the
+ * clock is on **in the user's zone**, and the answer is whether the target day
+ * is strictly after it — so the day itself counts as on/after and the row is
+ * Ready from the user's local midnight on the target date. PLAN.md's wording
+ * is *in the future → Waiting; on/after → Ready*.
  *
- * `now` is real UTC and `target_publish_date` is a zoneless `date`, which has a
- * consequence worth stating rather than discovering: a user east of UTC sees
- * "Confirm live" from their local morning, and a user west of it sees it during
- * the evening before. One user, one zone, and a `date` column with no zone in
- * it — pinning this to a configured zone is a settings question (M7), not an
- * arithmetic one.
+ * Until M10 this was the UTC day, so a user east of UTC saw "Confirm live"
+ * from their local morning and one west of it the evening before. The zone is
+ * the user's setting now (`lib/time-zone-data.ts`), and the calendar's "today"
+ * ring and the board's filming badge use the same one.
  */
-function isFuture(date: string, now: number): boolean {
+function isFuture(date: string, now: number, zone: TimeZone): boolean {
   // Whole calendar days through the one helper, rather than a second
-  // `Date.parse(date + "T00:00:00Z")`: `todayColumn` is the same UTC floor this
-  // used to compute by hand, and it cannot roll `2026-02-30` forward into
-  // March the way `Date.parse` does. A value that is not a calendar day at all
+  // `Date.parse(date + "T00:00:00Z")`: `todayColumn` is the one definition of
+  // today, and it cannot roll `2026-02-30` forward into March the way
+  // `Date.parse` does. A value that is not a calendar day at all
   // keeps the old answer — not in the future, so the row is offered rather than
   // held back over a column nobody can read.
   if (!isDateColumn(date)) return false;
-  return compareDateColumns(date, todayColumn(now)) > 0;
+  return compareDateColumns(date, todayColumn(now, zone)) > 0;
 }
 
 /** Elapsed ms since an ISO stamp; never negative, 0 for an unparseable one. */

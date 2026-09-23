@@ -13,12 +13,14 @@ import {
   type BoardStage,
 } from "@/components/board/types";
 import { formatDateColumn, todayColumn } from "@/lib/calendar-dates";
+import { readTimeZone } from "@/lib/time-zone-data";
 import { isStageKind, type StageKind } from "@/lib/defaults";
 import { readFilmingVideos } from "@/lib/filming-data";
 import { cacheBusted, signedUrlsFor } from "@/lib/storage";
 import { readPaged } from "@/lib/paged";
 import { requireUser } from "@/lib/supabase/require-user";
 import { channelPageTitle } from "@/lib/page-title";
+import { readClock } from "@/lib/request-clock";
 
 export async function generateMetadata({
   params,
@@ -125,8 +127,12 @@ export default async function BoardPage({
   // "now" is the request's own time. Every clock-dependent value the client
   // gets — days in stage, the 30-day cut-off — is derived from this one read,
   // so the whole board agrees with itself.
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = await readClock();
+  // And the user's zone, once, for the one calendar-day question the board
+  // asks: which day is today (the filming badge's "from today on", the
+  // target-date labels). Days in stage and the 30-day cut-off are durations
+  // and do not use it.
+  const { zone } = await readTimeZone();
 
   // Concept sketches live in a private bucket, so the card needs a signed URL
   // per path. Signed in ONE request for the whole board (PLAN.md: *server
@@ -291,11 +297,13 @@ export default async function BoardPage({
               strip scrolls sideways inside itself, and the ← → on every card
               is the same `move_video` a drag is. Dragging is what does not
               travel (touch does not start an HTML5 drag), so the sentence that
-              offers it is swapped for the one that works.
+              offers it is swapped for the one that works. (M10: the way
+              across the columns on a phone is now the row of stages above
+              them, which needs no sentence.)
             */}
             <span className="hidden thumb:inline">
-              Swipe sideways through the columns; ← and → on a card move it.
-              Dragging cards needs a mouse and a wider screen.
+              ← and → on a card move it to the stage beside it. Dragging
+              cards needs a mouse.
             </span>
           </p>
         </div>
@@ -358,7 +366,7 @@ export default async function BoardPage({
             wipThreshold={channel.wip_threshold}
             staleDays={channel.stale_days}
             filmingElsewhere={filmingElsewhere}
-            today={todayColumn(now)}
+            today={todayColumn(now, zone)}
             now={now}
           />
         )}
@@ -367,7 +375,12 @@ export default async function BoardPage({
   );
 }
 
-/** Whole days between `iso` and `now`, floored, never negative. */
+/**
+ * Whole days between `iso` and `now`, floored, never negative.
+ *
+ * A **duration** — elapsed 24-hour periods — not the number of midnights
+ * crossed, so it needs no zone: "3 days in stage" means 72 hours or more.
+ */
 function wholeDaysSince(iso: string, now: number): number {
   const entered = Date.parse(iso);
   if (Number.isNaN(entered)) return 0;

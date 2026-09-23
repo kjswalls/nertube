@@ -174,7 +174,7 @@ export function VideoCard({
           <Link
             href={`/videos/${card.id}`}
             draggable={false}
-            className="line-clamp-3 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+            className="line-clamp-3 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
           >
             {title}
           </Link>

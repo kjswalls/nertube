@@ -330,7 +330,7 @@ function AddTemplateItem({
           maxLength={MAX_ITEM_LENGTH}
           onChange={(event) => setText(event.target.value)}
           placeholder="Add an item — it goes at the end"
-          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none placeholder:font-sans placeholder:text-[13px] placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base"
+          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none placeholder:font-sans placeholder:text-[13px] placeholder:text-muted focus-visible:ring-2 focus-visible:ring-accent max-md:basis-full max-md:text-base thumb:min-h-11"
         />
         <label htmlFor={minutesId} className="sr-only">
           Minutes for the new {stageName} item
@@ -347,7 +347,7 @@ function AddTemplateItem({
           onChange={(event) => setMinutes(event.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
-          className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
+          className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
         />
         <span aria-hidden="true" className="font-mono text-[11px] text-muted">
           min

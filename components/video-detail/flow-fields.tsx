@@ -11,6 +11,8 @@ import {
   type SaveOutcome,
 } from "@/components/autosave";
 import { useVideoVersion, type VideoVersion } from "@/components/video-version";
+import { useTimeZone } from "@/components/time-zone";
+import { formatInstant, type TimeZone } from "@/lib/calendar-dates";
 import {
   MAX_NOTES_LENGTH,
   MAX_URL_LENGTH,
@@ -103,6 +105,7 @@ interface Shared {
 
 export function FlowFields(props: FlowFieldsProps) {
   const router = useRouter();
+  const zone = useTimeZone();
 
   const version = useVideoVersion();
 
@@ -157,7 +160,7 @@ export function FlowFields(props: FlowFieldsProps) {
         // at the old one: `absorb` used to update `publishedAt` and not
         // `publishedLabel`, so even the save path could leave the two out of
         // step.
-        publishedLabel: formatPublishedDate(video.publishedAt),
+        publishedLabel: formatPublishedDate(video.publishedAt, zone),
         waitingSince: video.waitingSince,
         // Recomputed here rather than on the server because this is a save the
         // user just made: the clock is read inside an event handler, never while
@@ -270,7 +273,7 @@ function FieldLabel({
 
 const INPUT_CLASS =
   // 16px text so iOS does not zoom the page when the field takes focus.
-  "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11";
 
 /**
  * Turn one flow save into the `SaveOutcome` the autosave hook speaks.
@@ -309,20 +312,13 @@ function flowSaver(
 }
 
 /**
- * `published_at` as a date, in UTC with a fixed locale — the same formatting
- * the server render uses, so a label recomputed after a save reads identically
- * to one that came down with the page.
+ * `published_at` as a date in the user's zone (M10) — the same formatter and
+ * zone the server render uses (`app/videos/[id]/page.tsx`), so a label
+ * recomputed after a save reads identically to one that came down with the
+ * page.
  */
-function formatPublishedDate(value: string | null): string | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+function formatPublishedDate(value: string | null, zone: TimeZone): string | null {
+  return formatInstant(value, zone);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -405,7 +401,7 @@ function TargetDateField({
             field.setValue("");
             field.commit();
           }}
-          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
         >
           Clear
         </button>
@@ -491,7 +487,7 @@ function WaitingOnField({
             field.setValue("");
             field.commit();
           }}
-          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+          className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
         >
           Unblocked
         </button>
@@ -759,7 +755,7 @@ function ArchiveButton({
           data-archived={archived ? "true" : "false"}
           disabled={pending}
           onClick={() => send(!archived)}
-          className="rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+          className="rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
         >
           {pending
             ? archived

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { CORE_KIND_ORDER } from "@/lib/defaults";
+import { scriptIsEditable } from "@/lib/script";
+
 import {
   DEFAULT_SECTION,
   parseSection,
@@ -103,6 +106,18 @@ describe("sectionReadiness", () => {
       sectionReadiness({ ...FRESH, stageKind: "editing", scriptFilled: true }).script
         .kind,
     ).toBe("done");
+  });
+
+  it("locks the Script tab exactly where the editor is closed (M10)", () => {
+    // The tab's padlock and the editor's rule are one decision stated twice —
+    // `reached()` here, `scriptIsEditable` in `lib/script.ts`, which
+    // `updateVideo` enforces. A lock over an open editor, or an open tab over
+    // a refused save, is the contradiction this pins shut, for every kind and
+    // for the inert stage.
+    for (const stageKind of [...CORE_KIND_ORDER, null]) {
+      const locked = sectionReadiness({ ...FRESH, stageKind }).script.kind === "locked";
+      expect(locked, String(stageKind)).toBe(!scriptIsEditable(stageKind));
+    }
   });
 
   it("never locks a tab on a video sitting in an inert stage", () => {

@@ -125,7 +125,7 @@ export default async function CapturePage({
         </h1>
         <Link
           href={`/c/${target.slug}/board`}
-          className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center thumb:px-3"
         >
           Board
         </Link>

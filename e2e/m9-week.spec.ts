@@ -10,7 +10,8 @@ import {
   SEED_CHECKLISTS,
   SEED_STAGES,
 } from '../lib/defaults';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { todayColumn } from '../lib/calendar-dates';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 import { untilTaken } from './hydration';
 import { makePng } from './png';
 
@@ -535,7 +536,7 @@ async function walkTheWeek(page: Page, device: Device): Promise<void> {
   /* ---------------------------------------------------- script ---- */
   await test.step('script it', async () => {
     await openVideo(page, id, 'script');
-    await expect(page.getByTestId('script-text')).toContainText('Nine hours a night');
+    await expect(page.getByTestId('script-editor')).toHaveValue(/Nine hours a night/);
     await shot(page, device, '08-script');
 
     await page.goto('/now');
@@ -623,7 +624,8 @@ async function walkTheWeek(page: Page, device: Device): Promise<void> {
     await shot(page, device, '14-thumbnails');
 
     await openVideo(page, id, 'schedule');
-    const today = new Date().toISOString().slice(0, 10);
+    // Today in the seed account's zone (M10), not the machine's.
+    const today = todayColumn(Date.now(), SEED_TIME_ZONE);
     const date = page.getByTestId('target-date');
     await untilTaken(
       async () => {

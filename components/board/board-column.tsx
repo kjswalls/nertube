@@ -86,6 +86,10 @@ export function BoardColumn({
         // quiet Filming column look like the furniture they are, which is what
         // makes the one column that *is* over its limit findable at a glance.
         "flex w-column shrink-0 flex-col self-stretch rounded-card border bg-surface transition",
+        // A phone (M10): one column at a time, the width of the screen less a
+        // 16px sliver of the next, snapped. At 216px a card's title had a
+        // 106px column and was cut at three lines of two words each.
+        "max-md:w-[calc(100vw-4rem)] max-md:snap-start",
         wipWarning ? "border-over-limit/60" : "border-border",
         isDropTarget ? "ring-2 ring-accent" : "",
       ].join(" ")}

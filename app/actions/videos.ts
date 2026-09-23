@@ -19,6 +19,15 @@ import {
   VideoPatchSchema,
   type VideoPatchInput,
 } from "@/lib/video-fields";
+import { hasHookPlaceholder, stageName } from "@/lib/channel-settings";
+import { isStageKind } from "@/lib/defaults";
+import {
+  buildScriptFromTemplate,
+  chosenHookText,
+  isScriptStructure,
+  scriptIsEditable,
+  type ScriptStructure,
+} from "@/lib/script";
 import { requireUser } from "@/lib/supabase/require-user";
 import { cleanProse } from "@/lib/text";
 
@@ -379,6 +388,10 @@ export interface VideoState {
   readonly verticalId: string | null;
   readonly horizontalId: string | null;
   readonly tags: readonly string[];
+  /* script — the Script tab (M10) */
+  readonly script: string | null;
+  readonly scriptStructure: ScriptStructure | null;
+  readonly endScreenTarget: string | null;
   /**
    * The row's new version stamp. The page hands it back as the precondition on
    * its next write — see `components/video-version.tsx`.
@@ -401,7 +414,7 @@ export type UpdateVideoResult =
 
 /** The columns every write reads back. `channel_id` is for the revalidation. */
 const VIDEO_COLUMNS =
-  "channel_id, updated_at, title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, vertical_id, horizontal_id, tags";
+  "channel_id, updated_at, title, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, archived_at, vertical_id, horizontal_id, tags, script, script_structure, end_screen_target";
 
 interface VideoRow {
   channel_id: string;
@@ -422,6 +435,9 @@ interface VideoRow {
   vertical_id: string | null;
   horizontal_id: string | null;
   tags: string[] | null;
+  script: string | null;
+  script_structure: string | null;
+  end_screen_target: string | null;
 }
 
 /**
@@ -457,6 +473,13 @@ function stateOf(row: VideoRow): VideoState {
     // `videos.tags` is `not null default '{}'`, so the null branch is only for
     // a row selected by something that did not ask for the column.
     tags: row.tags ?? [],
+    script: row.script,
+    // The CHECK holds the same three values; anything else is a row written by
+    // hand, and reads as "not chosen" rather than as a value the select lacks.
+    scriptStructure: isScriptStructure(row.script_structure)
+      ? row.script_structure
+      : null,
+    endScreenTarget: row.end_screen_target,
     updatedAt: row.updated_at,
   };
 }
@@ -517,6 +540,35 @@ export async function updateVideo(
     patch.horizontal_id = fields.horizontalId;
   }
   if (fields.tags !== undefined) patch.tags = [...fields.tags];
+
+  /*
+    The Script tab's three columns (M10), and the one rule they carry: a
+    script is written from Scripting onward (`scriptIsEditable`, where the
+    reason is written down). The tab says so and draws no editor before then;
+    this is the same rule for a request that did not come from the tab — a
+    stale page, a forged POST. The column grant in 0001 would allow the write,
+    so the refusal lives here, where every other rule about these fields is.
+  */
+  const touchesScript =
+    fields.script !== undefined ||
+    fields.scriptStructure !== undefined ||
+    fields.endScreenTarget !== undefined;
+  if (touchesScript) {
+    const refusal = await scriptWriteRefusal(supabase, videoId);
+    if (refusal !== null) {
+      return {
+        ok: false,
+        error: `${refusal} Nothing was saved; what you typed is still here.`,
+      };
+    }
+  }
+  if (fields.script !== undefined) patch.script = fields.script;
+  if (fields.scriptStructure !== undefined) {
+    patch.script_structure = fields.scriptStructure;
+  }
+  if (fields.endScreenTarget !== undefined) {
+    patch.end_screen_target = fields.endScreenTarget;
+  }
 
   /*
     Archive and restore are not a column write any more.
@@ -698,4 +750,119 @@ async function revalidateVideoViews(
     // can change, and the matrix's counts are the filing itself.
     revalidatePath(`/c/${channel.slug}/ideas`);
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* The script                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Why this video's script cannot be written now, or `null` when it can.
+ *
+ * Two reads (the video's stage, then its kind), because `videos` reaches
+ * `stages` through a composite foreign key and every other read on this page
+ * takes the plain-select line for the same reason. Only paid by a patch that
+ * touches the script.
+ */
+async function scriptWriteRefusal(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  videoId: string,
+): Promise<string | null> {
+  const { data: video } = await supabase
+    .from("videos")
+    .select("stage_id, channel_id")
+    .eq("id", videoId)
+    .maybeSingle();
+  // No row is the update's own "does not exist any more" — let it say so.
+  if (!video) return null;
+
+  const { data: stages } = await supabase
+    .from("stages")
+    .select("id, name, kind")
+    .eq("channel_id", video.channel_id);
+
+  const current = (stages ?? []).find((stage) => stage.id === video.stage_id);
+  const kind = isStageKind(current?.kind) ? current.kind : null;
+  if (scriptIsEditable(kind)) return null;
+
+  const scripting = stageName(
+    { scripting: (stages ?? []).find((stage) => stage.kind === "scripting")?.name },
+    "scripting",
+  );
+  return `This video is in ${current?.name ?? "an earlier stage"}, before ${scripting}, so its script is not written yet — the title, thumbnail concept and hook come first.`;
+}
+
+export type ScriptFromTemplateResult =
+  | {
+      ok: true;
+      /** The script `move_video` would write now. */
+      script: string;
+      /** The chosen hook that went into `{{hook}}`, or null when none is. */
+      hook: string | null;
+      /** Whether the template has a `{{hook}}` for it to go into at all. */
+      templateHasHook: boolean;
+      channelName: string;
+    }
+  | { ok: false; error: string };
+
+/**
+ * "Reset from template": the script this video would get from its channel's
+ * template and its chosen hook **as they are stored now** — built by the one
+ * function that mirrors `move_video` (`buildScriptFromTemplate`).
+ *
+ * ## Why this reads and does not write
+ *
+ * The Script tab writes its column through one save queue with one version
+ * check, and a reset is an edit like any other: it replaces the text in the
+ * box, and the box saves. Writing it here instead would be a second write path
+ * into `script` racing the editor's own queue — a save still on the wire when
+ * the reset landed would be refused as "changed somewhere else" by the page's
+ * own version token, or worse, land after it. So this answers "what would the
+ * template give me?", the page asks the person whether to replace their text
+ * with it, and on yes the editor sends it like a keystroke — which is also why
+ * Undo is nothing more than sending the old text back.
+ *
+ * Refused before Scripting for the same reason `updateVideo` refuses the
+ * column there.
+ */
+export async function scriptFromTemplate(
+  videoId: string,
+): Promise<ScriptFromTemplateResult> {
+  if (!z.uuid().safeParse(videoId).success) {
+    return { ok: false, error: "That video does not exist any more." };
+  }
+
+  const { supabase } = await requireUser();
+
+  const { data: video } = await supabase
+    .from("videos")
+    .select("channel_id, hooks")
+    .eq("id", videoId)
+    .maybeSingle();
+  if (!video) return { ok: false, error: "That video does not exist any more." };
+
+  const refusal = await scriptWriteRefusal(supabase, videoId);
+  if (refusal !== null) {
+    return { ok: false, error: refusal };
+  }
+
+  const { data: channel, error } = await supabase
+    .from("channels")
+    .select("name, script_template")
+    .eq("id", video.channel_id)
+    .maybeSingle();
+  if (error || !channel) {
+    return {
+      ok: false,
+      error: `Could not read the channel's template${error ? `: ${error.message}` : "."}`,
+    };
+  }
+
+  return {
+    ok: true,
+    script: buildScriptFromTemplate(channel.script_template, video.hooks),
+    hook: chosenHookText(video.hooks),
+    templateHasHook: hasHookPlaceholder(channel.script_template),
+    channelName: channel.name,
+  };
 }

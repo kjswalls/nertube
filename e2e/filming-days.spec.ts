@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
 import { addDays, formatDateColumn, todayColumn } from '../lib/calendar-dates';
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 
 import { untilTaken } from './hydration';
 
@@ -56,7 +56,8 @@ const TITLES = {
 let db: pg.Client;
 
 /** The clock, read once per run: every date below is derived from this. */
-const TODAY = todayColumn(Date.now());
+// The seed account's today, in the account's zone (M10) — not the machine's.
+const TODAY = todayColumn(Date.now(), SEED_TIME_ZONE);
 /** The Saturday-ish future date the tests book. */
 const SHOOT = addDays(TODAY, 12) as string;
 /** A second free date, for "move it" and "a different day". */

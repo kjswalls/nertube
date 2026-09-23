@@ -25,6 +25,7 @@ import {
   type BoardCard,
   type BoardStage,
 } from "./types";
+import { StageJump } from "./stage-jump";
 import { VideoCard } from "./video-card";
 
 /**
@@ -826,6 +827,15 @@ export function Board({
     <>
       <WeeklyStrip columns={stripColumns} staleDays={staleDays} />
 
+      <StageJump
+        stages={columns.map(({ stage, total }) => ({
+          id: stage.id,
+          name: stage.name,
+          count: total,
+        }))}
+        boardRef={boardRef}
+      />
+
       <div
         ref={boardRef}
         data-testid="board"
@@ -844,7 +854,11 @@ export function Board({
           is supposed to live. `components/app-shell.tsx` clips the shell as
           well, so nothing else can reintroduce it either.
         */
-        className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-4 [contain:paint]"
+        /*
+          Below `md` a column is nearly the screen's width and the strip snaps
+          to one column at a time (M10); `StageJump` above is the way across.
+        */
+        className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-4 [contain:paint] max-md:snap-x max-md:snap-mandatory"
       >
         {columns.map(({ stage, total, visible, overflow }) => {
           const wipWarning =
@@ -933,7 +947,7 @@ export function Board({
                     data-testid="idea-overflow"
                     draggable={false}
                     title="Open the idea bank: every idea in this channel, with filters and promote."
-                    className="block rounded-button px-1 py-2 text-[11px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+                    className="block rounded-button px-1 py-2 text-[11px] text-muted underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center thumb:text-[13px]"
                   >
                     +{overflow} more in Ideas
                   </Link>

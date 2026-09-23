@@ -166,7 +166,7 @@ export function TagEditor({
                 key={tag}
                 data-testid="tag-chip"
                 data-tag={tag}
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pr-1 pl-2.5 text-[13px]"
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pr-1 pl-2.5 text-[13px] thumb:py-0 thumb:pr-0 thumb:text-[14px]"
               >
                 {tag}
                 <button
@@ -177,7 +177,7 @@ export function TagEditor({
                   /* The tag is in the name because "Remove" on its own, read out
                      of a list of six, says nothing about which one. */
                   aria-label={`Remove the tag ${tag}`}
-                  className="rounded-full px-1 leading-none text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+                  className="rounded-full px-1 leading-none text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:size-11 thumb:text-[16px]"
                 >
                   ×
                 </button>
@@ -231,7 +231,7 @@ export function TagEditor({
               // small betrayal that stops people using a field.
               if (draft.trim() !== "") add(draft);
             }}
-            className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            className="min-w-0 flex-1 rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
           />
 
           <button
@@ -239,7 +239,7 @@ export function TagEditor({
             data-testid="tag-add"
             disabled={full || draft.trim() === ""}
             onClick={() => add(draft)}
-            className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+            className="shrink-0 rounded-button border border-border px-3 py-2 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11"
           >
             Add
           </button>
@@ -266,7 +266,7 @@ export function TagEditor({
               data-tag={tag}
               disabled={pending}
               onClick={() => add(tag)}
-              className="rounded-full border border-dashed border-border px-2.5 py-0.5 text-[13px] text-muted outline-none hover:border-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+              className="rounded-full border border-dashed border-border px-2.5 py-0.5 text-[13px] text-muted outline-none hover:border-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11 thumb:px-3.5 thumb:text-[14px]"
             >
               {tag}
             </button>

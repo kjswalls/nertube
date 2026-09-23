@@ -131,7 +131,7 @@ export function IdeaRow({
             <Link
               href={`/videos/${idea.id}`}
               data-testid="idea-open"
-              className="outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+              className="outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:block thumb:min-h-11"
             >
               {title}
             </Link>

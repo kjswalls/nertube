@@ -83,7 +83,7 @@ function channel(over: Partial<NowChannel> = {}): NowChannel {
 }
 
 function contextOf(...channels: NowChannel[]): NowContext {
-  return { channels: new Map(channels.map((c) => [c.id, c])) };
+  return { channels: new Map(channels.map((c) => [c.id, c])), timeZone: "UTC" };
 }
 
 let counter = 0;
@@ -518,6 +518,26 @@ describe("rule 5 — scheduled", () => {
 
   it("falls through when there is no date to go by", () => {
     expect(scheduled(null)).toBeNull();
+  });
+
+  it("turns Ready at the user's midnight, not UTC's (M10)", () => {
+    // 20:00 UTC on 15 September 2025: already the 16th in Auckland (08:00,
+    // NZST), still the 15th in Los Angeles (13:00, PDT).
+    const evening = Date.parse("2025-09-15T20:00:00Z");
+    const ch = channel();
+    const target = video({ stageId: "ch1-scheduled", targetPublishDate: "2025-09-16" });
+    const inZone = (timeZone: string) =>
+      nextAction(target, { ...contextOf(ch), timeZone }, evening);
+
+    expect(inZone("Pacific/Auckland")).toMatchObject({ rule: 5, section: "ready" });
+    expect(inZone("America/Los_Angeles")).toMatchObject({ rule: 5, section: "waiting" });
+    expect(inZone("UTC")).toMatchObject({ rule: 5, section: "waiting" });
+
+    // One minute before Los Angeles's midnight, and one minute after.
+    const la = (iso: string) =>
+      nextAction(target, { ...contextOf(ch), timeZone: "America/Los_Angeles" }, Date.parse(iso));
+    expect(la("2025-09-16T06:59:00Z")).toMatchObject({ section: "waiting" });
+    expect(la("2025-09-16T07:00:00Z")).toMatchObject({ section: "ready" });
   });
 
   it("falls through when the channel has no Published stage enabled", () => {

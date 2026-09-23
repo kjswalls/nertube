@@ -483,8 +483,20 @@ export function useAssistFocus<T extends HTMLElement>(
 ): RefObject<T | null> {
   const ref = useRef<T | null>(null);
   useEffect(() => {
-    ref.current?.focus();
-    ref.current?.scrollIntoView({ block: "nearest" });
+    const heading = ref.current;
+    if (!heading) return;
+    /*
+      `preventScroll`, then one deliberate scroll. On a phone (M10) "nearest"
+      left the panel where it opened — below the button, which is mid-screen
+      after a tap — so the heading showed and the first proposal was under the
+      fold (y 873 of 844 for Generate 20). Below `md` the panel's heading goes
+      to the top of the screen instead, under the pinned bar
+      (`scroll-padding-top`), so what was asked for is what is in view. From
+      `md` up it is "nearest", as it always was.
+    */
+    heading.focus({ preventScroll: true });
+    const phone = window.matchMedia("(width < 48rem)").matches;
+    heading.scrollIntoView({ block: phone ? "start" : "nearest" });
   }, [nonce]);
   return ref;
 }

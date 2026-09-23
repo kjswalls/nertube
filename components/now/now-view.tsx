@@ -10,6 +10,7 @@ import { updateVideo } from "@/app/actions/videos";
 import { defaultIntent, type NowIntent } from "@/components/now/intent";
 import { NowEmpty } from "@/components/now/now-empty";
 import { NowRowItem } from "@/components/now/now-row";
+import { TimeZoneNotice, useTimeZone } from "@/components/time-zone";
 import { useToast } from "@/components/toast";
 import {
   SECTION_ORDER,
@@ -134,9 +135,16 @@ export function NowView({
   /* Derivation                                                              */
   /* ---------------------------------------------------------------------- */
 
+  // The zone the server ranked with (M10): rule 5's "is the go-live date
+  // here yet" is a calendar day in the user's zone, and re-ranking here must
+  // reach the answer the server rendered.
+  const timeZone = useTimeZone();
   const context = useMemo(
-    () => ({ channels: new Map(channels.map((channel) => [channel.id, channel])) }),
-    [channels],
+    () => ({
+      channels: new Map(channels.map((channel) => [channel.id, channel])),
+      timeZone,
+    }),
+    [channels, timeZone],
   );
 
   const current = useMemo(() => {
@@ -612,6 +620,8 @@ export function NowView({
             : `${rows.length} ${rows.length === 1 ? "thing" : "things"} you could move right now.`}
         </p>
       </div>
+
+      <TimeZoneNotice />
 
       {/* ---- filters ---- */}
       {/* Nothing to narrow on an empty list: the chips would be controls that

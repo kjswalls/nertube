@@ -359,7 +359,7 @@ export function FilmingDayPanel({
                   disabled={busy}
                   onClick={() => detach(video.id, video.title, index)}
                   title={`Take “${video.title}” off this filming day. The video itself is untouched.`}
-                  className="shrink-0 rounded-button px-2 py-1 text-[11px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                  className="shrink-0 rounded-button px-2 py-1 text-[11px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
                 >
                   Detach
                 </button>
@@ -397,7 +397,7 @@ export function FilmingDayPanel({
               // The date box replaces this button; focus follows it there.
               requestFocus({ kind: "move-date" });
             }}
-            className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
           >
             Move this day…
           </button>
@@ -420,7 +420,7 @@ export function FilmingDayPanel({
               data-testid="move-day-save"
               disabled={busy || moving === day.onDate}
               onClick={moveDay}
-              className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] font-medium outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+              className="rounded-button border border-border bg-background px-2.5 py-1 text-[12px] font-medium outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
             >
               Move it
             </button>
@@ -431,7 +431,7 @@ export function FilmingDayPanel({
                 setMoving(null);
                 requestFocus({ kind: "move" });
               }}
-              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
             >
               Keep the date
             </button>
@@ -461,7 +461,7 @@ export function FilmingDayPanel({
               data-testid="cancel-day-yes"
               disabled={busy}
               onClick={cancelDay}
-              className="rounded-button border border-over-limit/50 px-2.5 py-1 text-[12px] font-medium text-over-limit outline-none transition-colors hover:bg-over-limit/10 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+              className="rounded-button border border-over-limit/50 px-2.5 py-1 text-[12px] font-medium text-over-limit outline-none transition-colors hover:bg-over-limit/10 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
             >
               Yes, cancel it
             </button>
@@ -472,7 +472,7 @@ export function FilmingDayPanel({
                 setConfirming(false);
                 requestFocus({ kind: "cancel" });
               }}
-              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-button px-2 py-1 text-[12px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
             >
               Keep it
             </button>
@@ -488,7 +488,7 @@ export function FilmingDayPanel({
               // answer, not to `<body>`.
               requestFocus({ kind: "cancel-yes" });
             }}
-            className="rounded-button border border-border px-2.5 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+            className="rounded-button border border-border px-2.5 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
           >
             Cancel this day…
           </button>

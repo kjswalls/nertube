@@ -128,7 +128,7 @@ export function RepurposedLane({
           onChange={(event) => void toggle(event.target.checked)}
           className="size-4 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent"
         />
-        <label htmlFor={inputId} className="text-sm">
+        <label htmlFor={inputId} className="text-sm thumb:min-h-11 thumb:py-3">
           The <span className="font-medium">{stage.name}</span> lane is switched
           on for this channel
         </label>

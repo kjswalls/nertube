@@ -11,7 +11,7 @@ import {
   type EvidenceFacts,
 } from "@/lib/checklist";
 import { readPaged } from "@/lib/paged";
-import { compareKinds, isStageKind, type StageKind } from "@/lib/defaults";
+import { isStageKind, type StageKind } from "@/lib/defaults";
 import { stageName } from "@/lib/channel-settings";
 import { GATE_ANCHOR, readHooks, readTitleCandidates } from "@/lib/packaging";
 import {
@@ -43,6 +43,7 @@ import type { SwapEntry } from "@/components/thumbnails/swap-log";
 import { ROLE_LABEL } from "@/components/thumbnails/roles";
 import { PostPublishBlock } from "@/components/post-publish/post-publish-block";
 import { ScriptSection } from "@/components/video-sections/script-section";
+import { isScriptStructure, scriptIsEditable } from "@/lib/script";
 import {
   parseSection,
   SECTION_PARAM,
@@ -55,9 +56,12 @@ import { FlowFields, type FlowStage } from "@/components/video-detail/flow-field
 import {
   compareDateColumns,
   formatDateColumn,
+  formatInstant,
   isDateColumn,
   todayColumn,
+  type TimeZone,
 } from "@/lib/calendar-dates";
+import { readTimeZone } from "@/lib/time-zone-data";
 import { readLinkableFilmingDays } from "@/lib/filming-data";
 import { videoPageTitle } from "@/lib/page-title";
 import { formatAge } from "@/components/video-detail/age";
@@ -65,6 +69,7 @@ import { PackagingBlock } from "@/components/packaging/packaging-block";
 import { VideoVersionProvider } from "@/components/video-version";
 
 import { ConceptSketch } from "./concept-sketch";
+import { readClock } from "@/lib/request-clock";
 
 export async function generateMetadata({
   params,
@@ -151,7 +156,7 @@ export default async function VideoDetailPage({
   const { data: video, error } = await supabase
     .from("videos")
     // prettier-ignore
-    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, filming_day_id, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at, brainstorm_last")
+    .select("id, title, channel_id, stage_id, updated_at, thumbnail_concept_path, thumbnail_concept, title_candidates, hooks, packaging_skipped_at, packaging_skip_reason, script, script_structure, end_screen_target, target_publish_date, youtube_url, published_at, notes, waiting_on, waiting_since, filming_day_id, archived_at, vertical_id, horizontal_id, tags, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path, shipped_role, first24_impressions, first24_ctr, first24_views, new_viewers_note, metrics_logged_at, swap_dismissed_at, brainstorm_last")
     .eq("id", id)
     .maybeSingle();
 
@@ -474,8 +479,10 @@ export default async function VideoDetailPage({
     one string on the server and a different one in the browser a moment later,
     which is a hydration mismatch.
   */
-  // eslint-disable-next-line react-hooks/purity
-  const now = Date.now();
+  const now = await readClock();
+  // The user's zone, read once like the clock (M10): which day is today, and
+  // which day `published_at` fell on, are both answered in it.
+  const { zone } = await readTimeZone();
 
   const flowStages: FlowStage[] = (stageRows ?? [])
     .filter((row) => row.is_enabled)
@@ -497,11 +504,11 @@ export default async function VideoDetailPage({
 
     From today onwards, plus the one it is already on when that is in the past —
     a video linked to last Saturday's shoot has to be able to name the day it is
-    on. `todayColumn(now)` turns this page's single clock read into a calendar
+    on. `todayColumn(now, zone)` turns this page's single clock read into a calendar
     day through the one helper that is allowed to (`lib/calendar-dates.ts`), so
     the list and the board's badge cannot land on opposite sides of midnight.
   */
-  const today = todayColumn(now);
+  const today = todayColumn(now, zone);
   /*
     Formatted here, on the server, and passed down as strings.
 
@@ -543,7 +550,7 @@ export default async function VideoDetailPage({
         {channel ? (
           <Link
             href={`/c/${channel.slug}/board`}
-            className="underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+            className="underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center thumb:text-[13px]"
           >
             ← {channel.name} board
           </Link>
@@ -631,6 +638,33 @@ export default async function VideoDetailPage({
                  reader to ignore real missing keys, so they stay. */
               packaging: (
                 <>
+                  {/*
+                    A phone's way past the packaging fields (M10). Below `md`
+                    the tab is one column several screens long, with Filing
+                    and the YouTube preview under every field — M9's week
+                    walk found filing an existing idea the longest detour of
+                    the week. Two in-page links, not a reordering: the fields
+                    stay in the order the gate reads them, at every width.
+                  */}
+                  <nav
+                    aria-label="Further down this tab"
+                    data-testid="packaging-jump"
+                    className="flex flex-wrap gap-2 md:hidden"
+                  >
+                    <a
+                      href="#video-filing"
+                      className="flex min-h-11 items-center rounded-button border border-border px-3 text-[14px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      Filing and tags ↓
+                    </a>
+                    <a
+                      href="#video-preview"
+                      className="flex min-h-11 items-center rounded-button border border-border px-3 text-[14px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      How it looks on YouTube ↓
+                    </a>
+                  </nav>
+
                   <PackagingBlock
                     videoId={video.id}
                     stageNames={{
@@ -716,11 +750,15 @@ export default async function VideoDetailPage({
 
               script: (
                 <ScriptSection
+                  videoId={video.id}
                   script={video.script}
-                  reachedScripting={
-                    sectionFacts.stageKind !== null &&
-                    compareKinds(sectionFacts.stageKind, "scripting") >= 0
+                  structure={
+                    isScriptStructure(video.script_structure)
+                      ? video.script_structure
+                      : null
                   }
+                  endScreenTarget={video.end_screen_target}
+                  editable={scriptIsEditable(sectionFacts.stageKind)}
                   stageName={stage?.name ?? "this stage"}
                   scriptingName={nameOf("scripting")}
                 />
@@ -798,7 +836,7 @@ export default async function VideoDetailPage({
                   waitingAgeLabel={formatAge(video.waiting_since, now)}
                   archivedAt={video.archived_at}
                   publishedAt={video.published_at}
-                  publishedLabel={formatPublished(video.published_at)}
+                  publishedLabel={formatPublished(video.published_at, zone)}
                 />
               ),
 
@@ -814,7 +852,7 @@ export default async function VideoDetailPage({
                   videoId={video.id}
                   stageKind={sectionFacts.stageKind}
                   publishedAt={video.published_at}
-                  publishedLabel={formatPublished(video.published_at)}
+                  publishedLabel={formatPublished(video.published_at, zone)}
                   youtubeUrl={video.youtube_url}
                   targetPublishDate={video.target_publish_date}
                   targetLabel={
@@ -897,18 +935,10 @@ export default async function VideoDetailPage({
 }
 
 /**
- * `published_at` as a date, in UTC with a fixed locale so the server and the
- * browser cannot disagree about which day it was — the same treatment the board
- * gives `target_publish_date`.
+ * `published_at` as a date in the user's zone (M10), through the one
+ * formatter for instants. The client recomputes the same label after a save
+ * with the same zone (`useTimeZone()`), so the two cannot disagree.
  */
-function formatPublished(value: string | null): string | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+function formatPublished(value: string | null, zone: TimeZone): string | null {
+  return formatInstant(value, zone);
 }

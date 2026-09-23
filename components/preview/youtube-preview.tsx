@@ -175,6 +175,7 @@ export function YouTubePreview({
 
   return (
     <section
+      id="video-preview"
       data-testid="youtube-preview"
       aria-labelledby="preview-heading"
       /*

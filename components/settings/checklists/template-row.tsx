@@ -161,7 +161,7 @@ export function TemplateRow({
               setTextDraft(item.text);
             }
           }}
-          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base"
+          className="min-w-0 flex-1 rounded-input border border-border bg-surface px-2 py-1 font-display text-[14px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:basis-[calc(100%-1.75rem)] max-md:text-base thumb:min-h-11"
         />
 
         <div className="flex shrink-0 items-center gap-1 max-md:ml-7">
@@ -185,7 +185,7 @@ export function TemplateRow({
             onKeyDown={(event) => {
               if (event.key === "Enter") event.currentTarget.blur();
             }}
-            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:text-base"
+            className="w-16 rounded-input border border-border bg-surface px-2 py-1 text-right font-mono text-[12px] leading-5 outline-none disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
           />
           <span aria-hidden="true" className="font-mono text-[11px] text-muted">
             min
@@ -215,7 +215,7 @@ export function TemplateRow({
             disabled={unsaved}
             onClick={() => onRemove(item.id)}
             title="Remove from the template. Videos already in this stage keep it."
-            className="rounded-button border border-transparent px-1.5 py-1 text-[12px] leading-4 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button border border-transparent px-1.5 py-1 text-[12px] leading-4 text-muted outline-none enabled:hover:border-border enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:size-11 thumb:text-[16px]"
           >
             <span aria-hidden="true">×</span>
             <span className="sr-only">Remove item {index + 1}</span>

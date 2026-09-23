@@ -43,7 +43,7 @@ export function ChannelSwitch({
             aria-current={current ? "page" : undefined}
             data-testid="settings-channel-link"
             className={[
-              "rounded-button border px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+              "rounded-button border px-2 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:flex thumb:min-h-11 thumb:items-center thumb:px-3 thumb:text-[14px]",
               current
                 ? "border-border bg-surface font-medium text-foreground"
                 : "border-transparent text-muted hover:text-foreground",

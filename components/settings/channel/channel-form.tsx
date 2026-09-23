@@ -103,7 +103,7 @@ const TEXTAREA_CLASS =
   "w-full rounded-input border border-border bg-background px-3 py-2 text-base leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-accent resize-y";
 
 const NUMBER_CLASS =
-  "w-24 rounded-input border border-border bg-background px-3 py-2 text-right font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  "w-24 rounded-input border border-border bg-background px-3 py-2 text-right font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11";
 
 function commitOnEnter(commit: () => void) {
   return (event: KeyboardEvent<HTMLInputElement>) => {

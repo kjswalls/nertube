@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 
-import { PG, SEED_EMAIL, SEED_PASSWORD } from '../scripts/dev-stack/shared';
+import { PG, SEED_EMAIL, SEED_PASSWORD, SEED_TIME_ZONE } from '../scripts/dev-stack/shared';
 
 /**
  * `/calendar` — the month grid, walked in a browser.
@@ -43,10 +43,18 @@ const CHANNELS = {
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-/** Today in UTC, which is the zone the whole product decides calendar days in. */
-function todayUtc(): string {
-  const now = new Date();
-  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+/**
+ * Today in the seed account's zone, which is the zone the product decides the
+ * account's calendar days in (M10; it was always UTC before). `en-CA` formats
+ * as `YYYY-MM-DD`; `Intl` directly rather than the helper under test.
+ */
+function seedToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SEED_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 /**
@@ -61,7 +69,7 @@ function monthPlus(month: string, delta: number): string {
   return `${Math.floor(total / 12)}-${pad((total % 12) + 1)}`;
 }
 
-const TODAY = todayUtc();
+const TODAY = seedToday();
 const THIS_MONTH = TODAY.slice(0, 7);
 /** A month far enough ahead to be this file's alone, and always in the future. */
 const BUSY_MONTH = monthPlus(THIS_MONTH, 4);

@@ -66,7 +66,7 @@ export function RemoveConfirm({
           type="button"
           data-testid={`${testIdPrefix}-remove-yes`}
           onClick={onConfirm}
-          className="rounded-button border border-attention/50 px-2 py-0.5 text-attention outline-none hover:bg-attention/10 focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-attention/50 px-2 py-0.5 text-attention outline-none hover:bg-attention/10 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3 thumb:text-[14px]"
         >
           {confirmLabel}
         </button>
@@ -74,7 +74,7 @@ export function RemoveConfirm({
           type="button"
           data-testid={`${testIdPrefix}-remove-keep`}
           onClick={onKeep}
-          className="rounded-button border border-border px-2 py-0.5 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-2 py-0.5 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3 thumb:text-[14px]"
         >
           Keep
         </button>
@@ -89,7 +89,7 @@ export function RemoveConfirm({
       data-testid={`${testIdPrefix}-remove`}
       disabled={state === "busy"}
       onClick={onAsk}
-      className="text-[12px] text-muted underline decoration-border underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
+      className="text-[12px] text-muted underline decoration-border underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 thumb:min-h-11 thumb:px-2 thumb:text-[14px]"
     >
       {state === "busy" ? busyLabel : "Remove"}
       <span className="sr-only"> {subject}</span>
