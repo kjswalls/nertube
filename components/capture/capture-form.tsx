@@ -388,36 +388,67 @@ export function CaptureForm({
         <label htmlFor={titleId} className="text-sm font-medium">
           Idea
         </label>
-        <input
-          ref={titleRef}
-          id={titleId}
-          name="title"
-          type="text"
-          required
-          maxLength={300}
-          /* The modal exists to put the cursor here, and /capture is a
+        {/*
+          The field and, below `md`, the save beside it.
+
+          On a phone the keyboard takes the lower half of the screen the moment
+          this field is focused — which on `/capture` is on arrival — and the
+          form's own Capture button, at the foot of the form, sat 398px down a
+          390×844 screen: under the keyboard. The browser always scrolls the
+          focused field into view, so a button on the field's own line is the
+          one place a save cannot be hidden. The keyboard's return key saves
+          too; this is for the thumb that looks for a button.
+
+          Two submit buttons in the markup, one per layout, never both
+          displayed: `display: none` takes the other out of the tab order and
+          the accessibility tree, so at any width there is one "Capture".
+        */}
+        <div className="flex gap-2">
+          <input
+            ref={titleRef}
+            id={titleId}
+            name="title"
+            type="text"
+            required
+            maxLength={300}
+            /* The modal exists to put the cursor here, and /capture is a
              capture-only route: both are the documented exception to "never
              move focus for the user". */
-          autoFocus={autoFocus}
-          value={title}
-          onChange={(event) => {
-            setTitle(event.target.value);
-            if (clientError) setClientError(null);
-            if (!confirmationHidden) setConfirmationHidden(true);
-          }}
-          onKeyDown={onTitleKeyDown}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={hintId}
-          placeholder="What is the video?"
-          className={field}
-        />
+            autoFocus={autoFocus}
+            value={title}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              if (clientError) setClientError(null);
+              if (!confirmationHidden) setConfirmationHidden(true);
+            }}
+            onKeyDown={onTitleKeyDown}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={hintId}
+            placeholder="What is the video?"
+            className={`${field} min-w-0 flex-1 max-md:min-h-11`}
+          />
+          <button
+            type="submit"
+            data-testid="capture-submit-inline"
+            disabled={submitting}
+            className="min-h-11 shrink-0 rounded-button bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 md:hidden"
+          >
+            {submitting ? "Saving…" : "Capture"}
+          </button>
+        </div>
         <p id={hintId} className="text-xs text-muted">
           Enter saves it as an idea
-          {current ? ` in ${current.name}` : ""}. Shift+Enter adds a hook, notes,
-          tags and the two buckets.
-          {channels.length > 1
-            ? " Alt+1–9, or the chips below, pick the channel."
-            : ""}
+          {current ? ` in ${current.name}` : ""}.
+          {/* Keys a touchscreen does not have, said only where there is a
+              keyboard to press them on — on a phone they were two of the
+              three lines between the field and everything below it. */}
+          <span className="pointer-coarse:hidden">
+            {" "}
+            Shift+Enter adds a hook, notes, tags and the two buckets.
+            {channels.length > 1
+              ? " Alt+1–9, or the chips below, pick the channel."
+              : ""}
+          </span>
         </p>
 
         {/*
@@ -595,7 +626,7 @@ export function CaptureForm({
         <button
           type="submit"
           disabled={submitting}
-          className="min-h-11 rounded-button bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+          className="min-h-11 rounded-button bg-foreground px-4 py-2 text-sm font-medium text-background outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 max-md:hidden"
         >
           {submitting ? "Saving…" : "Capture"}
         </button>

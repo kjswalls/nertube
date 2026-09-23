@@ -139,7 +139,21 @@ export function BoardColumn({
         className="flex min-h-40 flex-1 flex-col gap-2 overflow-y-auto p-2"
       >
         {count === 0 ? (
-          <p className="px-1 py-2 text-[11px] text-muted">Nothing here yet.</p>
+          /*
+            M9: an empty column is a place a card can go, drawn as one — a
+            quiet dashed slot — rather than the sentence "Nothing here yet."
+            repeated eight times across a board whose one busy column is the
+            thing worth reading. The header's count already says 0; a screen
+            reader, which cannot see the slot, gets the sentence instead.
+          */
+          <>
+            <div
+              aria-hidden="true"
+              data-testid="column-empty"
+              className="h-16 rounded-card border border-dashed border-border"
+            />
+            <p className="sr-only">No videos in {name}.</p>
+          </>
         ) : (
           <ul className="flex flex-col gap-2">{children}</ul>
         )}

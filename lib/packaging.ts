@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cleanProse } from "./text";
 
 /**
  * The packaging block's data rules: the shapes that may be written into
@@ -120,7 +121,8 @@ const StableId = z
 function requiredText(max: number, blank: string, tooLong: string) {
   return z
     .string()
-    .transform((value) => value.trim())
+    // NUL out first: Postgres refuses it in any text, jsonb included.
+    .transform((value) => cleanProse(value).trim())
     .pipe(z.string().min(1, blank).max(max, tooLong));
 }
 
@@ -134,7 +136,7 @@ export const TitleCandidateSchema = z.object({
   ),
   note: z
     .string()
-    .transform((value) => value.trim())
+    .transform((value) => cleanProse(value).trim())
     .pipe(
       z
         .string()
@@ -249,7 +251,7 @@ export const SKIP_REASON_TOO_SHORT =
 
 export const SkipReasonSchema = z
   .string()
-  .transform((value) => value.trim())
+  .transform((value) => cleanProse(value).trim())
   .pipe(
     z
       .string()

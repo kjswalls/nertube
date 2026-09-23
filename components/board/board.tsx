@@ -631,7 +631,7 @@ export function Board({
     {
       key: "j",
       description: "Select the next card",
-      hint: { keys: "j / k", text: "select a card" },
+      hint: { keys: "j / k", text: "select a card", label: "Select the next or previous card" },
       run: (event) => {
         event.preventDefault();
         step(1);
@@ -659,7 +659,11 @@ export function Board({
     {
       key: "]",
       description: "Move the selected card forward one stage",
-      hint: { keys: "[ / ]", text: "move a stage" },
+      hint: {
+        keys: "[ / ]",
+        text: "move a stage",
+        label: "Move it back or forward a stage",
+      },
       run: (event) => {
         event.preventDefault();
         if (event.repeat) return;
@@ -669,7 +673,7 @@ export function Board({
     {
       key: "Enter",
       description: "Open the selected card",
-      hint: { keys: "Enter", text: "open it" },
+      hint: { keys: "Enter", text: "open it", label: "Open the selected card" },
       run: (event) => {
         if (!selectedCard) return;
         event.preventDefault();
@@ -679,8 +683,9 @@ export function Board({
     {
       key: "Escape",
       description: "Clear the card selection",
-      // No hint: Escape is the key everybody already tries, and the capture
-      // dialog says "Escape to close" on its own face.
+      // On the sheet, not the bar: Escape is the key everybody already tries,
+      // and the bar is kept for the keys nobody would guess.
+      hint: { keys: "Escape", text: "clear the selection", bar: false },
       run: (event) => {
         // Only when there is a selection to clear. Escape means something to
         // the browser (stopping a load, closing a native picker) and a
@@ -691,7 +696,7 @@ export function Board({
         setAnnouncement("Selection cleared.");
       },
     },
-  ]);
+  ], { group: "On the board" });
 
   /* ----------------------------------------------------------------- dnd -- */
 

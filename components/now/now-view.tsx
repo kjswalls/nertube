@@ -8,6 +8,7 @@ import { moveVideo } from "@/app/actions/moves";
 import { toggleChecklistItem } from "@/app/actions/checklist";
 import { updateVideo } from "@/app/actions/videos";
 import { defaultIntent, type NowIntent } from "@/components/now/intent";
+import { NowEmpty } from "@/components/now/now-empty";
 import { NowRowItem } from "@/components/now/now-row";
 import { useToast } from "@/components/toast";
 import {
@@ -235,9 +236,15 @@ export function NowView({
 
       const row = rows[next];
       setSelection({ videoId: row.videoId, index: next });
-      rowRefs.current
-        .get(row.videoId)
-        ?.scrollIntoView({ block: "nearest", behavior: "auto" });
+      const element = rowRefs.current.get(row.videoId);
+      element?.scrollIntoView({ block: "nearest", behavior: "auto" });
+      /*
+        Focus follows the selection (M9), as it does on the board and in the
+        bank. Without it, focus stayed wherever the last click left it — on a
+        channel chip, say — and `Enter`, which rightly stands aside on a
+        focused button, toggled the chip instead of opening the row.
+      */
+      element?.focus({ preventScroll: true });
     },
     [rows, selectedVideoId],
   );
@@ -502,7 +509,11 @@ export function NowView({
         {
           key: "j",
           description: "Select the next row",
-          hint: { keys: "j / k", text: "select a row" },
+          hint: {
+            keys: "j / k",
+            text: "select a row",
+            label: "Select the next or previous row",
+          },
           run: (event) => {
             event.preventDefault();
             step(1);
@@ -519,7 +530,11 @@ export function NowView({
         {
           key: "x",
           description: "Complete the selected row",
-          hint: { keys: "x", text: "complete the row" },
+          hint: {
+            keys: "x",
+            text: "complete the row",
+            label: "Do the selected row's next action",
+          },
           run: (event) => {
             if (!selectedRow) return;
             event.preventDefault();
@@ -540,17 +555,35 @@ export function NowView({
         {
           key: "Enter",
           description: "Open the selected video",
-          hint: { keys: "Enter", text: "open the video" },
+          hint: {
+            keys: "Enter",
+            text: "open the video",
+            label: "Open the selected row's video",
+          },
           run: (event) => {
             if (!selectedRow) return;
             event.preventDefault();
             router.push(`/videos/${selectedRow.videoId}`);
           },
         },
+        {
+          // M9: the board has cleared its selection on Escape since M1, and
+          // `/now` did not — one key, two meanings, on the two views used most.
+          key: "Escape",
+          description: "Clear the row selection",
+          hint: { keys: "Escape", text: "clear the selection", bar: false },
+          run: (event) => {
+            // Only when there is something to clear: see the board's note on
+            // an Escape that swallows the key with nothing to do.
+            if (!selectedRow) return;
+            event.preventDefault();
+            setSelection(null);
+          },
+        },
       ],
       [perform, router, selectedRow, step],
     ),
-    { enabled: allRows.length > 0 },
+    { enabled: allRows.length > 0, group: "On Now" },
   );
 
   /* ---------------------------------------------------------------------- */
@@ -596,7 +629,7 @@ export function NowView({
                     }))
                   }
                   className={[
-                    "rounded-full border px-2.5 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                    "rounded-full border px-2.5 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3.5 thumb:text-[13px]",
                     on
                       ? "border-accent text-foreground"
                       : "border-border text-muted hover:text-foreground",
@@ -617,7 +650,7 @@ export function NowView({
           }
           title="Rows estimated at ten minutes or less. Filming and editing checklist items need a real block, and Waiting rows are not work, so both are hidden."
           className={[
-            "rounded-full border px-2.5 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+            "rounded-full border px-2.5 py-1 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3.5 thumb:text-[13px]",
             filters.quickOnly
               ? "border-accent text-foreground"
               : "border-border text-muted hover:text-foreground",
@@ -641,13 +674,14 @@ export function NowView({
       </div>
 
       {/* ---- the list ---- */}
-      {sections.length === 0 ? (
+      {sections.length === 0 && allRows.length === 0 ? (
+        // No rows at all: said by *why* — see `now-empty.tsx` (M9).
+        <NowEmpty channels={channels} videos={current} />
+      ) : sections.length === 0 ? (
         <p data-testid="now-empty" className="text-[13px] text-muted">
-          {allRows.length === 0
-            ? "Nothing is waiting on you. Capture an idea with c, or promote one from the board."
-            : hiddenByFilters > 0
-              ? "Nothing matches those filters. Turn one off to see the rest."
-              : `Everything left is set aside for now. Reload to bring ${setAsideCount === 1 ? "it" : "them"} back.`}
+          {hiddenByFilters > 0
+            ? "Nothing matches those filters. Turn one off to see the rest."
+            : `Everything left is set aside for now. Reload to bring ${setAsideCount === 1 ? "it" : "them"} back.`}
         </p>
       ) : (
         <div className="flex max-w-3xl flex-col gap-5">

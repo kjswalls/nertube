@@ -1,6 +1,11 @@
 import Link from "next/link";
 
 import { settingsPath } from "@/components/settings/settings-nav";
+import {
+  PRIMARY_ACTION,
+  QUIET_ACTION,
+  StatePanel,
+} from "@/components/state-panel";
 
 import { BucketCount, QuotaMeter } from "./quota-meter";
 import type { BucketTally } from "./tally";
@@ -52,60 +57,55 @@ export function NoVerticals({
       data-horizontals={horizontals.length}
       className="flex flex-col gap-5"
     >
-      <section className="flex max-w-prose flex-col gap-3 rounded-card border border-border bg-surface px-4 py-3">
-        <h2 className="font-display text-[16px] leading-tight font-semibold">
-          {missing.length === 2
+      {/* M9: the application's one empty-state presentation. */}
+      <StatePanel
+        title={
+          missing.length === 2
             ? "This channel has no buckets yet"
             : verticals.length === 0
               ? "No topic pillars yet"
-              : "No formats yet"}
-        </h2>
-
-        <p className="text-[13px] text-muted">
-          A matrix needs both axes: {missing.join(" and ")}{" "}
-          {missing.length === 2 ? "are" : "is"} missing, so there is nothing to
-          cross.
+              : "No formats yet"
+        }
+        actions={
+          <>
+            <Link
+              href={settingsPath("buckets", channelSlug)}
+              data-testid="add-buckets"
+              className={PRIMARY_ACTION}
+            >
+              {/* The link says what is missing, as the heading does: pillars,
+                  formats, or both. */}
+              {missing.length === 2
+                ? "Set up buckets"
+                : verticals.length === 0
+                  ? "Name your pillars"
+                  : "Add formats"}
+            </Link>
+            <Link href={`/c/${channelSlug}/ideas`} className={QUIET_ACTION}>
+              Back to the idea bank
+            </Link>
+          </>
+        }
+      >
+        <p>
+          The matrix crosses topic pillars with formats, and every empty
+          intersection is a prompt for an idea. It needs both axes:{" "}
+          {missing.join(" and ")} {missing.length === 2 ? "are" : "is"}{" "}
+          missing, so there is nothing to cross yet.
         </p>
-
         {verticals.length === 0 ? (
-          <p className="text-[13px] text-muted">
-            A new channel is seeded with the eight formats from the brief and no
-            pillars at all — deliberately. The formats are a vocabulary anyone
-            can borrow; the pillars are the three to five topics{" "}
-            <em>this</em> channel is about, and only you know them. Name them
-            and the grid below has rows.
+          <p>
+            A new channel starts with the eight formats from the brief and no
+            pillars, on purpose: formats are a vocabulary anyone can borrow,
+            but the three to five topics <em>this</em> channel is about are
+            yours to name.
           </p>
         ) : null}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href={settingsPath("buckets", channelSlug)}
-            data-testid="add-buckets"
-            className="inline-flex items-center gap-1.5 rounded-button border border-border px-2 py-1 text-[12px] font-medium outline-none hover:border-accent/60 focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            {/* The link says what is missing, as the heading does: pillars,
-                formats, or both. */}
-            {missing.length === 2
-              ? "Set up buckets"
-              : verticals.length === 0
-                ? "Name your pillars"
-                : "Add formats"}
-          </Link>
-
-          <a
-            href={`/c/${channelSlug}/ideas`}
-            className="rounded-button px-1 py-0.5 text-[12px] text-muted underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            Back to the idea bank
-          </a>
-        </div>
-
-        <p data-testid="add-buckets-note" className="text-[12px] text-muted">
-          Naming pillars, renaming formats and setting monthly quotas all live
-          in the channel&rsquo;s settings. A pillar added there is a row here
-          the moment the page is next drawn.
+        <p data-testid="add-buckets-note">
+          Pillars, formats and monthly quotas live in the channel&rsquo;s
+          settings; one named there is a row here on the way back.
         </p>
-      </section>
+      </StatePanel>
 
       {/*
         One axis is still an answer. Not called a matrix, and drawn as a list

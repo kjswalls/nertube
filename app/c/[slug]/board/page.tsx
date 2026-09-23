@@ -1,7 +1,11 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { Board } from "@/components/board/board";
+import { CaptureLink } from "@/components/capture/capture-dialog";
+import { settingsPath } from "@/components/settings/settings-nav";
+import { PRIMARY_ACTION, StatePanel } from "@/components/state-panel";
 import { checklistRatios } from "@/components/checklist/ratios";
 import {
   PUBLISHED_CARD_TTL_DAYS,
@@ -275,15 +279,75 @@ export default async function BoardPage({
               live shortcut registry — repeating them here is how the two get
               to disagree. */}
           <p className="text-[12px] text-muted">
-            Drag a card between columns, or use the move buttons on a card. The
-            keys in the sidebar do the same thing.
+            <span className="thumb:hidden">
+              Drag a card between columns, or use the move buttons on a card.
+              The keys in the sidebar do the same thing.
+            </span>
+            {/*
+              M9: said on the board itself, where a thumb is the pointer. A
+              kanban of nine 216px columns is a desktop view and this does not
+              pretend otherwise — but it is not a broken one on a phone: the
+              strip scrolls sideways inside itself, and the ← → on every card
+              is the same `move_video` a drag is. Dragging is what does not
+              travel (touch does not start an HTML5 drag), so the sentence that
+              offers it is swapped for the one that works.
+            */}
+            <span className="hidden thumb:inline">
+              Swipe sideways through the columns; ← and → on a card move it.
+              Dragging cards needs a mouse and a wider screen.
+            </span>
           </p>
         </div>
 
+        {/*
+          M9: a board with no cards on it at all — a channel created a moment
+          ago, or one whose every video has been archived. Nine empty columns
+          say nothing about how anything gets onto them, and the only ways in
+          were a key and a sidebar button nobody has been told about. The
+          columns still draw below it, because they are the answer to "what is
+          this page": the stages a video will move through.
+        */}
+        {stages.length > 0 && cards.length === 0 ? (
+          <StatePanel
+            testId="board-empty"
+            title={`${channel.name}’s board is empty`}
+            actions={
+              <CaptureLink
+                channels={[{ id: channel.id, name: channel.name, slug: channel.slug }]}
+                channelId={channel.id}
+                testId="board-empty-capture"
+                className={PRIMARY_ACTION}
+              >
+                Capture an idea
+              </CaptureLink>
+            }
+          >
+            <p>
+              Every video moves left to right through these columns, from an
+              idea to a published URL. To start one, capture a title —
+              packaging, the script and the rest come later, one column at a
+              time.
+            </p>
+          </StatePanel>
+        ) : null}
+
         {stages.length === 0 ? (
-          <p className="text-[13px] text-muted">
-            This channel has no enabled stages. Turn one back on in settings.
-          </p>
+          <StatePanel
+            testId="board-no-stages"
+            tone="problem"
+            title="Every stage is switched off"
+            actions={
+              <Link href={settingsPath("stages", channel.slug)} className={PRIMARY_ACTION}>
+                Open stage settings
+              </Link>
+            }
+          >
+            <p>
+              A board draws one column per enabled stage, and this channel has
+              none. Switch the stages you use back on and the board returns
+              with its videos where they were.
+            </p>
+          </StatePanel>
         ) : (
           <Board
             channelName={channel.name}

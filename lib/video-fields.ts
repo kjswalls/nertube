@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { parseDateColumn } from "./calendar-dates";
+import { cleanProse } from "./text";
 import {
   HookListSchema,
   MAX_TITLE_LENGTH,
@@ -76,7 +77,9 @@ export const CHANGED_ELSEWHERE =
  */
 export const NullableText = z
   .union([z.string(), z.null()])
-  .transform((value) => (value === null ? null : value.trim()))
+  // `cleanProse` first: a pasted U+0000 is refused by every Postgres `text`
+  // column with a sentence nobody should be shown (M7 review, deferred to M9).
+  .transform((value) => (value === null ? null : cleanProse(value).trim()))
   .transform((value) => (value === "" ? null : value));
 
 /**
@@ -89,7 +92,7 @@ export const NullableText = z
  */
 export const WorkingTitleSchema = z
   .string()
-  .transform((value) => value.trim())
+  .transform((value) => cleanProse(value).trim())
   .pipe(
     z
       .string()
@@ -222,7 +225,7 @@ export const TagListSchema = z
     const seen = new Set<string>();
     const kept: string[] = [];
     for (const raw of tags) {
-      const tag = raw.trim();
+      const tag = cleanProse(raw).trim();
       if (tag === "") continue;
       const key = tag.toLocaleLowerCase();
       if (seen.has(key)) continue;

@@ -1,6 +1,11 @@
 import Link from "next/link";
 
 import { calendarHref } from "@/components/calendar/grid/url";
+import {
+  PRIMARY_ACTION,
+  QUIET_ACTION,
+  StatePanel,
+} from "@/components/state-panel";
 import { formatMonth, parseMonthKey } from "@/lib/calendar-dates";
 
 /** The nearest month either side that actually has something in it. */
@@ -46,53 +51,58 @@ export function EmptyMonth({
   );
   const nothingAnywhere = nearest.length === 0;
 
+  /*
+    M9: the application's one empty-state presentation (`StatePanel`), with the
+    three things above as its title, its sentence and its way forward. The
+    title keeps its exact words, which `e2e/calendar.spec.ts` asserts.
+  */
   return (
-    <div
-      data-testid="calendar-empty"
-      data-scope={nothingAnywhere ? "nothing-anywhere" : "empty-month"}
-      className="rounded-card border border-border bg-surface px-4 py-3"
-    >
-      <p className="font-display text-[15px]">
-        Nothing is going out in {label}, and no filming day is booked.
-      </p>
-
-      {nothingAnywhere ? (
-        <p className="mt-1 text-[13px] text-muted">
-          No video anywhere has a target publish date yet. A date set on a
-          video&rsquo;s page — or on a card from{" "}
-          {boardHref ? (
-            <Link
-              href={boardHref}
-              className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              the board
+    <StatePanel
+      testId="calendar-empty"
+      title={`Nothing is going out in ${label}, and no filming day is booked.`}
+      actions={
+        nothingAnywhere ? (
+          boardHref ? (
+            <Link href={boardHref} className={PRIMARY_ACTION}>
+              Open the board
             </Link>
           ) : (
-            "the board"
-          )}{" "}
-          — is what puts it here. Publishing is a rhythm; this is where it
-          becomes visible.
+            <Link href="/c/new" className={PRIMARY_ACTION}>
+              Create your first channel
+            </Link>
+          )
+        ) : (
+          nearest.map((entry) => (
+            <Link
+              key={entry.month}
+              href={calendarHref({ month: entry.month })}
+              data-testid="calendar-nearest"
+              data-month={entry.month}
+              className={entry === nearest[0] ? PRIMARY_ACTION : QUIET_ACTION}
+            >
+              {labelOf(entry.month)}{" "}
+              <span className="font-mono text-[11px] opacity-80">
+                ({entry.count})
+              </span>
+            </Link>
+          ))
+        )
+      }
+    >
+      {nothingAnywhere ? (
+        <p data-scope="nothing-anywhere">
+          No video has a target publish date yet. A date is set on the
+          video&rsquo;s own page; from then on it sits on that day here, beside
+          every other channel&rsquo;s, so the rhythm of what is going out is
+          one page. Filming days are booked with the button above.
         </p>
       ) : (
-        <p className="mt-1 text-[13px] text-muted">
-          The nearest month with anything in it is{" "}
-          {nearest.map((entry, index) => (
-            <span key={entry.month}>
-              <Link
-                href={calendarHref({ month: entry.month })}
-                data-testid="calendar-nearest"
-                data-month={entry.month}
-                className="underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                {labelOf(entry.month)}
-              </Link>{" "}
-              <span className="font-mono text-[11px]">({entry.count})</span>
-              {index < nearest.length - 1 ? ", or " : "."}
-            </span>
-          ))}
+        <p data-scope="empty-month">
+          The nearest {nearest.length === 1 ? "month" : "months"} with anything
+          in {nearest.length === 1 ? "it" : "them"}:
         </p>
       )}
-    </div>
+    </StatePanel>
   );
 }
 

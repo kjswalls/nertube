@@ -273,6 +273,7 @@ export default async function IdeasPage({
           carried the query the page was requested with would be stale the
           moment anything was typed. */}
       <IdeaList
+        channelId={channel.id}
         channelName={channel.name}
         channelSlug={channel.slug}
         ideas={ideas}

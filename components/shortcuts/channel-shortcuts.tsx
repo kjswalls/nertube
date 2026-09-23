@@ -8,9 +8,9 @@ import { useShortcuts, type Shortcut } from "@/lib/shortcuts";
 /**
  * `1`..`9` — switch channel (PLAN.md's "Shortcuts": *`1..9` switch channel*).
  *
- * Mounted by the sidebar, which is the one component that always knows the
- * channel list, so the digits work on every signed-in route rather than only on
- * a board. The nth digit goes to the nth channel's board, in the same order the
+ * Mounted by `KeyboardShortcuts` (this folder), inside the sidebar — the one
+ * component that always knows the channel list, so the digits work on every
+ * signed-in route rather than only on a board. The nth digit goes to the nth channel's board, in the same order the
  * sidebar draws the rows and the capture form numbers them — one order for the
  * whole application, so "channel 2" means one thing.
  *
@@ -52,7 +52,11 @@ export function ChannelShortcuts({
         // One hint for the whole run of digits, carried by the first.
         hint:
           index === 0
-            ? { keys: channels.length > 1 ? "1–9" : "1", text: "switch channel" }
+            ? {
+                keys: channels.length > 1 ? "1–9" : "1",
+                text: "switch channel",
+                label: "Switch to a channel's board, in sidebar order",
+              }
             : undefined,
         run: (event: KeyboardEvent) => {
           const target = `/c/${channel.slug}/board`;
@@ -80,7 +84,7 @@ export function ChannelShortcuts({
     [channels, router],
   );
 
-  useShortcuts(shortcuts, { enabled: channels.length > 1 });
+  useShortcuts(shortcuts, { enabled: channels.length > 1, group: "Get around" });
 
   return null;
 }

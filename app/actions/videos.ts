@@ -20,6 +20,7 @@ import {
   type VideoPatchInput,
 } from "@/lib/video-fields";
 import { requireUser } from "@/lib/supabase/require-user";
+import { cleanProse } from "@/lib/text";
 
 /**
  * Video server actions. There are two, and they are two because they do
@@ -77,7 +78,7 @@ const CaptureInput = z.object({
   channelId: z.uuid("Pick a channel to capture into."),
   title: z
     .string()
-    .transform((value) => value.trim())
+    .transform((value) => cleanProse(value).trim())
     .pipe(
       z
         .string()

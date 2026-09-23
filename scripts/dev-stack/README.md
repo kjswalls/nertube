@@ -13,7 +13,7 @@ authority and this harness should be ignored.
 ```bash
 npm run dev:stack       # reset, seed, serve http://127.0.0.1:54321
 npm run dev             # the app, pointed at that origin
-npm run e2e             # Playwright: starts the app itself, reuses this stack
+npm run e2e             # Playwright: starts both itself; stop this stack first
 npm run e2e:refresh     # the session-refresh spec, on its own ports and database
 npm run dev:stack:smoke # drive a running stack with supabase-js
 npm run dev:stack:stop  # stop any stack left behind by a SIGKILL
@@ -21,7 +21,9 @@ npm run dev:stack:stop  # stop any stack left behind by a SIGKILL
 
 `npm run e2e` starts the **application** itself every time (it is the only place
 the app is pointed at this harness, so a server it did not start is a server
-testing something else) and will reuse a stack you already have up.
+testing something else), and since M9 it starts the **stack** itself too and
+refuses to run against one it did not start — see item 31 below. `E2E_REUSE=1`
+reuses both on purpose.
 `npm run e2e:refresh` takes its own ports *and its own database*
 (`nertube_e2e_refresh`), because the whole point of that command is a five-second
 access token and a reused stack would still be minting hour-long ones.
@@ -317,12 +319,17 @@ either fix it or add it.
     node process that outlives npm and would keep the parent pid stable
     forever). SIGKILL cannot be handled; `npm run dev:stack:stop` clears up
     after it.
-31. **`npm run e2e` reuses a stack you already have running.** That is
-    deliberate — it is the fast inner loop — but it means the database under the
-    suite may carry whatever you did to it by hand. A cold `npm run
-    dev:stack:stop && npm run e2e` is the clean run. The *application* server is
-    never reused (`E2E_REUSE=1` opts in), because Playwright's `env` block is
-    the only thing aiming the app at this origin.
+31. **`npm run e2e` refuses a stack it did not start** (since M9; it used to
+    reuse one). A stack left running from an earlier session serves a database
+    built from that session's migrations, and a suite run against it fails in
+    ways that look exactly like regressions — M8's first full run lost eight
+    specs that way. With something already on the gateway port, Playwright now
+    stops before any test with "…is already used … or set
+    reuseExistingServer:true". `npm run dev:stack:stop` clears it;
+    `E2E_REUSE=1` reuses both servers on purpose, for a fast inner loop when you
+    know what is running. The *application* server is never reused without
+    that, because Playwright's `env` block is the only thing aiming the app at
+    this origin.
 32. **A `npm run dev` in this directory blocks `npm run e2e` outright.** Next
     allows one dev server per directory, so the suite's own app server exits
     with "Another next dev server is already running" and *nothing runs* — not

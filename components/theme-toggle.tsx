@@ -53,7 +53,7 @@ export function ThemeToggle() {
       data-testid="theme-toggle"
       onClick={cycle}
       title="Switch between following the system, light and dark"
-      className="flex w-full items-center justify-between gap-2 rounded-button border border-border px-2 py-1.5 text-[12px] text-muted outline-none transition-colors hover:border-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+      className="flex w-full items-center justify-between gap-2 rounded-button border border-border px-2 py-1.5 text-[12px] text-muted outline-none transition-colors hover:border-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
     >
       <span>Theme</span>
       {/*

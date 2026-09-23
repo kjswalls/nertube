@@ -94,6 +94,8 @@ export function BucketRow({
       event.preventDefault();
       name.commit();
     } else if (event.key === "Escape") {
+      // Consumed: reverting the name is all Escape means here.
+      event.preventDefault();
       name.setValue(bucket.name);
     }
   }
@@ -119,6 +121,7 @@ export function BucketRow({
       event.preventDefault();
       quota.commit();
     } else if (event.key === "Escape") {
+      event.preventDefault();
       quota.setValue(quotaText(bucket.monthlyQuota));
     }
   }

@@ -158,7 +158,10 @@ export function MetricsPair({
 
   const compact = density === "row";
   const inputClass = compact
-    ? "rounded-input border border-border bg-background px-2 py-1 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    ? // The row density is `/now`'s, which is the view a phone opens: 16px
+      // type below `md` (anything smaller and iOS zooms the page on focus) and
+      // a 44px target wherever a thumb is likely.
+      "rounded-input border border-border bg-background px-2 py-1 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
     : "rounded-input border border-border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
   const labelClass = compact
     ? "text-[11px] text-muted"
@@ -260,7 +263,9 @@ export function MetricsPair({
           onClick={submit}
           className={[
             "rounded-button border border-border outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent",
-            compact ? "px-2 py-1 text-[12px]" : "px-3 py-2 text-sm",
+            compact
+              ? "px-2 py-1 text-[12px] thumb:min-h-11 thumb:px-3 thumb:text-sm"
+              : "px-3 py-2 text-sm",
           ].join(" ")}
         >
           {submitLabel}

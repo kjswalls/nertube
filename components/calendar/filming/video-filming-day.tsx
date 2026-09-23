@@ -142,8 +142,8 @@ export function VideoFilmingDay({
         router.refresh();
       } catch {
         // The POST never landed. Without this the rejection escapes the
-        // transition and — the app has no `app/error.tsx` — Next replaces the
-        // whole video page with its error screen. See the same `catch` in
+        // transition and the whole video page is replaced by the route's error
+        // screen (`app/error.tsx` since M9), losing what was on it. See the same `catch` in
         // `components/board/board.tsx`.
         setError(UNREACHABLE);
       }

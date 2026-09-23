@@ -74,10 +74,13 @@ export function NowRowItem({
       data-selected={selected ? "true" : "false"}
       aria-current={selected ? "true" : undefined}
       aria-busy={busy || undefined}
+      // Focusable by script only, so `j`/`k` can move focus here the way the
+      // board and the idea bank do — without the row joining the tab order.
+      tabIndex={-1}
       onFocusCapture={onSelect}
       onClick={onSelect}
       className={[
-        "relative flex flex-col gap-2 rounded-card border bg-surface py-card-y pr-card-x pl-4 transition",
+        "relative flex flex-col gap-2 rounded-card border bg-surface py-card-y pr-card-x pl-4 outline-none transition",
         selected ? "border-accent ring-1 ring-accent" : "border-border",
         busy ? "animate-pulse" : "",
       ].join(" ")}
@@ -97,7 +100,7 @@ export function NowRowItem({
         {/* The action, in the tool's own voice — this is not the user's text. */}
         <p
           data-testid="now-label"
-          className="min-w-0 flex-1 text-[13px] leading-snug font-medium"
+          className="min-w-0 flex-1 text-[13px] leading-snug font-medium max-md:text-[15px]"
         >
           {row.label}
         </p>
@@ -105,29 +108,39 @@ export function NowRowItem({
         <span
           data-testid="now-age"
           title={`In ${row.stageName} for ${daysLabel}`}
-          className="shrink-0 font-mono text-[11px] text-muted"
+          className="shrink-0 font-mono text-[11px] text-muted max-md:text-[12px]"
         >
           {daysLabel}
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-muted">
+      {/*
+        On a phone the title takes a line of its own and may use two, and the
+        chips go under it: at 358px a truncated title beside three chips was a
+        dozen characters of the one thing in the row the user wrote, and the
+        separator dot was left hanging at the end of a line. The chips grow to
+        24px there, which is WCAG 2.5.8's floor for a target that is not the
+        row's own control.
+      */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-muted max-md:gap-y-1.5 max-md:text-[12px]">
         {/* The video's own title is the user's words, so it is the reading face. */}
         <Link
           href={`/videos/${row.videoId}`}
           data-testid="now-video-link"
-          className="min-w-0 truncate font-display text-[13px] text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent"
+          className="min-w-0 truncate font-display text-[13px] text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent max-md:line-clamp-2 max-md:basis-full max-md:py-0.5 max-md:text-[15px] max-md:leading-snug max-md:whitespace-normal"
         >
           {row.videoTitle}
         </Link>
-        <span aria-hidden="true">·</span>
+        <span aria-hidden="true" className="max-md:hidden">
+          ·
+        </span>
         <Link
           href={`/c/${row.channelSlug}/board`}
-          className="rounded-full border border-border px-1.5 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
         >
           {row.channelName}
         </Link>
-        <span data-testid="now-stage" className="rounded-full border border-border px-1.5 py-0.5">
+        <span data-testid="now-stage" className="rounded-full border border-border px-1.5 py-0.5 max-md:px-2 max-md:py-1">
           {row.stageName}
         </span>
         {row.needsABlock ? (
@@ -147,7 +160,7 @@ export function NowRowItem({
               data-testid="needs-a-block"
               data-stage-kind={row.stageKind}
               title="Filming needs a real block of time, not ten spare minutes. Book a batch day on the calendar."
-              className="rounded-full border border-border px-1.5 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="rounded-full border border-border px-1.5 py-0.5 outline-none max-md:px-2 max-md:py-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               needs a block
             </Link>
@@ -156,7 +169,7 @@ export function NowRowItem({
               data-testid="needs-a-block"
               data-stage-kind={row.stageKind}
               title="Filming and editing need a real block of time, not ten spare minutes."
-              className="rounded-full border border-border px-1.5 py-0.5"
+              className="rounded-full border border-border px-1.5 py-0.5 max-md:px-2 max-md:py-1"
             >
               needs a block
             </span>
@@ -185,6 +198,16 @@ export function NowRowItem({
 /* The eight controls                                                          */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * A row's buttons, sized for a thumb.
+ *
+ * `/now` is the view a phone opens (BRIEF.md principle 3: *"I have 10 minutes —
+ * what can I move right now?"*), so every control a row offers is 44px tall
+ * wherever a finger is the likely pointer (`thumb:` in `app/globals.css`), and
+ * the desktop keeps the 26px density a mouse is happy with.
+ */
+const THUMB = "thumb:min-h-11 thumb:px-3 thumb:text-sm";
+
 function RowControl({
   row,
   now,
@@ -201,7 +224,19 @@ function RowControl({
   switch (payload.input) {
     case "tick":
       return (
-        <div className="flex items-center gap-2">
+        /*
+          A `<label>`, so the sentence beside the box is part of the target: on
+          a phone the 16px box alone was the whole of it, and it sat under a
+          label wrapped five words to a line (M3's review, finding 32). The
+          checkbox keeps its own `aria-label`, which wins over the wrapping
+          label for its name, so a screen reader still hears which item it
+          ticks. `self-start`, so the target is the box and the sentence and not
+          the empty width of the row beside them.
+        */
+        <label
+          data-testid="now-tick-target"
+          className="flex cursor-pointer items-center gap-2 self-start rounded-button thumb:min-h-11 thumb:pr-2"
+        >
           <input
             type="checkbox"
             data-testid="now-tick"
@@ -210,12 +245,12 @@ function RowControl({
             disabled={busy}
             onChange={() => onIntent({ kind: "tick" })}
             aria-label={`Done: ${payload.itemText}`}
-            className="size-4 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="size-4 shrink-0 accent-[var(--accent)] outline-none focus-visible:ring-2 focus-visible:ring-accent thumb:size-5"
           />
-          <span className="text-[12px] text-muted">
+          <span className="text-[12px] text-muted max-md:text-[13px]">
             Tick it and the next item takes its place.
           </span>
-        </div>
+        </label>
       );
 
     case "text":
@@ -258,7 +293,8 @@ function RowControl({
               aria-pressed={hook.chosen}
               onClick={() => onIntent({ kind: "choose-hook", hookId: hook.id })}
               className={[
-                "max-w-full truncate rounded-button border px-2 py-1 text-left text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
+                "max-w-full truncate rounded-button border px-2 py-1 text-left text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent max-md:whitespace-normal",
+                THUMB,
                 hook.chosen
                   ? "border-accent text-foreground"
                   : "border-border text-muted hover:border-accent hover:text-foreground",
@@ -331,7 +367,7 @@ function RowControl({
             data-now-primary
             disabled={busy}
             onClick={() => onIntent({ kind: "unblocked" })}
-            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            className={`rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent ${THUMB}`}
           >
             Unblocked
           </button>
@@ -341,7 +377,7 @@ function RowControl({
             disabled={busy}
             onClick={() => onIntent({ kind: "still-waiting" })}
             title="Leaves the block exactly as it is, and takes the row off this list until the page is reloaded."
-            className="rounded-button px-2 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            className={`rounded-button px-2 py-1 text-[12px] text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent ${THUMB}`}
           >
             Still waiting
           </button>
@@ -362,7 +398,7 @@ function RowControl({
             data-now-primary
             disabled={busy}
             onClick={() => onIntent({ kind: "keep-thumbnail" })}
-            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            className={`rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent ${THUMB}`}
           >
             Keep it
           </button>
@@ -377,7 +413,7 @@ function RowControl({
           <Link
             href={`/videos/${row.videoId}?section=thumbnails`}
             data-testid="now-swap-open"
-            className="rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            className={`rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent ${THUMB}`}
           >
             Swap thumbnail…
           </Link>
@@ -410,7 +446,7 @@ function RowControl({
           data-now-primary
           disabled={busy}
           onClick={() => onIntent({ kind: "move" })}
-          className="self-start rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+          className={`self-start rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent ${THUMB}`}
         >
           Move to {payload.toStageName}
         </button>
@@ -474,14 +510,14 @@ function SingleLine({
             onSubmit(value);
           }
         }}
-        className="min-w-0 flex-1 rounded-input border border-border bg-background px-2 py-1 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="min-w-0 flex-1 basis-40 rounded-input border border-border bg-background px-2 py-1 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:min-h-11"
       />
       <button
         type="button"
         data-testid="now-text-save"
         disabled={busy || empty}
         onClick={() => onSubmit(value)}
-        className="shrink-0 rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+        className={`shrink-0 rounded-button border border-border px-2 py-1 text-[12px] outline-none transition-colors hover:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 ${THUMB}`}
       >
         {submitLabel}
       </button>

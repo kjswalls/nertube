@@ -57,8 +57,8 @@ import { MAX_FILMING_NOTES_LENGTH, type FilmingDay } from "./types";
  * ## A dropped connection changes nothing and says so
  *
  * Every action call is wrapped. Without the `catch`, an aborted POST escaped as
- * an unhandled rejection and — the app has no `app/error.tsx` — Next replaced
- * the whole route with its error page, taking the panel and anything composed
+ * an unhandled rejection and the whole route was replaced by an error page
+ * (Next's own until M9, now `app/error.tsx`), taking the panel and anything composed
  * around it with it. `DayNotes` below already degraded correctly, because
  * `useAutosave` catches; this is the rest of the file brought up to it.
  */

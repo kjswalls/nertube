@@ -8062,3 +8062,429 @@ is silent and looks exactly like a regression: **a run that reuses a stack
 predating a migration is not a run of this tree.**
 
 <!-- GATES -->
+
+---
+
+## M9 — The responsive pass: one bar, one sheet, and the 102px column
+
+> The slice that owns `components/app-shell.tsx`, `components/app-sidebar.tsx`
+> and the phone behaviour of `/now` and `/capture`. It pays M3's review
+> finding 32, which was deferred here by name.
+
+### The finding, reproduced before anything was changed
+
+M3's note was checked in a real browser (Chromium 141, the dev stack, the
+seeded account plus one Packaging video with its checklist) before a line of
+this slice was written, so the fix is judged against what the page did and
+not against a sentence about it:
+
+| Width | Sidebar | `main` | Gutters | Content column | `/now` row label | Tick box |
+|---|---|---|---|---|---|---|
+| 390×844 | 224px | 166px | 32 + 32 | **102px** | 7 lines for "Generated 10–20 title candidates, not 3"; the age ("4 days") printed over the label | 13×16px |
+| 360×800 | 224px | 136px | 32 + 32 | **72px** | 5 lines, same overlap | 13×16px |
+
+The note's numbers were exact. The one thing it undersold is the overlap: it
+was not only the tick box — the row's age span was drawn on top of the label,
+because a `min-w-0` label in 102px lets its longest word overflow into the
+flex sibling beside it.
+
+After this slice, measured the same way:
+
+| Width | Bar | `main` | Gutters | Content column |
+|---|---|---|---|---|
+| 390×844 | 56px bar + 1px rule across the top | 390px | 16 + 16 | **358px** |
+| 360×800 | same | 360px | 16 + 16 | **328px** |
+| 768 | 224px sidebar (unchanged) | 544px | 24 + 24 | 496px (reading views 480) |
+| 1024 – 1920 | 224px sidebar (unchanged) | width − 224 | 32 + 32 (reading 40 + 40) | unchanged from M3 |
+
+### What this slice delivers
+
+- **The sidebar is a bar below 768px** (`md`). One element, two layouts: at
+  phone width the same wordmark and the same `CaptureHost` sit in a 56px bar
+  pinned to the top, beside a 44px menu button; the sections, channels, theme
+  control and account move behind the button. From `md` up the sidebar is
+  byte-for-byte the layout M3 signed off — `e2e/responsive.spec.ts` pins its
+  boxes at 1024, 1280, 1440 and 1920 (wordmark at 12,16; Capture 199×34 at
+  12,45; Now 199×32 at 12,99), which are the numbers the pre-M9 tree drew.
+- **The menu is the application's one modal**, not a drawer of its own.
+  `Modal` gained one prop, `placement: "center" | "start"`, which changes the
+  geometry and nothing else: a full-height sheet against the leading edge on
+  the sidebar's ground, leaving a strip of backdrop to tap. Focus moves in and
+  is trapped, Escape closes it from anywhere, the backdrop closes it, focus
+  returns to the menu button, and the `exclusive` shortcut scope keeps `c`,
+  `j`, `x` and `1..9` off the page underneath — all of which `Modal` already
+  did for the capture box. The button carries `aria-expanded` and
+  `aria-haspopup="dialog"`; the sheet is `role="dialog"`, `aria-modal`, named
+  "Menu", and holds a `<nav aria-label="Main">`. Choosing a link closes it; so
+  does widening the window past the breakpoint.
+- **Gutters that scale, from the tokens.** `--spacing-gutter` and
+  `--spacing-gutter-reading` are redefined in `@layer base` media queries in
+  `app/globals.css`: 16/20 below 768, 24/32 from 768 to 1023, and the signed-off
+  32/40 from 1024 up. No component changed; every `px-gutter`, `-mx-gutter` and
+  `py-gutter-reading` follows. `scroll-padding-top` is set at phone width so an
+  in-page jump stops below the pinned bar instead of under it.
+- **One variant for "a thumb is the pointer"**: `thumb:` in `app/globals.css`,
+  `(width < 48rem), (pointer: coarse)`. It is used for target sizes and
+  nothing else, so a mouse on a desktop keeps the density the design asked for
+  and a finger gets 44px — including a phone in landscape, which is wider than
+  `md` and gets the desktop sidebar.
+- **`/now` on a phone.** Every control a row offers — the tick, Save, Confirm
+  live, the hook chips, Unblocked, Still waiting, Keep it, Swap, Move, the
+  metrics pair and its Log button, the filter chips — is 44px tall under
+  `thumb:`. The tick is now a `<label>` wrapping the box and its sentence, so
+  the sentence is part of the target (the checkbox keeps its own `aria-label`,
+  which wins for its name). The video's title takes its own line and may use
+  two; the chips go under it at 24px, WCAG 2.5.8's floor for a target that is
+  not the row's own control; the label is 15px. Every field on the list is
+  16px below `md`, because anything smaller makes iOS Safari zoom the page on
+  focus.
+- **`/capture` on a phone.** The claim in PLAN.md:116 was checked rather than
+  assumed, and half of it did not hold: the page rendered no shell (true), but
+  its Capture button sat at y=398 on a 390×844 screen — under a phone keyboard,
+  which leaves roughly the top 440px. Below `md` the save now sits on the title
+  field's own line, and the browser always scrolls a focused field into view,
+  so the save cannot be hidden. The keyboard-only sentences in the hint
+  (Shift+Enter, Alt+1–9) are hidden on a coarse pointer, where there are no
+  such keys. The same form is the `c` dialog, so the dialog opened from the
+  phone bar gets the same fix.
+- **The other views, walked at 390.** A person who taps through does not hit
+  anything broken, and where a view is a desktop view it says so in the view:
+  - *Board*: the strip already scrolled sideways inside itself. A touch does
+    not start an HTML5 drag, so on a thumb the header sentence that offered
+    dragging is replaced with the one that works ("Swipe sideways through the
+    columns; ← and → on a card move it. Dragging cards needs a mouse and a
+    wider screen."), and the card arrows are 44px under `thumb:`.
+  - *Calendar*: seven columns of 350px are 50px a day — a date and a channel
+    tag, not a title. Below `md` the page says "A month needs a wider screen to
+    read titles. Here, tap a chip to open its video."
+  - *Matrix*: **it scrolled the whole page 507px sideways at 390** once a
+    channel had pillars. Not the table — that was inside its own scroller —
+    but its `sr-only` labels: `position: absolute` with no positioned
+    ancestor, so their containing block was the viewport, and overflow
+    clipping does not apply to a box whose containing block is outside the
+    clipping element. `main` is now `relative`, which makes it their
+    containing block, and the shell's `overflow-x: clip` holds. The fix is in
+    the shell, so it covers every visually hidden label in every sideways
+    scroller, not just this one.
+  - *Settings → Stages*: the rename field was 40px wide at 390 ("Ide",
+    "Packa") because the count and the switch took a third grid column.
+    Below `md` they drop under the note, and the field has a 128px basis.
+- **Scroll, at every width, on every route.** `e2e/responsive.spec.ts` visits
+  thirteen signed-in routes (including the matrix with pillars and the video
+  page's Thumbnails section, the two widest things in the app) at all seven
+  widths, and asserts both that `scrollWidth` equals `clientWidth` and that
+  `window.scrollTo(10000, y)` leaves `scrollX` at 0 — the second because the
+  matrix bug above was found by trying to scroll, not by reading a number.
+
+### Decisions taken without the user
+
+1. **The breakpoint is 768px (`md`), and the menu opens from the left.** 768 is
+   where a 224px sidebar still leaves a 496px column with 24px gutters — a
+   usable board and a comfortable `/now` — and below it the sidebar was
+   eating a third of the screen or more. Left, because that is where the
+   sidebar is on a desktop: the menu is the same thing, arriving from the same
+   side.
+2. **Capture stays on the bar, not behind the menu.** It is the one control in
+   the sidebar that *does work* rather than navigate, and BRIEF.md's capture is
+   "a global shortcut, one input, save, done" — two taps through a menu would
+   break that on the device where it matters most. It is the same
+   `CaptureHost` element, restyled, so `c` is still bound exactly once.
+3. **The sheet renders the links a second time; nothing else is duplicated.**
+   The desktop `<nav>` is `display: none` below `md` (out of the accessibility
+   tree too), and the sheet draws a second server rendering of the same lists
+   with its own ids, so there is one "Main" navigation at every width and no
+   duplicate id. `CaptureHost` and `ChannelShortcuts` — the things that bind
+   keys — are mounted once in the bar and never passed into the sheet.
+   The alternative, extracting `Modal`'s behaviour into a hook and applying
+   dialog semantics to the in-place sidebar, would have made two consumers of
+   one half of the modal; one prop on the whole modal is smaller.
+4. **The keyboard hint bar is not in the sheet.** A phone has no keys, and a
+   narrow desktop window still has the `?` sheet. The theme control and Sign
+   out are in it, because those are things a phone user needs.
+5. **Targets: 44px for a row's own controls, 24px for the chips that link
+   elsewhere**, under `thumb:` only. 44 is the Apple/WCAG AAA figure; 24 is
+   WCAG 2.5.8 AA, applied to the channel and stage chips because making every
+   chip 44px would have doubled each row's height to satisfy a link nobody
+   came to the row to press. A mouse on a desktop gets M3's density back.
+6. **`/capture` has two submit buttons in its markup, one per layout, never
+   both displayed.** A single button moved by CSS `order` would have put the
+   visual order and the tab order out of step; a single button moved *up* for
+   everyone would have put the save above the disclosure's fields on a
+   desktop. `display: none` removes the other from the tab order and the
+   accessibility tree, so there is one "Capture" at any width — which is also
+   what `e2e/capture.spec.ts`'s existing phone test (`getByRole('button', {
+   name: 'Capture' })`, strict) already required.
+7. **The calendar says "wider screen" instead of becoming an agenda.** An
+   agenda view at phone width would be a second calendar, and M9 adds no
+   features. The grid still works — every chip is its video's link and nothing
+   scrolls sideways — and the page says what it is not good at.
+
+### Deviations from PLAN.md, stated plainly
+
+- **The mobile pass went past `/now` and `/capture`.** PLAN.md:199 scopes it to
+  those two, and they are the two that were made genuinely good. The rest —
+  the board's copy and card arrows, the calendar's note, the matrix's page
+  scroll, the stage row's reflow — are the minimum for a tap-through not to
+  land on something broken, as this milestone's brief asked.
+- **`Modal` gained a prop.** It is still the one modal; `placement="start"` is
+  geometry only, and the M4 swap dialog, the matrix's capture cell and the
+  filming-day dialog are unchanged (`placement` defaults to `"center"`). Its
+  close button now says "Close" on a coarse pointer — a touchscreen has no
+  Escape key — and "Escape to close" everywhere else.
+
+### Honest limits
+
+- **No real phone was used.** Every number here is Chromium at a phone-sized
+  viewport, with a mouse. In particular:
+  - *"The keyboard is open"* is simulated as a 390×440 viewport. Real iOS
+    Safari does not shrink the layout viewport for its keyboard (it shrinks
+    the visual one and scrolls the focused field into view); the inline save
+    is designed around exactly that, but it has not been seen on a device.
+  - *`pointer: coarse`* is never true in the suite. What it switches — the
+    hidden keyboard sentences on `/capture`, "Close" on the modal, the
+    thumb sizes at widths above 768 — is proved only by reading the CSS the
+    build emits, not by a test.
+- **The calendar's chips are below 24px at 390.** They are links to videos
+  and they work, but they are small; the page says the grid is a desktop view
+  rather than pretending otherwise.
+- **The board is a desktop view.** It is operable on a phone (swipe the strip,
+  tap the arrows), and it says so, but a kanban of nine 216px columns is not a
+  phone layout and was not turned into one.
+- **The other settings screens, the ideas list and the video page's five
+  sections were checked for sideways scroll at all seven widths and looked at
+  in a 390px screenshot**, not walked control by control the way `/now` and
+  `/capture` are. The stage row was the one broken thing that walk found.
+- **The sheet's links are rendered twice in the RSC payload** — once for the
+  desktop column, once for the sheet. It is a few hundred bytes of links and
+  counts; it is also the reason the sheet cannot drift from the sidebar.
+- **Two agents edited the shell at once.** The shortcuts slice moved
+  `components/channel-shortcuts.tsx` and `components/shortcut-hints.tsx` into
+  `components/shortcuts/` while this slice was restructuring
+  `components/app-sidebar.tsx`; the sidebar's imports were pointed at the new
+  paths here. Nothing else of that slice was touched.
+
+## M9 — The keyboard: one set, one sheet, one Escape
+
+Eight milestones each added a key or two. This slice took stock of all of them,
+made them one set, gave the set its `?` sheet, and wrote down once what Escape
+means. It owns `lib/shortcuts.ts` and `components/shortcuts/**`. It adds no
+feature a key did not already stand for, with two exceptions that close gaps
+the inventory found (`g` navigation, which PLAN.md:151 always had, and `/` for
+the one search box).
+
+### The inventory, taken before anything changed
+
+Every keyboard path in the tree, found by grepping for `useShortcuts`,
+`addEventListener`, `onKeyDown` and `event.key` across `app/`, `components/`
+and `lib/`, not by reading the milestone notes:
+
+| Key | What it did | Where | Mechanism |
+|---|---|---|---|
+| `c` | Open the capture box | every shell route | registry (`capture-host.tsx`) |
+| `1`–`9` | Go to the nth channel's board | every shell route, 2+ channels | registry (`channel-shortcuts.tsx`) |
+| `j` / `k` | Select next / previous | board, `/now`, idea bank | registry, three call sites |
+| `[` / `]` | Move the selected card by kind order | board | registry |
+| `Enter` | Open the selected item | board, `/now`, idea bank | registry |
+| `x` | Do the selected `/now` row's action | `/now` | registry |
+| `p` | Promote the selected idea | idea bank | registry |
+| `Escape` | Clear the card selection | **board only** | registry |
+| `Escape` | Close the dialog | capture, swap reason, (M9) phone menu | **React `onKeyDown` in `modal.tsx`** |
+| `Escape` | Close the panel | the four assist panels | **React `onKeyDown` + `stopPropagation` in `assist/chrome.tsx`** |
+| `Escape` | Revert the field | stage name, bucket name, bucket quota, template text | field `onKeyDown`, **not consumed** |
+| `Tab` / `Shift+Tab` | Focus trap | every dialog | React `onKeyDown` in `modal.tsx` |
+| `Enter`, `Shift+Enter`, `Alt+1–9` | Save / more fields / retarget | capture title field | field `onKeyDown` |
+| `Enter` | Commit / add | title candidates, hooks, working title, metrics, confirm-live, tag editor, flow fields, `/now` inline input, settings rows | field `onKeyDown` |
+| `Backspace` | Remove the last tag when the draft is empty | tag editor | field `onKeyDown` |
+
+Not bound anywhere, though PLAN.md:151 lists them: `g n/b/i/k` and `?`.
+
+### What was wrong with it
+
+1. **Escape meant three things by three mechanisms.** The registry had one
+   (the board's selection), the modal had its own React handler, and the
+   assist panel had a third whose comment claimed `stopPropagation()` kept the
+   key from the registry. It did not: React 19 and the registry both listen on
+   `document`, and stopping propagation does not stop a second listener on the
+   same node. No bug had come of it only because no page yet had a panel and
+   an Escape binding at once.
+2. **Escape meant something on the board and nothing on `/now` or in the
+   bank**, the other two lists with the same `j`/`k`/`Enter`.
+3. **A checkbox counted as typing.** The registry treated every `<input>` as a
+   text field, so after ticking a `/now` row with the mouse, `j` did nothing
+   until you clicked somewhere else.
+4. **On `/now`, `j` did not move focus.** The board and the bank move focus
+   to the selected item (the M5 review's "focus follows the selection");
+   `/now` only scrolled. Focus stayed wherever the last click put it. After
+   clicking a channel chip, `Enter` (which rightly stands aside on a focused
+   button) re-toggled the chip instead of opening the row. The new spec found
+   this.
+5. **`[` was unreachable on a German or French Windows keyboard.** There it is
+   AltGr+8, which arrives as Ctrl+Alt, and the registry drops anything with
+   Ctrl or Alt held. The file's own header claimed `[` "works on any layout
+   that produces `[`".
+6. **Settings fields reverted on Escape without consuming it**, so they were
+   one future overlay away from an Escape that did two things.
+
+### The set, as it stands
+
+| Keys | Does | Where |
+|---|---|---|
+| `g` then `n` / `b` / `i` / `c` / `s` | Go to Now / Board / Ideas / Calendar / Settings | every shell route |
+| `1`–`9` | Go to that channel's board | every shell route, 2+ channels |
+| `c` | Capture an idea | every shell route with a channel |
+| inside the box: `Enter`, `Shift+Enter`, `Alt+1–9`, `Escape` | Save, more fields, another channel, close | the capture box |
+| `j` / `k` | Select next / previous | board, `/now`, idea bank |
+| `Enter` | Open the selected video | board, `/now`, idea bank |
+| `Escape` | Clear the selection | board, `/now`, idea bank |
+| `[` / `]` | Move the selected card back / forward a stage | board |
+| `x` | Do the selected row's next action | `/now` |
+| `p` | Promote the selected idea | idea bank |
+| `/` | Search titles and hooks | idea bank |
+| `?` | The sheet (again, or Escape, to close) | every shell route |
+
+It stays small on purpose. The rule for going places is the sidebar row's
+initial. The rule for lists is `j`/`k`/`Enter`/`Escape` on all three.
+Page-specific verbs get one letter each (`[ ]`, `x`, `p`, `/`), and each exists
+on exactly one route.
+
+### Escape, defined once
+
+Written in the header of `lib/shortcuts.ts` and enforced there. One press
+dismisses exactly one thing, the first of:
+
+1. an armed `g` sequence;
+2. the newest **overlay**, meaning any `Modal` (capture, swap reason, the `?`
+   sheet, the phone menu), from anywhere, including from inside a text field;
+3. the **region** focus is inside, meaning an assist panel;
+4. an ordinary `Escape` binding (clearing the selection), which like every
+   binding stands aside while you are typing.
+
+A field that gives Escape a local meaning calls `preventDefault()` and so
+comes first. The four settings fields now do. `useDismiss(onDismiss, {within})`
+is how a layer joins. `Modal` and `AssistPanel` use it, and the two React
+Escape handlers are gone. Nothing else in the application listens for Escape.
+
+### One mechanism
+
+`lib/shortcuts.ts` is still the only `keydown` listener on `document` (the
+field-level `onKeyDown`s are React handlers on the fields themselves, which is
+what they should be). The two Escape handlers above were folded in.
+`components/channel-shortcuts.tsx` and `components/shortcut-hints.tsx` moved
+into `components/shortcuts/`. The sidebar now mounts one `KeyboardShortcuts`
+(`1`–`9`, `g`, `?`, the sheet, the sequence indicator) where it mounted
+`ChannelShortcuts`.
+
+### The sheet
+
+`?` opens it on every shell route; `?` or Escape closes it and focus goes back.
+Its rows are **read off the registry** at the moment it opens
+(`readShortcutSheet()`), so it lists only what is bound on this route and
+cannot drift. The capture box's field keys, which the registry cannot see, are
+the one hand-written group, and the spec presses every one of them. Groups
+follow what the person is doing: this page's keys, then Capture, then Get
+around, then Closing things. The sheet uses two columns at `md` and up (a
+`width="wide"` option on `Modal`), because at one column it ran past the
+bottom of a 900px screen. It is honest about what is not here. The views
+whose keys are not live on this route are named at the bottom as links ("Not
+on this page: Now and the idea bank each have keys of their own — press ?
+there").
+
+After `g`, a small bar at the bottom of the screen lists where the next key
+goes, for the 1.5 seconds the sequence waits. It is a live region, so a
+screen reader hears the same list.
+
+### Decisions taken without the user
+
+1. **`g c` is the calendar, not PLAN.md's `g k`.** One rule (the sidebar
+   row's initial) beats five keys to learn. `k` was presumably chosen because
+   `c` is capture, but after `g` the registry reads the next key only as a
+   destination, so there is no clash. `g s` (Settings) was added by the same
+   rule, since Settings has been a sidebar row since M7.
+2. **The second key of a sequence is always consumed.** `g` then a stray `c`
+   does nothing rather than opening capture. After `g`, a letter means a
+   place.
+3. **The hint bar stays** (M1 review finding 18 asked M9 to reconsider it).
+   It is what someone who has never pressed `?` sees, and its last item is a
+   button that opens the sheet, which is how a mouse user finds the keyboard
+   at all. It no longer tries to be complete: `g`, `/` and Escape are
+   sheet-only (`hint.bar: false`).
+4. **Escape clears the selection on `/now` and in the bank too**, as it has on
+   the board since M1.
+5. **An assist panel is a region, not an overlay.** It is inline and the page
+   keeps working around it (M8's reasoning), so Escape closes it only when
+   focus is inside it. With focus elsewhere on the page, Escape leaves every
+   open panel alone.
+6. **Checkboxes, radios and buttons are not "typing".** Letter keys work from
+   them; Enter and Space still belong to the browser there.
+7. **AltGr is a way to produce a key, not a modifier on one.** A key typed
+   with AltGr is that key. Ctrl or Alt without AltGr still belongs to the
+   browser.
+8. **`/` exists only in the idea bank**, because that is the only search box.
+   It is bound by the component that draws the box, so the key and the box
+   cannot come apart.
+
+### Deviations from PLAN.md, stated plainly
+
+- `g k` → `g c`, and `g s` added (decision 1).
+- `Escape` (clear selection) on `/now` and the bank, and `/` in the bank:
+  PLAN.md:151 lists neither.
+- PLAN.md:151 says the hook "ignores events from inputs". It now ignores
+  events from text-entry inputs. A checkbox is an input and is no longer
+  ignored (decision 6).
+
+### Honest limits
+
+These are for the README's limits section; this slice did not edit the README.
+
+- **No key moves a video from its own page.** `[`/`]` exist only on the board.
+  On `/videos/[id]` the stage select is one Tab away. Binding `[`/`]` there
+  would need the board's kind-order semantics (it skips inert stages), and
+  the page's select does not carry kinds. A key that meant "next stage" on one
+  page and "next option in the select" on another is the incoherence this
+  slice exists to remove.
+- **No keys on the calendar, the matrix, settings or `/capture`** beyond the
+  application's own (`g`, `1`–`9`, `c`, `?`). `/capture` has no shell, so it
+  has no `?` either. It is the phone bookmark, and the page is the form.
+- **The sheet is unreachable by touch on a phone.** The hint bar and its "all
+  keys" button live in the desktop sidebar. That is deliberate (a phone has no
+  keys), but a phone with a hardware keyboard gets the keys without a visible
+  way to learn them other than `?`.
+- **Keys match `KeyboardEvent.key`**, so a layout that produces `j` elsewhere
+  gets `j` elsewhere, which is the right trade for letters. The AltGr case is
+  proved with a synthetic event. No real non-US keyboard was used.
+- **Sequences cannot be remapped**, and nothing can. There are no user
+  keybindings.
+- **The `g` indicator lasts 1.5 seconds** and is not configurable.
+
+### Gates for this slice
+
+Run in this container with no `ANTHROPIC_API_KEY`, while two other M9 agents
+were editing the same tree and running their own stacks.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs, after the last edit |
+| Lint | `npm run lint` | clean |
+| Unit | `npm test` | 519 passing in 32 files (no unit file touched) |
+| Browser, full | `E2E_REUSE=0 DEV_STACK_PORT=54341 DEV_STACK_POSTGREST_PORT=54342 NERTUBE_DEV_DB=nertube_e2e_keys E2E_PORT=3113 npx playwright test` | **282 passed, 2 failed, 1 skipped (23.5m)**, on a database built fresh by that run, on ports no other agent was using |
+| Browser, this spec after the fixes below | `E2E_REUSE=1 npx playwright test shortcuts` | **12 passed**, against another agent's running stack (its `next dev` held the directory's dev lock, so a second isolated run was not possible) |
+
+The two failures in the full run, named:
+
+1. **`shortcuts.spec.ts`, the `1–9` step.** On a database a full run has
+   filled, "Keys" is the tenth-or-later channel, and only the first nine get
+   a digit. The spec now uses a seeded channel and throws a named error if a
+   channel has no digit. Re-verified in the 12-pass run above. This was the
+   spec's assumption; the application was right.
+2. **`responsive.spec.ts:748`** (the responsive slice's, not this one's)
+   expected the sidebar strip to be exactly the viewport's height. On a full
+   run's long `/now` it is 2733px. That slice has since rewritten the
+   assertion to "at least the viewport".
+
+Two changes landed after the full run and are covered only by the 12-pass
+run: that fix, and the sheet's "Not on this page" line excluding the current
+page. **The orchestrator's final `E2E_REUSE=0` full run is the one that
+counts for this slice.** None of the 270-odd existing specs needed a change
+for the keyboard work: the hint-bar assertions in `m1-acceptance`, the
+capture box, the swap dialog and the assist panels' Escape all passed
+unmodified.

@@ -256,6 +256,22 @@ export default async function CalendarPage({
           />
         ) : null}
 
+        {/*
+          M9: said in the view rather than left to be discovered. Seven columns
+          of a 350px column are 50px a day, which holds a date and a chip's
+          channel tag and not a title. The grid still works — every chip is
+          still the link to its video, and nothing scrolls the page sideways —
+          but reading a month is a desktop job, and the page says so where the
+          phone is.
+        */}
+        <p
+          data-testid="calendar-phone-note"
+          className="text-[12px] text-muted md:hidden"
+        >
+          A month needs a wider screen to read titles. Here, tap a chip to open
+          its video.
+        </p>
+
         <MonthGrid
           month={month}
           events={events}

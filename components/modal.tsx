@@ -10,7 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { useShortcuts } from "@/lib/shortcuts";
+import { useDismiss, useShortcuts } from "@/lib/shortcuts";
 
 /**
  * The application's one modal.
@@ -44,8 +44,9 @@ import { useShortcuts } from "@/lib/shortcuts";
  *   the first, Shift+Tab from the first goes to the last;
  * - focus **returns** to whatever had it when the dialog closes, so `c`,
  *   Escape leaves the board exactly as it was;
- * - Escape closes, from anywhere inside — including from a text field, where
- *   the global shortcut registry deliberately does not listen;
+ * - Escape closes, from anywhere inside — including from a text field — and
+ *   closes only the newest dialog when two are open (`useDismiss` in
+ *   `lib/shortcuts.ts`, where the one Escape order is written down);
  * - **the page underneath goes quiet**: the dialog registers an `exclusive`
  *   scope with `useShortcuts`, so `j`, `[`, `]`, `Enter` and `1..9` are not
  *   board or header keys while it is open. Without it, a key pressed while
@@ -63,6 +64,8 @@ export function Modal({
   onClose,
   onClosed,
   testId,
+  placement = "center",
+  width = "default",
   children,
 }: {
   title: string;
@@ -86,6 +89,24 @@ export function Modal({
   onClosed?: () => void;
   /** A handle for the specs, on the dialog itself rather than on its content. */
   testId?: string;
+  /**
+   * Where the box sits. `"center"` is every dialog in the application; `"start"`
+   * is a full-height sheet against the leading edge, which is what the app
+   * shell's navigation becomes on a phone (`components/app-sidebar-menu.tsx`).
+   *
+   * One prop and not a second component, because everything that makes this a
+   * modal — the focus trap, the return, Escape from inside a field, the
+   * `exclusive` scope that silences the page's keys, the backdrop — is exactly
+   * as true of a navigation drawer as of the capture box. Only the geometry
+   * differs, so only the geometry is a variant.
+   */
+  placement?: "center" | "start";
+  /**
+   * How wide a centred box may grow. `"default"` (32rem) is every form; the
+   * `?` sheet is `"wide"` (48rem) because it is a reference card set in two
+   * columns, and at one column it ran past the bottom of a laptop screen.
+   */
+  width?: "default" | "wide";
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -93,11 +114,18 @@ export function Modal({
 
   /*
     An empty exclusive registration: it binds no key of its own, and while it
-    is mounted no non-exclusive binding fires. Escape and Tab are handled below
-    as React events, because both have to work from inside a text field — which
-    is exactly where the registry, correctly, does not listen.
+    is mounted no non-exclusive binding fires.
+
+    Escape is the registry's too: every open dialog is an *overlay*, and the
+    newest overlay takes Escape from anywhere — including from inside the
+    title field, where ordinary bindings, correctly, do not listen. That is
+    what makes two stacked layers close one at a time, newest first (the
+    phone's menu under the capture box; the `?` sheet over a board with a card
+    selected). The order is written down once, in `lib/shortcuts.ts`. Tab
+    stays a React handler below: the trap is this element's business alone.
   */
   useShortcuts(EMPTY, { exclusive: true });
+  useDismiss(onClose);
   // What to give focus back to, fixed at mount.
   const opener = useRef<Element | null>(null);
   // Read through a ref: the effect below is mount-only, so a callback captured
@@ -131,15 +159,6 @@ export function Modal({
   }, []);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      // Escape has to work from inside the title input, which is why this is a
-      // React handler on the dialog rather than a `useShortcuts` binding: that
-      // hook ignores everything typed into a field, correctly.
-      onClose();
-      return;
-    }
-
     if (event.key !== "Tab") return;
 
     const dialog = dialogRef.current;
@@ -161,11 +180,19 @@ export function Modal({
     }
   }
 
+  const sheet = placement === "start";
+
   return createPortal(
     <div
       // Not a focus trap by itself — the keydown handler below is — but it does
       // catch a click on the backdrop.
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]"
+      className={
+        sheet
+          ? // `overscroll-contain` so a swipe on the backdrop does not scroll
+            // the page underneath the sheet.
+            "fixed inset-0 z-50 flex justify-start overscroll-contain bg-black/40"
+          : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]"
+      }
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -173,22 +200,45 @@ export function Modal({
       <div
         ref={dialogRef}
         data-testid={testId}
+        data-placement={placement}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="w-full max-w-lg rounded-card border border-border bg-surface p-4 shadow-xl sm:p-5"
+        className={
+          sheet
+            ? // Never the whole width: the strip of backdrop that is left is
+              // what a thumb taps to dismiss it, and what says the page is
+              // still there underneath.
+              "flex h-dvh w-[min(20rem,calc(100vw-3rem))] flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar px-3 py-4 shadow-xl"
+            : [
+                "w-full rounded-card border border-border bg-surface p-4 shadow-xl sm:p-5",
+                width === "wide" ? "max-w-3xl" : "max-w-lg",
+              ].join(" ")
+        }
       >
-        <div className="mb-3 flex items-baseline justify-between gap-3">
+        <div
+          className={[
+            "mb-3 flex items-baseline justify-between gap-3",
+            sheet ? "px-1" : "",
+          ].join(" ")}
+        >
           <h2 id={headingId} className="text-base font-semibold tracking-tight">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
           >
-            Escape to close
+            {/*
+              A touchscreen has no Escape key, so there the button says what it
+              does rather than which key does it. `display: none` takes the
+              other word out of the accessibility tree too, so the name is
+              exactly one of the two.
+            */}
+            <span className="pointer-coarse:hidden">Escape to close</span>
+            <span className="hidden pointer-coarse:inline">Close</span>
           </button>
         </div>
 

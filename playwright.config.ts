@@ -38,7 +38,9 @@ import { apiKey } from './scripts/dev-stack/jwt';
  *     ports and database, so it always starts the stack it configured.
  *
  * `E2E_REUSE=1` opts back in to reusing both, for a fast inner loop when you
- * know what is running.
+ * know what is running. Since M9 that is the only way either is reused: the
+ * stack was reused by default until then, and the paragraph below says why
+ * that default was the wrong one.
  *
  * ## Why `executablePath`
  *
@@ -55,8 +57,18 @@ const ANON_KEY = apiKey('anon', API_KEY_IAT, API_KEY_EXP);
 const APP_PORT = Number(process.env.E2E_PORT ?? 3111);
 const APP_URL = `http://localhost:${APP_PORT}`;
 
-/** The stack may be one a developer already has up; the app never is. */
-const REUSE_STACK = !process.env.CI && process.env.E2E_REUSE !== '0';
+/**
+ * Neither is reused unless asked for. M4's review deferred this to M9: the
+ * stack used to be reused by default, and a stack left over from an earlier
+ * session is a database built from an earlier set of migrations — M8's first
+ * full run tested against one and produced eight failures that looked exactly
+ * like a regression. Playwright now refuses to start when something already
+ * answers on the gateway port ("…is already used, make sure that nothing is
+ * running on the port/url or set reuseExistingServer:true"), which is the
+ * correct answer: stop the old stack (`npm run dev:stack:stop`), or say
+ * `E2E_REUSE=1` and own the consequences.
+ */
+const REUSE_STACK = !process.env.CI && process.env.E2E_REUSE === '1';
 const REUSE_APP = !process.env.CI && process.env.E2E_REUSE === '1';
 
 /** Where the pre-installed browser lives. */

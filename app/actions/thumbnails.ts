@@ -21,6 +21,7 @@ import {
   type ThumbnailRole,
 } from "@/lib/storage";
 import { requireUser } from "@/lib/supabase/require-user";
+import { cleanProse } from "@/lib/text";
 
 /**
  * The three thumbnail variants: recording one, removing one, and shipping one.
@@ -405,7 +406,7 @@ export async function shipThumbnail(
         currentRole: current,
       };
     }
-    logReason = (reason ?? "").trim();
+    logReason = cleanProse(reason ?? "").trim();
   }
 
   /*

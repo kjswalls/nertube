@@ -1,225 +1,218 @@
 # NerTube
 
-A personal YouTube production pipeline tool. Where other tools chase AI ideation,
-NerTube owns the production middle: moving a video from a captured idea to a
-published URL. It keeps several videos alive at once across per-channel stages
-(Idea → Packaging (TTH) → Scripting → Filming → Editing → Publish Prep →
-Scheduled → Published → Repurposed), makes it structurally awkward to skip the
-packaging gate (title + thumbnail concept + hook before a word is scripted), and
-answers the question that actually matters in a spare ten minutes: *what can I
-move right now?* Multi-channel, keyboard-driven, with an idea bank, content
-buckets, per-stage checklists, three-thumbnail launches with a swap log, and a
-Claude-backed brainstorm for titles and hooks.
+A personal YouTube production pipeline. Other tools concentrate on the idea; this
+one owns the middle — moving a video from a captured idea to a published URL
+and through its first day live. It keeps several videos alive at once across
+per-channel stages (Idea → Packaging (TTH) → Scripting → Filming → Editing →
+Publish Prep → Scheduled → Published → Repurposed), makes it structurally
+awkward to script a video before its title, thumbnail concept and hook are
+decided, and answers the question a creator actually has in a spare ten
+minutes: *what can I move right now?*
 
-See `docs/BRIEF.md` for the requirements and `docs/PLAN.md` for the plan this
-build follows.
+It is built for one person with two channels, and structured so it could become
+a product later. `docs/BRIEF.md` is the requirement, `docs/PLAN.md` the plan it
+was built from, and `docs/MILESTONES.md` the record of every milestone: what was
+built, every deviation from the plan and why, every review finding, and every
+decision taken without the user.
 
-## Stack
+**Contents:** [What it does](#what-it-does) ·
+[The principles, and why the data model looks like this](#the-principles-and-why-the-data-model-looks-like-this) ·
+[Running it locally](#running-it-locally) ·
+[Environment variables](#environment-variables) ·
+[Where writes happen](#where-writes-happen) ·
+[Deploying](#deploying) ·
+[Honest limits](#honest-limits)
 
-Next.js 16 (App Router) + TypeScript, Tailwind CSS v4, Supabase (Postgres, auth,
-storage), Anthropic API server-side only, deployed on Vercel.
+## What it does
 
-## Running the app
+- **Now** (`/now`) — the next small step on every video in production, across
+  every channel, oldest first. Every row is finishable where it stands: tick the
+  checklist item, type the working title, pick the hook, log impressions and CTR,
+  record the URL, answer the swap question. A "10 minutes or less" filter hides
+  the steps that need a real block of time.
+- **Board** (`/c/<channel>/board`) — a kanban per channel with drag and drop
+  and keyboard moves, WIP warnings, days-in-stage, a stale flag, a weekly-review
+  strip (count, oldest, median per column) and a Filming badge that books a
+  batch filming day when three or more videos are waiting on a camera.
+- **Idea bank and matrix** (`/c/<channel>/ideas`) — every idea with search,
+  tag and bucket filters and Promote; `?view=matrix` crosses topic pillars with
+  formats, shows monthly quotas, and turns every empty cell into a capture.
+- **Capture** — `c` anywhere, one field, Enter, done; `/capture` is the same
+  form as a page for a phone's home screen.
+- **The video page** (`/videos/<id>`) — packaging (working title with a 55-
+  character warning, title candidates with notes, the written thumbnail concept
+  and a sketch, up to three hooks, the gate indicator and a deliberate skip),
+  the checklist for the current stage, the script as the template filled it,
+  three thumbnail variants (wild card / moderate / safe) with a shipped role and
+  a swap log, and the post-publish block (impressions and CTR always together,
+  views, new viewers, "swap thumbnail?").
+- **Calendar** (`/calendar`) — target publish dates for every channel on one
+  month, and filming days as their own kind of event.
+- **Settings** (`/settings/…`) — per channel: stages (rename, reorder within the
+  core order, switch off, add your own), checklist templates with minute
+  estimates, buckets and quotas, the voice guide, the script template, the WIP
+  and stale thresholds, and the CTR the swap prompt measures against.
+- **The assists** — title and hook suggestions, thumbnail concepts, and a
+  critique of the three variants at feed size, conditioned on the channel's
+  voice guide and past titles. Proposals, never edits: nothing lands in a field
+  until it is accepted.
+- **Keys** — `?` on any page lists what works there. `g` then a letter goes
+  places, `j`/`k`/`Enter`/`Escape` work every list, `[`/`]` move a card, `x`
+  does a `/now` row, `p` promotes an idea.
+
+## The principles, and why the data model looks like this
+
+The brief names eight principles and says they determine the data model. They
+do; this is where each one lives.
+
+| Principle | What it became |
+|---|---|
+| **Packaging comes first.** Title, thumbnail concept and hook before a word is scripted. | One hard gate, enforced by the database. `move_video()` refuses any move past Packaging unless the three fields are filled *at that moment* (`title <> ''`, a thumbnail concept, exactly one chosen hook). There is no "locked" flag to go stale: the gate is the fields. Skipping is allowed only with a typed reason, which leaves a permanent badge and puts "Complete packaging" at the top of `/now`. |
+| **Thumbnail concept ≠ thumbnail asset.** | Two different things in two different places: `thumbnail_concept` (text the gate reads) plus an optional sketch, decided at Packaging; and three image slots decided near publish. They are never conflated — the gate never looks at an image. |
+| **Parallel, not serial.** Five to ten videos alive, nudged forward in spare minutes. | `/now` is a pure function (`lib/next-action.ts`, unit-tested rule by rule) over the videos, their checklists and the clock. It is *derived*, not stored: the answer depends on the time of day (24-hour checks, go-live dates, staleness), so a stored "next action" would be a cache with five ways to go stale. |
+| **Batch filming.** | `filming_days`, one per date, user-level and cross-channel (one creator, one camera). The board's Filming badge counts across every channel and books the day. |
+| **Bottleneck visibility.** | `stage_entered_at` on every video, set only by `move_video()`: days in stage on the card, the stale flag, the WIP warning on in-flight columns, and the weekly strip's median. |
+| **Friction reduction is the product.** | Every channel is created with its nine stages, seven checklist templates (the brief's, verbatim, with minute estimates), eight formats and a script template (`lib/defaults.ts`). Checklists are *copied* onto a video the first time it enters a stage, so a template edit never silently un-ticks work in flight, and a custom item goes to the top and is immediately the next action. |
+| **Three thumbnails at launch.** | Three slots, not a list (`thumb_wild_card_path`, `thumb_moderate_path`, `thumb_safe_path`), so there is exactly one "safe" and it is a column. `shipped_role` has a CHECK that the role has an image, and changes only through `swap_thumbnail()`, which writes the append-only `thumbnail_swaps` log (with a required reason) in the same transaction. |
+| **Publishing is not the last stage.** | The post-publish block and `/now`'s rules 2 and 3. Impressions and CTR are one component and one CHECK (`(first24_impressions is null) = (first24_ctr is null)`): a CTR without its denominator cannot be stored. |
+
+Four structural decisions follow from those and from the brief's other lines:
+
+- **One `videos` table; an idea is a video in the Idea stage.** Promote is a
+  stage move like any other, so there is no copy step and nothing to keep in
+  sync between an "ideas" table and a "videos" table.
+- **Stages are a per-channel table whose rows carry a fixed `kind`.** The brief
+  says stages must be editable per channel, so they are rows. But behaviour —
+  the gate, the Filming badge, the URL field, the post-publish block, "the next
+  stage" — keys on `kind` and on `CORE_KIND_ORDER` in code, never on the name or
+  the position. Rename Packaging to "TTH" and the gate still fires; add a stage
+  of your own and it is inert. Core stages cannot be deleted, and cannot be
+  reordered past each other.
+- **`user_id` on every table, with tenant-bound composite foreign keys.** A
+  single user today, but every parent has `unique (id, user_id)` and every child
+  references `(parent_id, user_id)`, so one account cannot attach rows to
+  another's even through a foreign-key check (which bypasses RLS). A bucket can
+  only be attached to a video of its own channel, on its own axis, by the same
+  mechanism. RLS is on for every table.
+- **Invariants live in SQL functions, not in application code.** supabase-js
+  has no transactions, so every multi-row write is a `security definer`
+  function that checks ownership first: `create_channel`, `capture_video`,
+  `move_video`, `swap_thumbnail`, and the settings functions. The columns they
+  own (`stage_id`, `stage_entered_at`, `published_at`, `shipped_role`, stage
+  `kind`/`position`/`is_enabled`) have their UPDATE privilege revoked from the
+  client, so the functions are the only way to change them — enforced by the
+  database, not by convention.
+
+## Running it locally
+
+You need **Node 22** and one of two ways to run Supabase.
+
+### With Docker: the Supabase CLI (the authority)
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in real values
-npm run dev                  # http://localhost:3000
+npx supabase start            # uses supabase/config.toml and supabase/migrations
+npx supabase db reset         # applies every migration from 0001 to 0009
+cp .env.example .env.local    # paste the API URL and anon key `supabase start` printed
+npm run dev                   # http://localhost:3000
 ```
 
-`.env.local` is gitignored and is the only place real keys belong.
-`.env.example` lists the variable names with empty placeholders.
+Then create your user: Studio at http://127.0.0.1:54323 → Authentication →
+Users → *Add user*, with *Auto Confirm User* ticked. There is no sign-up
+screen, and `supabase/config.toml` has signups turned off on purpose (one user,
+created once). Sign in, and the app walks you from an empty account to your
+first channel.
 
-Other scripts:
+**This path has not been run in the environment NerTube was built in**, which
+has no Docker daemon. `supabase/config.toml` was generated by the pinned CLI
+(`supabase init`, v2.117.0) in M9 with only three changes (project id,
+signups off, the seed step off); everything else is the CLI's own default.
 
-| Script | What it does |
+### Without Docker: the local test harness
+
+This is how every milestone was built and tested. **If you do not have Docker,
+do not reach for `supabase start` — it cannot run.** Use this instead:
+
+```bash
+npm install
+npm run dev:stack             # needs PostgreSQL 16 on 127.0.0.1:5432 and `postgrest` 12.2 on PATH
+npm run dev                   # in a second terminal
+```
+
+`npm run dev:stack` runs the whole SQL test suite against a throwaway database
+and refuses to serve anything unless it passes, then rebuilds `nertube_dev`
+from the migrations alone, seeds one user and two channels **through the real
+`create_channel` and `capture_video` functions as that user**, and serves one
+origin at http://127.0.0.1:54321 carrying `/rest/v1` (the real PostgREST
+binary, logging in as `authenticator`, so every RLS policy and column grant is
+enforced by Postgres), `/auth/v1` and `/storage/v1`. It prints the URL, the anon
+key and the seeded credentials to paste into `.env.local`. Ctrl-C (or a plain
+`kill`) takes PostgREST down with it; `npm run dev:stack:stop` clears up after
+a `kill -9`.
+
+**It is a test harness that approximates Supabase. It is never deployed and the
+application does not import a line of it.** Postgres and PostgREST in it are
+real; GoTrue and Storage are re-implemented to the shape
+`@supabase/supabase-js` parses. What that costs — no email, magic links, OTP,
+OAuth, MFA or `auth.admin.*`; no rate limiting; only the `public` schema over
+REST; no Realtime; in Storage no image transforms, resumable uploads, public
+buckets or Range requests — is listed in full in
+[`scripts/dev-stack/README.md`](scripts/dev-stack/README.md#what-this-harness-does-not-reproduce).
+**A passing local run is not a passing hosted run.**
+
+It drops and recreates its databases on every start, so it refuses to talk to
+anything but a loopback `PGHOST`.
+
+### Tests
+
+| Command | What it proves |
 |---|---|
-| `npm run dev` | Next dev server |
-| `npm run build` | Production build |
-| `npm run start` | Serve the production build |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | `tsc --noEmit` over both programs: the app, and `tsconfig.harness.json` (the dev stack, the Playwright specs, the unit tests) |
-| `npm test` | `vitest run` |
-| `npm run db:verify` | Rebuild a local database and run the SQL tests |
-| `npm run db:types` | Regenerate `lib/database.types.ts` from the local database (needs Docker) |
-| `npm run seed:demo` | Dev-only: create the user, two seeded channels and the 8-video week fixture |
-| `npm run dev:stack` | Dev-only TEST harness: local Supabase stand-in (see below) |
-| `npm run dev:stack:smoke` | Drive a running dev stack with supabase-js and report what works |
-| `npm run dev:stack:stop` | Stop a dev stack that was killed without being able to clean up |
-| `npm run e2e` | Playwright end-to-end against the real app and the dev stack |
-| `npm run e2e:refresh` | The session-refresh spec on its own stack, ports and database, with a 5-second access token, to exercise `proxy.ts`'s session refresh |
+| `npm run typecheck` | Both TypeScript programs: the app, and `tsconfig.harness.json` (the harness, the Playwright specs, the unit tests). |
+| `npm run lint` | ESLint. |
+| `npm test` | Vitest: the ranking rules, the date helper, the assist provider against a stubbed transport, the schemas. |
+| `npm run db:verify [dbname]` | The Docker-free database check: drops and recreates a database on local Postgres, applies `supabase/tests/shim.sql` (the Supabase pieces a plain Postgres lacks: the `auth` and `storage` schemas, `auth.uid()`, the roles and default grants), every migration in order, then every `supabase/tests/*.test.sql`. Exits non-zero on the first failure. |
+| `npm run e2e` | Playwright, against the real app and the harness. It starts **both** servers itself and refuses to run if a stack is already up — a stack left over from an earlier session is a database built from earlier migrations, and a run against it fails in ways that look exactly like regressions. `npm run dev:stack:stop` clears one; `E2E_REUSE=1` reuses both on purpose. A `next dev` already running in the directory also blocks it (Next allows one per directory), and the suite says so in one sentence. |
+| `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
-## The local dev stack (a TEST harness)
+The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
+third party. Playwright is pointed at the Chromium in `/opt/pw-browsers`
+through `executablePath`; do not run `playwright install` in that environment.
 
-`npm run dev:stack` starts a local, Docker-free stand-in for Supabase so the
-real app can be driven in a real browser against real Postgres with real
-row-level security. It lives in `scripts/dev-stack/` and has its own
-[README](scripts/dev-stack/README.md).
+Other scripts: `npm run seed:demo` (see [Deploying](#deploying)),
+`npm run db:types` (regenerates `lib/database.types.ts`; the Supabase CLI
+shells out to Docker for this, so the committed file was written by hand and
+checked column by column against a built database), and
+`npm run dev:stack:smoke` (drives a running harness with supabase-js).
 
-```bash
-npm run dev:stack   # resets nertube_dev, seeds it, serves http://127.0.0.1:54321
-npm run dev         # the app, pointed at that origin
-npm run e2e         # Playwright end-to-end; starts both of the above itself
-```
+## Environment variables
 
-It runs the SQL test suite against a throwaway `nertube_test` (so the tests have
-to pass before it will serve anything), builds the database it actually serves
-from the shim and the migrations alone, seeds one user and two channels through
-the real `create_channel` / `capture_video` functions as the `authenticated`
-role, runs the real **PostgREST** binary in front of the database (as
-`authenticator`, not as a superuser), and serves one origin carrying
-`/rest/v1`, `/auth/v1` and `/storage/v1` behind a Kong-style api-key check. It
-prints the URL and the anon key to paste into `.env.local`, and takes PostgREST
-down with it on Ctrl-C — or on a plain `kill`, which npm does not forward and
-which the stack therefore watches for itself. `npm run dev:stack:stop` clears up
-after a `kill -9`, the one case nothing can catch.
+`.env.example` lists every name with an empty value; `.env.local` is gitignored
+and is the only place real values belong. No value is written down anywhere in
+this repository.
 
-**It is a test harness that approximates Supabase. It is never used in
-production, it is never deployed, and the application does not import a line of
-it. It exists only because Docker is unavailable in this environment**, so
-`supabase start` cannot run and no page that needs data could otherwise be
-opened at all. Where Docker is available, `supabase start` is the authority.
+| Variable | Read by | Where it goes | What it is |
+|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | the app | `.env.local`, Vercel | The project URL. Public by design. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the app | `.env.local`, Vercel | The anon/publishable key. Public by design: RLS is what protects the data. |
+| `ANTHROPIC_API_KEY` | `lib/assist/anthropic.ts` only | Vercel (server-side), optionally `.env.local` | **Secret.** Never with a `NEXT_PUBLIC_` prefix — that prefix inlines a value into the browser bundle. |
+| `ANTHROPIC_MODEL` | `lib/assist/anthropic.ts` | Vercel, optional | Overrides the pinned model id (`claude-opus-5`). |
+| `ASSIST_PROVIDER` | `app/actions/assist.ts` | **Unset in production** | `fake` forces the built-in fixtures. See the table below. |
+| `ASSIST_FAKE_SCENARIO` | `lib/assist/fake.ts` only | dev and tests only | Makes the fixtures fail in a named way, to walk the error paths. |
+| `SUPABASE_SERVICE_ROLE_KEY` | `scripts/` only, never the app | a local shell, never Vercel | **Secret.** Used by `scripts/seed-demo.ts`. |
+| `SEED_EMAIL`, `SEED_PASSWORD` | `scripts/` only | a local shell | The account `seed-demo.ts` creates, and the harness's login. |
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `NERTUBE_DB_URL` | `scripts/` only | a local shell | The local Postgres the harness and `db:verify` use (loopback only). |
+| `E2E_REUSE`, `E2E_PORT`, `DEV_STACK_*` | Playwright and the harness | a local shell | Test plumbing; `scripts/dev-stack/README.md` has the full table. |
 
-The database and PostgREST in it are real; GoTrue and Storage are
-re-implemented to the shape `@supabase/supabase-js` parses. What that costs is
-listed in full under
-["What this harness does not reproduce"](scripts/dev-stack/README.md#what-this-harness-does-not-reproduce)
-— roughly: no email, magic links, OTP, OAuth, SSO, MFA or `auth.admin.*`; no
-rate limiting or lockout; no JWKS or asymmetric signing keys; no refresh-token
-reuse detection; none of Kong beyond the api-key check; only the `public` schema
-over REST; no Realtime, Edge Functions, Supavisor, `pg_cron`/`pg_net`/
-`pg_graphql` or Studio; and in Storage no image transforms, resumable uploads,
-`move`/`copy`, public buckets, CDN or Range requests, with a simplified `list()`.
-**A passing local run is not a passing hosted run.** If a behaviour on that list
-matters, check it against a real project.
+With no Supabase variables at all, the proxy answers every page with a readable
+503 setup page instead of an unexplained 500.
 
-`npm run e2e` is the acceptance test for all of the above: it signs in through
-the real login form with the seeded credentials, lands on a board, asserts the
-nine seeded stage columns, asserts a wrong password shows an error without
-signing in, and asserts a signed-out browser is bounced from the board to
-`/login`. It writes a screenshot into the gitignored `e2e/screenshots/`.
-It also asserts the browser's session cookie names this origin, so the suite
-cannot silently be driving an app pointed somewhere else; Playwright starts the
-application server itself for the same reason. `npm run e2e:refresh` drives the
-session-refresh path by starting its own stack — own ports, own database — with
-a five-second access token, the only way to watch `proxy.ts` rotate a token, and
-the check that found the harness's one real fidelity bug (rotating refresh
-tokens with no reuse interval, which signed the user out mid-render). It fails
-rather than skips if it ever finds itself talking to a stack that mints
-hour-long tokens.
-Playwright uses the Chromium already installed at `/opt/pw-browsers` via
-`executablePath`; `playwright install` must never run here.
+### Which assist implementation answers
 
-## Database
-
-The normal local workflow is the Supabase CLI Docker stack:
-
-```bash
-npx supabase start
-npx supabase db reset
-```
-
-Where Docker is not available, `npm run db:verify` is the stand-in. It drops and
-recreates a throwaway database on a plain PostgreSQL server, applies
-`supabase/tests/shim.sql` (which recreates the Supabase-specific pieces: the
-`auth` and `storage` schemas, `auth.uid()`, `storage.foldername()`, the
-`anon`/`authenticated`/`service_role` roles and Supabase's default grants), then
-applies every `supabase/migrations/*.sql` in order and runs every
-`supabase/tests/*.test.sql`. It exits non-zero on the first error.
-
-```bash
-npm run db:verify              # uses the default database name
-npm run db:verify -- mydbname  # or name your own
-```
-
-It reads `PGHOST`, `PGPORT` and `PGUSER` (defaults `127.0.0.1`, `5432`,
-`postgres`), and refuses to run at all unless `PGHOST` is loopback — its first
-statement is `drop database ... with (force)`, and `PGHOST`/`PGPASSWORD` are
-exactly what you would export to reach a hosted database.
-`scripts/verify-db.sh --no-tests` stops after the migrations; that is how
-`npm run dev:stack` builds a serving database without the test fixtures.
-
-`npm run db:types` regenerates `lib/database.types.ts` with the Supabase CLI.
-The CLI is an npm dev dependency used for that one job. Note that
-`gen types --db-url` still shells out to Docker to run postgres-meta, so it
-needs a Docker daemon even though it is pointed at a plain database URL; without
-one it fails with `LegacyDockerRunError`. `NERTUBE_DB_URL` overrides the
-database it reads (the default is `nertube_dev` on localhost).
-
-The committed `lib/database.types.ts` was written by hand from
-`supabase/migrations/0001_init.sql` for exactly that reason, and checked column
-by column against the catalogue of a database built by `npm run db:verify`. Once
-Docker is available, `npm run db:types` should overwrite it wholesale. The script
-writes to a temporary file and only moves it into place on success, so running it
-without Docker leaves the committed file alone instead of replacing it with the
-CLI's error blob.
-
-## Where writes happen
-
-**The browser Supabase client is used only for Storage uploads and reads.**
-Thumbnail images and concept sketches go straight from the browser to Supabase
-Storage — that keeps them clear of Vercel's 4.5 MB request body limit — and
-signed URLs are read back for display.
-
-**Every database write goes through a server action.** No component writes to a
-table with the browser client. Server actions are the single write path, which
-is what makes the invariants enforceable: the stage move and thumbnail swap are
-plpgsql functions called over `rpc()`, and `videos.stage_id`,
-`stage_entered_at`, `published_at` and `shipped_role` have their `UPDATE`
-privilege revoked from the `authenticated` role, so those functions are the only
-way to change them. `INSERT` on `videos` is revoked outright for the same reason
-— a plain insert would otherwise create a video on the far side of the gate — so
-`capture_video()` is the only way a video comes into existence, and it always
-lands in the Idea stage. `stages.kind` is likewise not client-writable, which is
-what makes the "core stages cannot be deleted" delete policy hold: the policy
-keys on `kind`, so a writable `kind` would let a client launder a core stage into
-an inert one and then delete it. `thumbnail_swaps` has no client `UPDATE` or
-`DELETE` at all (it is an append-only log), and `TRUNCATE` — which RLS does not
-apply to — is revoked from `anon` and `authenticated` on every table. RLS is on
-for every table; the browser's anon key can read and write nothing that does not
-belong to the signed-in user.
-
-## The brainstorm, and what to set in Vercel
-
-The title / hook / concept suggestions and the thumbnail critique are one
-feature behind one interface — `AssistProvider` in `lib/assist/types.ts`. Two
-implementations ship: `lib/assist/anthropic.ts`, which calls Claude, and
-`lib/assist/fake.ts`, which returns deterministic fixtures with no network at
-all. The app depends only on the interface; `app/actions/assist.ts` picks an
-implementation from the environment and imports it lazily, so a process running
-the fixtures never even loads the vendor SDK.
-
-**The key is server-side only and must stay that way.** `lib/assist/anthropic.ts`
-is the one file that reads `ANTHROPIC_API_KEY`, and its first line is
-`import "server-only"` — a client component that reached it would fail the build
-rather than ship a key to a browser. The client sends a video id and a kind and
-nothing else; the prompt, the voice guide and the past titles are all assembled
-on the server, so a browser can never spend the key on something of its own.
-`npm run build` followed by a grep of `.next/static` for `ANTHROPIC_API_KEY`,
-`api.anthropic.com` and `x-api-key` is the check, and it finds nothing.
-
-### Variables
-
-Set these in Vercel under **Project → Settings → Environment Variables**, as
-server-side variables (no `NEXT_PUBLIC_` prefix — that prefix is what inlines a
-value into the browser bundle):
-
-| Variable | Required | What it does |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | **Yes**, for the real provider | Your Anthropic API key. Server-side only. Nothing else in this repository reads it, and no value for it is written down anywhere here. |
-| `ANTHROPIC_MODEL` | No | Overrides the model id. Defaults to the one `lib/assist/anthropic.ts` pins. Set it to migrate models without a deploy of new code. |
-| `ASSIST_PROVIDER` | No | `fake` forces the fixtures. Leave it **unset in production.** Unset means Claude when a key is present, and Claude (failing with "no API key configured") in production when it is not; a development checkout with no key falls back to the fixtures and says so on every answer. Any other non-empty value means Claude. The full rule is the table below. |
-| `ASSIST_FAKE_SCENARIO` | No | Only read by the fixtures: makes them answer with a named failure, for driving the error paths. Never set it in production. |
-
-Everything else the app needs (`NEXT_PUBLIC_SUPABASE_URL`,
-`NEXT_PUBLIC_SUPABASE_ANON_KEY`) is listed in `.env.example`;
-`SUPABASE_SERVICE_ROLE_KEY`, `SEED_EMAIL` and `SEED_PASSWORD` are read by
-`scripts/`, never by the app, and do not belong in a Vercel deployment.
-
-### Which implementation answers
-
-The rule is one pure function, `selectAssistProvider` in `lib/assist/select.ts`,
-with a unit test per case:
+The suggestions are one feature behind one interface, `AssistProvider` in
+`lib/assist/types.ts`. `lib/assist/anthropic.ts` calls Claude;
+`lib/assist/fake.ts` returns deterministic fixtures with no network. The rule is
+one pure function, `selectAssistProvider` in `lib/assist/select.ts`, with a unit
+test per row:
 
 | `ASSIST_PROVIDER` | key present | `NODE_ENV` | answers |
 |---|---|---|---|
@@ -229,92 +222,209 @@ with a unit test per case:
 | unset | no | `production` | Claude — and the panel says "no API key configured" |
 | unset | no | anything else | the fixtures |
 
-A **production** deployment with no key deliberately does *not* fall back. The
-fixtures return plausible titles with plausible reasons; a deployment where the
-key was never pasted would, if it fell back, hand you invented titles and let
-you believe a model wrote them — the one failure in this feature nobody can
-notice from outside. So it fails with a sentence naming the variable instead.
+A production deployment with no key deliberately does **not** fall back: the
+fixtures return plausible titles with plausible reasons, and a deployment where
+the key was never pasted would let you believe a model wrote them. Wherever the
+fixtures do answer, every panel says so on every answer, and which
+implementation answered is stored with the result, so a panel reopened tomorrow
+makes the same admission. `npm run build` followed by a grep of `.next/static`
+for `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` finds nothing.
 
-A **development** checkout with no key does fall back, so a fresh clone is
-reviewable without a paid account — and wherever the fixtures answer, every
-panel says so, on every answer, in the attention colour: *these came from this
-app's built-in fixtures, not from Claude.* Which implementation answered is
-stored with the result in `videos.brainstorm_last`, so a panel reopened tomorrow
-makes the same admission. The fixtures are never silent about being fixtures.
+## Where writes happen
 
-(That sentence points here rather than naming `ANTHROPIC_API_KEY`, on purpose:
-the panels are client components, so a variable spelled in one of them would
-appear in `.next/static` and cost the grep above its only useful answer, which
-is *nothing*.)
+**The browser Supabase client does uploads and reads only.** Thumbnail images
+and concept sketches go straight from the browser to Supabase Storage — which
+keeps them clear of Vercel's 4.5 MB request body limit — and signed URLs are
+read back for display.
 
-`npm run e2e` sets `ASSIST_PROVIDER=fake` explicitly in `playwright.config.ts`,
-so the suite can never spend money or depend on a third party being up.
+**Every database write goes through a server action or a `security definer`
+function.** No component writes to a table with the browser client. That is
+what makes the invariants enforceable rather than conventional:
 
-## Channels
+- `move_video()` and `swap_thumbnail()` are the only writers of `stage_id`,
+  `stage_entered_at`, `published_at` and `shipped_role`, whose UPDATE privilege
+  is revoked from the `authenticated` role.
+- INSERT on `videos` and on `channels` is revoked outright, so `capture_video()`
+  (always into the Idea stage — never past the gate) and `create_channel()`
+  (the channel with its stages, templates and buckets, all or nothing) are the
+  only ways either comes into existence.
+- `stages.kind`, `position` and `is_enabled` are written only by the settings
+  functions, which is what lets "a core stage cannot be deleted" and "a stage
+  holding videos cannot be switched off" hold against a forged request.
+- `thumbnail_swaps` has no client UPDATE or DELETE (it is an append-only log),
+  and TRUNCATE — which RLS does not govern — is revoked on every table.
 
-`createChannel` (`app/actions/channels.ts`) is the only way a channel comes into
-existence. It slugifies the name and calls `create_channel()`, which writes the
-channel, its nine stages, a checklist template per stage and the format buckets
-in one transaction. The content is still read from `lib/defaults.ts` — the single
-copy — and handed to the function as jsonb; `scripts/seed-demo.ts` writes the
-same rows from the same file.
+Storage has one private bucket, `thumbnails`, with stable object paths
+(`{user_id}/{video_id}/{concept|wild_card|moderate|safe}.{ext}`, uploaded with
+`upsert`), an owner-only policy, a 5 MB limit and an image-types allow-list
+(`0006_append_only_and_bucket_limits.sql`).
 
-Seeding is all-or-nothing, and literally so. supabase-js has no transactions, so
-doing this as four round trips meant a failure part way through committed a
-channel with no columns — and PLAN.md deliberately gives `channels` no delete
-policy, so nothing could remove it. Rather than add a delete path (an earlier
-`discard_empty_channel()` RPC turned out to be a channel-delete button for any
-video-less channel, configuration and all), the write moved into the database.
-`INSERT` on `channels` is revoked from clients, so an unseeded channel cannot be
-created at all. `supabase/tests/95_create_channel.test.sql` covers the happy
-path, the failed seed leaving nothing behind, and both closed doors.
+### Authentication
 
-## Authentication
+Email and password, one user, no sign-up screen. `proxy.ts` (Next 16's renamed
+middleware) refreshes the session on every request, including `/login`, and
+sends anyone signed out to `/login?next=<path>`; `?next=` is reduced to a path on
+this site by `lib/safe-path.ts`. Every guard uses `supabase.auth.getUser()`,
+never `getSession()`. `cookies()` is async in Next 16 and is always awaited.
 
-Email + password, one user. There is deliberately no sign-up screen: the single
-account is created once, out of band, and signups are then turned off.
+## Deploying
 
-Create the user either way:
+This has **never been done** from the environment NerTube was built in: it has
+no Supabase or Vercel credentials and no egress to either. The steps below are
+the runbook for someone who has the accounts; see
+[Honest limits](#honest-limits) for what that means.
 
-- **Supabase dashboard** — Authentication → Users → *Add user*, with
-  *Auto Confirm User* checked; or
-- **locally** — `npx supabase start`, then Authentication → Users in Studio at
-  http://127.0.0.1:54323, or `scripts/seed-demo.ts`, which calls
-  `auth.admin.createUser` with the service-role key.
+1. **Create a Supabase project.** From *Project Settings → API* take the
+   project URL, the anon key and the service-role key. The service-role key
+   stays in your shell; it never goes to Vercel.
+2. **Push the schema.** `npx supabase login`, `npx supabase link --project-ref
+   <ref>`, `npx supabase db push`. That applies `0001` to `0009`: every table,
+   policy, revoke and function, and the private `thumbnails` bucket with its
+   policy and limits. `npx supabase migration list` should show all nine
+   remotely.
+3. **Create the one user** in the dashboard (Authentication → Users → *Add
+   user*, auto-confirm), then turn sign-ups off (Authentication → Sign In /
+   Providers → *Allow new users to sign up*). `supabase/config.toml` covers the
+   local stack only; the hosted switch is a dashboard setting.
+   (`npm run seed:demo` can create the user *and* a two-channel demo fixture
+   through `auth.admin.createUser`; it has never been run, because the harness
+   has no admin API. Skip it if you do not want demo rows in real data.)
+4. **Optionally regenerate the types** against the project:
+   `NERTUBE_DB_URL=<connection string> npm run db:types`, then
+   `npm run typecheck`.
+5. **Deploy to Vercel** with `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `ANTHROPIC_API_KEY` set for production
+   (and preview, if you want previews to work). Leave `ASSIST_PROVIDER` unset.
+   The build fetches the four fonts from Google Fonts, so the build machine
+   needs that egress.
+6. **Walk it.** Sign in; create a channel; capture an idea from a phone at
+   `/capture`; drag it; refresh. Upload a concept sketch and confirm one object
+   at the stable path. Curl the REST endpoint with the anon key and confirm zero
+   rows. Then the assist, in this order: that a brainstorm returns at all; that
+   the outgoing request carries `effort: "medium"`, both `anthropic-beta` flags
+   and `fallbacks: "default"`; that a refusal arrives as the panel's sentence
+   rather than a crash; and that two opposite voice guides produce genuinely
+   different titles.
 
-Then disable further signups: `[auth] enable_signup = false` in
-`supabase/config.toml` for local dev, and Authentication → Sign In / Providers →
-*Allow new users to sign up* off in the hosted project.
+## Honest limits
 
-How it hangs together:
+This section is meant to be complete rather than flattering. Where a limit was
+recorded in `docs/MILESTONES.md`, the milestone is named so the reasoning can be
+found.
 
-- `proxy.ts` (root) runs before every request except `_next/static`,
-  `_next/image` and `favicon.ico`. It refreshes the session and redirects anyone
-  signed out to `/login?next=<path>`. `/login` is matched too and only skips the
-  redirect: it is the one place that can write refreshed auth cookies onto a
-  response, and the login page calls `getUser()` like everything else, so leaving
-  it out meant an expired token was rotated at Supabase with nowhere to put the
-  result — signing the user out on the page they came to sign in on.
-- `?next=` is reduced to a path on this site by `lib/safe-path.ts`, which parses
-  the value rather than checking its first two characters (the URL parser strips
-  tab/CR/LF, so `/<tab>/evil.com` is `//evil.com` by the time a browser reads the
-  `Location` header). Both the page and the `signIn` action use that one copy.
-- `app/login` posts to the `signIn` server action in `app/actions/auth.ts`, which
-  passes auth-server messages through and replaces transport failures (Node's
-  bare "fetch failed") with one that names the likely cause. `signOut` is in the
-  same file.
-- `lib/supabase/require-user.ts` is the guard every server component and server
-  action starts with; it returns the request's client together with the user.
-- Every authorization check uses `supabase.auth.getUser()`, never
-  `getSession()` — only `getUser()` verifies the token with the auth server.
-- The service-role key is never read by the app, only by `scripts/`.
+### Out of scope for v1, by design
 
-## Conventions worth knowing
+- **No YouTube API.** Nothing is uploaded or scheduled through YouTube. The
+  Scheduled stage means *you* scheduled it in YouTube Studio; "Confirm live"
+  means you paste the URL.
+- **No analytics dashboard, outlier research or SEO tooling.** The only
+  numbers the app holds are the ones you type in the first 24 hours.
+- **No teams.** One user per deployment. `user_id` is on every table, bound
+  into every foreign key and every RLS policy, so a second tenant is a schema
+  that is ready — but there is no sharing, no roles, no invitations and no
+  sign-up flow.
 
-- With no `.env.local`, the proxy answers every page with a readable 503 setup
-  page instead of an unexplained 500.
-- Next 16 renamed the request middleware convention: session refresh lives in a
-  root `proxy.ts` (typed with `NextProxy` / `ProxyConfig` from `next/server`).
-  `middleware.ts` still works but is deprecated and warns at build time.
-- `cookies()` from `next/headers` is async — always `await` it.
-- Server-side auth guards use `supabase.auth.getUser()`, never `getSession()`.
+### Never proven from here
+
+- **It has never been deployed.** No hosted Supabase project, no Vercel
+  deployment, no upload to a hosted bucket (M1's one unfinished acceptance
+  item). Every result in this repository is against the local harness, which
+  approximates GoTrue and Storage.
+- **No request has ever been sent to Anthropic.** There is no key in the build
+  environment and egress is blocked. The real provider is verified by reading
+  the installed SDK's types and asserting on the request it builds against a
+  stub (M8). Whether the model id is live, the beta headers current, the
+  latency inside the 60-second budget, what a critique of three images costs,
+  and whether a voice guide really changes the model's output are all unknown
+  until a key exists in Vercel.
+- **`supabase start` has never run** (no Docker), and `supabase/config.toml` was
+  added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
+  API). `lib/database.types.ts` is hand-written.
+- **No real phone and no touchscreen.** Every phone measurement is Chromium at a
+  phone-sized viewport driven by a mouse; the on-screen keyboard is simulated
+  by a short viewport; `pointer: coarse` is never true in the suite (M9).
+- **No real non-US keyboard.** The AltGr case for `[`/`]` is proved with a
+  synthetic event (M9).
+
+### In the brief, and not built
+
+- **The script cannot be edited in the app.** The Script section shows what
+  `move_video()` wrote on first entry to Scripting — the channel's template with
+  the chosen hook spliced in — and says it is read-only. `script` has no save
+  path, and a textarea over a column that cannot be saved would lose an
+  evening's work silently (M3, M8). The brief's per-video "chosen structure"
+  and "end-screen target" fields exist as columns (`script_structure`,
+  `end_screen_target`) with no UI at all; the structure is a line in the
+  template instead.
+- **The one-line hook is set at capture and never again.** It shows in the bank
+  but the video page has no field for it.
+- **Description, chapters, end screen and tags for YouTube are checklist items,
+  not fields.** Publish Prep's checklist reminds you to do them; the app holds
+  none of them.
+- **A thumbnail variant has no note of its own.** The brief's "each with a
+  note" became the role's fixed description plus the swap reason (M4).
+
+### Things it does, with a catch
+
+- **"Today" is the UTC day, everywhere** — on the calendar, the board's dates,
+  `/now`'s go-live check. Far enough west, the calendar's today turns over hours
+  before yours. There is no timezone setting; it was deferred from M6 to M7 to
+  M9 and is still open, because the fix is a per-user profile that does not
+  exist.
+- **Ages on `/now` are frozen for the life of the page.** Leave it open
+  overnight and it still says "3 days"; a reload is the refresh (M3).
+- **Two tabs do not merge.** Every save carries the version it was made
+  against; a stale tab is refused with "this video changed somewhere else" and a
+  Reload, rather than overwriting. Nothing is lost silently, but the second
+  person retypes (M2).
+- **Nothing can be deleted, only archived.** Channels cannot be removed at all
+  (PLAN.md gives them no delete policy). An archived idea is listed under the
+  bank's "Show archived"; **an archived video past the Idea stage is on no list
+  anywhere** — its page still works by its address, and that is the only way
+  back to it. Archive has no undo after a reload other than Restore.
+- **A shipped thumbnail cannot be un-shipped**, only swapped for another
+  variant (M4).
+- **"Confirm live" is two writes, not one transaction.** If the move fails after
+  the URL is saved, the page says so in those words; a second press finishes it
+  (M4).
+- **The board and the calendar are desktop views.** On a phone the board's
+  strip scrolls sideways and the card arrows work; nothing drags. The calendar
+  shows a date and a chip per day at 390px and says so (M9).
+- **The first click on a freshly loaded video page can be swallowed** while it
+  hydrates — it is the heaviest page, with five sections and three assist
+  panels mounted. The remedy on record is to make the sections lighter, not to
+  unmount the hidden ones, which would trade a lost click for a lost draft (M4,
+  M8).
+- **The assist has no spending ceiling.** It refuses the same question twice at
+  once, per server instance, but there is no per-hour or per-day cap, and
+  closing a panel stops the waiting, not the call, which runs to completion and
+  is billed (M8 review). Fine for one person paying their own bill; the first
+  thing to add if there is ever a second user.
+- **Fonts are fetched from Google at build time.** A build machine without
+  egress to `fonts.googleapis.com` fails the build rather than falling back.
+- **Scale.** PostgREST caps a read at 1000 rows; every list pages past it, then
+  counts and filters in memory. That is right for PLAN.md's sizing (one user,
+  hundreds of videos) and would want server-side aggregation at tens of
+  thousands.
+
+### Unfinished, carried out of the milestones
+
+- **Controls that are busy are `disabled`, not `aria-disabled`.** A disabled
+  control leaves the tab order, so focus can jump while a save is in flight.
+  M6's review deferred the application-wide change to M9; M9 did not make it
+  (it touches every in-flight control in the app, in files three M9 slices were
+  editing at once).
+- **The add-a-stage and add-a-bucket forms are still two components.** M7's
+  review offered to merge them in M9; they differ by a quota box and share a
+  dozen lines, and M9 left them as two.
+- **The `?` sheet cannot be opened by touch.** Its button is in the desktop
+  sidebar; a phone with a hardware keyboard gets the keys without a visible way
+  to learn them other than pressing `?` (M9).
+- **No key moves a video from its own page.** `[`/`]` are the board's; on
+  `/videos/<id>` the stage select is one Tab away (M9). Nothing is remappable.
+- **Back does not undo a filter change in the bank.** The filters are in the
+  address bar with `replaceState`, so a filtered bank can be linked, but six
+  keystrokes are not six history entries (M5).
+- **A Scheduled video with no target date produces no `/now` row.** There is no
+  honest thing to say about it; it is still on the board with its days climbing
+  (M3).

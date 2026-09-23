@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cleanProse } from "./text";
 
 /**
  * The first twenty-four hours: what the numbers may be, and how they read.
@@ -91,7 +92,7 @@ export const ViewsSchema = count("Views").nullable();
 /** `""` is not a note. NULL is. */
 export const NewViewersNoteSchema = z
   .union([z.string(), z.null()])
-  .transform((value) => (value === null ? null : value.trim()))
+  .transform((value) => (value === null ? null : cleanProse(value).trim()))
   .transform((value) => (value === "" ? null : value))
   .refine((value) => value === null || value.length <= MAX_NEW_VIEWERS_NOTE, {
     message: `Keep the new-viewers note to ${MAX_NEW_VIEWERS_NOTE} characters — it is a sentence, not a report.`,

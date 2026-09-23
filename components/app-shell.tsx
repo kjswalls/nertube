@@ -41,6 +41,11 @@ import { requireUser } from "@/lib/supabase/require-user";
  * - **40px** on reading views. Prose wants a wider rest at the edge, and these
  *   pages are narrow-measure anyway, so the cost is nothing.
  *
+ * Those are the numbers from 1024px up. Below that the two tokens step down —
+ * 24/32 between 768 and 1024, 16/20 on a phone — in `app/globals.css`, so this
+ * file still says only "work" or "reading" and never a width (M9; M3's review
+ * finding 32 measured a 102px content column at 390px).
+ *
  * The scroll container is the page, not the frame: the sidebar is `sticky` and
  * `h-dvh` so it stays put while a long board scrolls, without a nested
  * scroller that would swallow the page's own scrollbar.
@@ -157,7 +162,11 @@ export async function AppShell({
       itself. That is fixed at the strip; this is the belt to its braces, so no
       future wide child can scroll the chrome off the screen.
     */
-    <div className="flex min-h-dvh w-full overflow-x-clip">
+    /*
+      A column below `md` — the sidebar is a bar across the top there, see
+      `AppSidebar` — and a row from `md` up, which is the layout M3 signed off.
+    */
+    <div className="flex min-h-dvh w-full flex-col overflow-x-clip md:flex-row">
       {/*
         The bypass block (WCAG 2.4.1). The sidebar is ten tab stops on a
         two-channel account — wordmark, Capture, Now, Board, Ideas, Calendar,
@@ -202,7 +211,18 @@ export async function AppShell({
         data-testid="app-main"
         data-gutter={gutter}
         className={[
-          "flex min-w-0 flex-1 flex-col outline-none",
+          /*
+            `relative` is load-bearing, and M9 found it at 390px on the matrix.
+            An `sr-only` span is `position: absolute`; with no positioned
+            ancestor its containing block is the viewport, and overflow
+            clipping does not apply to a box whose containing block is outside
+            the clipping element. So every visually hidden label inside the
+            matrix's sideways-scrolling table sat at its static position, 900px
+            out, and scrolled the whole page 507px — past the `overflow-x:
+            clip` above, which was never asked about it. Positioning `main`
+            makes it their containing block, and then the clip holds.
+          */
+          "relative flex min-w-0 flex-1 flex-col outline-none",
           gutter === "reading"
             ? "px-gutter-reading py-gutter-reading"
             : "px-gutter py-gutter",

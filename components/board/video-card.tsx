@@ -266,7 +266,7 @@ export function VideoCard({
             event.stopPropagation();
             onMoveBack();
           }}
-          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:min-w-11 thumb:text-[15px]"
         >
           <span aria-hidden="true">←</span>
           <span className="sr-only">
@@ -284,7 +284,7 @@ export function VideoCard({
             event.stopPropagation();
             onMoveForward();
           }}
-          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"
+          className="rounded-button border border-border px-1.5 py-0.5 text-[11px] text-muted outline-none enabled:hover:border-accent/50 enabled:hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:min-w-11 thumb:text-[15px]"
         >
           <span aria-hidden="true">→</span>
           <span className="sr-only">

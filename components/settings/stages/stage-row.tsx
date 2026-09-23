@@ -102,6 +102,8 @@ export function StageRow({
       event.preventDefault();
       name.commit();
     } else if (event.key === "Escape") {
+      // Consumed: reverting the name is all Escape means here.
+      event.preventDefault();
       name.setValue(stage.name);
     }
   }
@@ -211,7 +213,9 @@ export function StageRow({
       data-enabled={enabled ? "true" : "false"}
       aria-busy={switchState.kind === "saving" || removing === "busy" ? true : undefined}
       className={[
-        "grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 gap-y-2 rounded-card border bg-surface px-4 py-3",
+        // M9: below `md` the count and the switch drop under the note instead
+        // of taking a third column, which left the name field 40px wide at 390.
+        "grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-4 gap-y-2 rounded-card border bg-surface px-4 py-3 max-md:grid-cols-[auto_minmax(0,1fr)] max-md:gap-x-3",
         inert ? "border-dashed border-border" : "border-border",
         enabled ? "" : "opacity-80",
       ].join(" ")}
@@ -253,7 +257,7 @@ export function StageRow({
             onKeyDown={onNameKey}
             // The label is the user's word for the stage, so it is set in the
             // reading face, like a title. Everything else on the row is chrome.
-            className="min-w-0 flex-1 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
+            className="min-w-0 flex-1 basis-32 rounded-input border border-transparent bg-transparent px-1.5 py-0.5 font-display text-[17px] leading-tight outline-none hover:border-border focus-visible:border-border focus-visible:ring-2 focus-visible:ring-accent"
           />
           <span
             data-testid="stage-kind"
@@ -289,7 +293,7 @@ export function StageRow({
         ) : null}
       </div>
 
-      <div className="flex flex-col items-end gap-2">
+      <div className="flex flex-col items-end gap-2 max-md:col-start-2 max-md:items-start">
         <span
           data-testid="stage-count"
           data-count={count}
@@ -303,7 +307,7 @@ export function StageRow({
           {count === 0 ? "empty" : `${count} ${count === 1 ? "video" : "videos"}`}
         </span>
 
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-end gap-1 max-md:items-start">
           <div className="flex items-center gap-2">
             <input
               id={switchId}
@@ -328,7 +332,7 @@ export function StageRow({
             <span
               id={switchNoteId}
               data-testid="stage-pinned-on"
-              className="max-w-[16rem] text-right text-[11px] leading-4 text-muted"
+              className="max-w-[16rem] text-right text-[11px] leading-4 text-muted max-md:text-left"
             >
               Stays on: capture lands here.
             </span>

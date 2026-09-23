@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Modal } from "@/components/modal";
-import { useToast } from "@/components/toast";
 import { useShortcuts } from "@/lib/shortcuts";
 
-import { CaptureForm, type CaptureChannel } from "./capture-form";
+import { CaptureDialog } from "./capture-dialog";
+import type { CaptureChannel } from "./capture-form";
 
 /**
  * What makes `c` work anywhere: the global binding, the modal it opens, and the
@@ -38,7 +37,6 @@ export function CaptureHost({
    * focus into the dialog, so the modal would "restore" focus to its own input.
    */
   const returnFocus = useRef<HTMLElement | null>(null);
-  const toast = useToast();
 
   const routeChannel = currentSlug
     ? channels.find((channel) => channel.slug === currentSlug)
@@ -49,7 +47,7 @@ export function CaptureHost({
       {
         key: "c",
         description: "Capture an idea",
-        hint: { keys: "c", text: "capture" },
+        hint: { keys: "c", text: "capture", label: "Capture an idea" },
         run: (event) => {
           event.preventDefault();
           openCapture();
@@ -58,7 +56,7 @@ export function CaptureHost({
     ],
     // While the modal is open `c` is a letter in a title. The hook ignores
     // events from inputs anyway; this makes it true of the whole dialog.
-    { enabled: !open && channels.length > 0 },
+    { enabled: !open && channels.length > 0, group: "Capture" },
   );
 
   // Says out loud that the shortcut is live — it is bound by an effect, so
@@ -90,56 +88,28 @@ export function CaptureHost({
         type="button"
         aria-keyshortcuts="c"
         onClick={openCapture}
-        className="flex w-full items-center justify-between gap-2 rounded-button border border-border bg-surface px-2 py-1.5 text-[13px] text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent"
+        /*
+          `thumb:` sizes: on a phone this button sits at the right of the
+          shell's top bar, and it is the one control there that does work.
+          The `c` is dropped where there is no keyboard to press it on.
+        */
+        className="flex w-full items-center justify-between gap-2 rounded-button border border-border bg-surface px-2 py-1.5 text-[13px] text-foreground outline-none transition-colors hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3.5 thumb:text-[15px]"
       >
         Capture
-        <kbd className="font-mono text-[10px] text-muted">c</kbd>
+        <kbd className="font-mono text-[10px] text-muted pointer-coarse:hidden">c</kbd>
       </button>
 
       {open ? (
-        <Modal
-          title="Capture an idea"
+        // The box itself, its toast and its "Open it" link are
+        // `CaptureDialog`, which an empty view's "Capture the first idea"
+        // opens too (M9). This component is the key and the button.
+        <CaptureDialog
+          channels={channels}
+          initialChannelId={(routeChannel ?? channels[0]).id}
+          preferLastUsed={!routeChannel}
           returnFocusRef={returnFocus}
           onClose={() => setOpen(false)}
-        >
-          <CaptureForm
-            channels={channels}
-            initialChannelId={(routeChannel ?? channels[0]).id}
-            preferLastUsed={!routeChannel}
-            variant="modal"
-            onSaved={(result) => {
-              setOpen(false);
-              // The modal closes on save, so the confirmation has to outlive it
-              // — and it goes through the application's one toast mechanism
-              // rather than a second line of its own. It says *where* the idea
-              // went, because `1..9` can have retargeted it.
-              toast.push({
-                message: `Captured “${result.title}” in ${result.channelName}.`,
-                /*
-                  M8: where the assist lives, one press away — and deliberately
-                  not in the box above.
-
-                  BRIEF.md principle 6 is that friction reduction *is* the
-                  product, and capture is the shortest path in the app: one
-                  field, Enter, gone. A model call takes ten to forty seconds,
-                  so an assist on that path would turn the fastest thing here
-                  into the slowest. It also could not be built honestly:
-                  `app/actions/assist.ts` takes a video id and nothing else,
-                  precisely so a browser can never hand the key a prompt of its
-                  own — and at capture time there is no row yet. So the idea is
-                  written first, and the confirmation carries the way to the
-                  four controls that can now do something with it.
-                */
-                links: [
-                  {
-                    label: "Open it",
-                    href: `/videos/${result.id}`,
-                  },
-                ],
-              });
-            }}
-          />
-        </Modal>
+        />
       ) : null}
     </>
   );

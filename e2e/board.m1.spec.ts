@@ -453,6 +453,16 @@ test('the WIP warning fires past the threshold and never on Idea', async ({
 test('the Filming badge counts across all channels and appears at three', async ({
   page,
 }) => {
+  /*
+    Filming videos this file did not make. The badge is cross-channel by
+    design, so on a database other specs have used it counts theirs too; the
+    literal "3" was true only on a clean one (M6's review deferred this to M9).
+    Counted here, the assertions below hold on either.
+  */
+  const elsewhere = await filmingOutsideThisFile();
+  const total = 3 + elsewhere;
+  const badge = `${total} in Filming across all channels — schedule batch day?`;
+
   await signInAndOpen(page, CHANNEL_A.slug);
 
   // Channel A has two of the three. The badge still says three, because there
@@ -460,22 +470,45 @@ test('the Filming badge counts across all channels and appears at three', async 
   // the column's own count badge directly above it says two and two numbers
   // that disagree with no explanation read as a miscount.
   await expect(cardsIn(page, FILMING)).toHaveCount(2);
-  await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(
-    '3 in Filming across all channels — schedule batch day?',
-  );
+  await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(badge);
 
   // The same badge is on the other channel's board, which holds the third.
   await openBoard(page, CHANNEL_B.slug);
   await expect(cardsIn(page, FILMING)).toHaveCount(1);
-  await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(
-    '3 in Filming across all channels — schedule batch day?',
-  );
+  await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(badge);
 
   // Drop below three and it goes: move the one in channel B forward to Editing.
   await dragCardTo(page, cardIn(page, FILMING, 'Film B1'), 'Editing');
   await expect(cardIn(page, 'Editing', 'Film B1')).toBeVisible();
-  await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveCount(0);
+  if (total - 1 < 3) {
+    await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveCount(0);
+  } else {
+    // Someone else's Filming videos keep it at three or more: it counts down.
+    await expect(column(page, FILMING).getByTestId('filming-badge')).toHaveText(
+      `${total - 1} in Filming across all channels — schedule batch day?`,
+    );
+  }
 });
+
+/**
+ * Non-archived videos in an enabled Filming stage, in channels this file did
+ * not create — the badge's definition (`lib/filming-data.ts`), for this user.
+ */
+async function filmingOutsideThisFile(): Promise<number> {
+  const result = await db.query<{ n: string }>(
+    `select count(*) as n
+       from public.videos v
+       join public.stages s on s.id = v.stage_id
+       join public.channels c on c.id = v.channel_id
+      where v.user_id = $1
+        and v.archived_at is null
+        and s.kind = 'filming'
+        and s.is_enabled
+        and c.slug not like 'm1-board-%'`,
+    [userId],
+  );
+  return Number(result.rows[0].n);
+}
 
 test('dragging an idea into Packaging moves it, and it survives a reload', async ({
   page,

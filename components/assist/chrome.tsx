@@ -10,6 +10,7 @@ import {
 
 import { formatAge } from "@/components/video-detail/age";
 import type { AssistMeta } from "@/lib/assist/types";
+import { useDismiss } from "@/lib/shortcuts";
 
 import { describeMeta } from "./acceptance";
 import type { AssistFailureView, AssistNotice } from "./run";
@@ -496,9 +497,14 @@ export function useAssistFocus<T extends HTMLElement>(
  * the rest of the screen keeps working while it thinks, and Escape closes it
  * from anywhere inside.
  *
- * Escape's `stopPropagation` matters: `lib/shortcuts.ts` keeps a single
- * `keydown` listener on `document`, and without this an Escape meant for the
- * panel would also reach whatever else is listening.
+ * That Escape is a *region* in `lib/shortcuts.ts` (`useDismiss` with
+ * `within`): it takes the key while focus is inside this panel, from a button
+ * or a field alike, and only when no dialog is open over the page — a `?`
+ * sheet opened from inside the panel closes first, and the next Escape closes
+ * the panel. It used to be a React `onKeyDown` with `stopPropagation()`, which
+ * did not do what its comment claimed: React and the registry both listen on
+ * `document`, and stopping propagation does not stop a second listener on the
+ * same node. One order, in one file, is what replaced it.
  */
 export function AssistPanel({
   testId,
@@ -512,17 +518,15 @@ export function AssistPanel({
   onClose: () => void;
   children: ReactNode;
 } & Record<`data-${string}`, string | undefined>) {
+  const panelRef = useRef<HTMLElement>(null);
+  useDismiss(onClose, { within: panelRef });
+
   return (
     <section
+      ref={panelRef}
       data-testid={testId}
       {...data}
       aria-labelledby={labelledBy}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.stopPropagation();
-          onClose();
-        }
-      }}
       className="flex w-full flex-col gap-3 rounded-card border border-accent/40 bg-surface/50 p-4"
     >
       {children}

@@ -1,11 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { moveVideo } from "@/app/actions/moves";
 import { updateVideo } from "@/app/actions/videos";
+import { CaptureLink } from "@/components/capture/capture-dialog";
 import { IdeasViewSwitch } from "@/components/ideas/matrix/view-switch";
+import { PRIMARY_ACTION, QUIET_ACTION, StatePanel } from "@/components/state-panel";
 import { useToast } from "@/components/toast";
 import { bucketOn } from "@/lib/buckets";
 import { useShortcuts } from "@/lib/shortcuts";
@@ -127,6 +130,7 @@ function withDeadline<T>(work: Promise<T>): Promise<T> {
  * leaves the bank, which is what Back means everywhere else in this app.
  */
 export function IdeaList({
+  channelId,
   channelName,
   channelSlug,
   ideas,
@@ -136,6 +140,8 @@ export function IdeaList({
   elsewhere,
   initialFilters,
 }: {
+  /** For the empty bank's capture box, which files into this channel. */
+  channelId: string;
   channelName: string;
   channelSlug: string;
   /** Every Idea-stage video in this channel, archived ones included. */
@@ -573,7 +579,11 @@ export function IdeaList({
         {
           key: "j",
           description: "Select the next idea",
-          hint: { keys: "j / k", text: "select an idea" },
+          hint: {
+            keys: "j / k",
+            text: "select an idea",
+            label: "Select the next or previous idea",
+          },
           run: (event) => {
             event.preventDefault();
             step(1);
@@ -590,7 +600,11 @@ export function IdeaList({
         {
           key: "p",
           description: "Promote the selected idea to Packaging",
-          hint: { keys: "p", text: "promote it" },
+          hint: {
+            keys: "p",
+            text: "promote it",
+            label: "Promote the selected idea onto the board",
+          },
           run: (event) => {
             if (!selected) return;
             event.preventDefault();
@@ -600,17 +614,32 @@ export function IdeaList({
         {
           key: "Enter",
           description: "Open the selected idea",
-          hint: { keys: "Enter", text: "open the idea" },
+          hint: {
+            keys: "Enter",
+            text: "open the idea",
+            label: "Open the selected idea",
+          },
           run: (event) => {
             if (!selected) return;
             event.preventDefault();
             router.push(`/videos/${selected.id}`);
           },
         },
+        {
+          // M9: the same Escape as the board's and `/now`'s.
+          key: "Escape",
+          description: "Clear the idea selection",
+          hint: { keys: "Escape", text: "clear the selection", bar: false },
+          run: (event) => {
+            if (!selected) return;
+            event.preventDefault();
+            setSelectedId(null);
+          },
+        },
       ],
       [promote, router, selected, step],
     ),
-    { enabled: visible.length > 0 },
+    { enabled: visible.length > 0, group: "In the idea bank" },
   );
 
   /* ---------------------------------------------------------------------- */
@@ -685,17 +714,69 @@ export function IdeaList({
         </p>
       ) : null}
 
-      <IdeaFilterBar
-        filters={filters}
-        onChange={setFilters}
-        tags={tags}
-        verticals={verticals}
-        horizontals={horizontals}
-        archivedCount={archivedCount}
-        counts={counts}
-      />
+      {/* Nothing to filter on an empty bank: the bar would be five controls
+          that can only ever find nothing (M9). */}
+      {all.length === 0 ? null : (
+        <IdeaFilterBar
+          filters={filters}
+          onChange={setFilters}
+          tags={tags}
+          verticals={verticals}
+          horizontals={horizontals}
+          archivedCount={archivedCount}
+          counts={counts}
+        />
+      )}
 
-      {visible.length === 0 ? (
+      {all.length === 0 ? (
+        /*
+          M9: a bank with nothing in it at all, archived included. The old
+          sentence here was "Press c to capture an idea", which is a key a
+          phone does not have and a mouse user has not been told about; the
+          action is now the capture box itself, one click away. The two cases
+          are the summary's two (a bank never used, and a bank worked
+          through), because they want different words and the same button.
+        */
+        <StatePanel
+          testId="idea-empty"
+          title={
+            elsewhere > 0 || promoted.size > 0
+              ? "Everything in the bank has moved on"
+              : "The idea bank is empty"
+          }
+          actions={
+            <>
+              <CaptureLink
+                channels={[{ id: channelId, name: channelName, slug: channelSlug }]}
+                channelId={channelId}
+                testId="idea-empty-capture"
+                className={PRIMARY_ACTION}
+              >
+                Capture an idea
+              </CaptureLink>
+              {elsewhere > 0 || promoted.size > 0 ? (
+                <Link href={`/c/${channelSlug}/board`} className={QUIET_ACTION}>
+                  See them on the board
+                </Link>
+              ) : null}
+            </>
+          }
+        >
+          {elsewhere > 0 || promoted.size > 0 ? (
+            <p>
+              Every idea captured for {channelName} has been promoted onto the
+              board, which is what the bank is for. The next one starts here.
+            </p>
+          ) : (
+            <p>
+              Ideas wait here until you commit to one. A title is enough to
+              capture one — a hook, notes, tags and its buckets can come later —
+              and Promote moves it onto the board when you are ready to package
+              it.
+            </p>
+          )}
+        </StatePanel>
+      ) : visible.length === 0 ? (
         <p data-testid="idea-empty" className="max-w-2xl text-[13px] text-muted">
           {explainEmpty(all, filters, { verticals, horizontals })}
           {activeFilterCount(filters) > 0 ? (

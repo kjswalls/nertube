@@ -166,6 +166,56 @@
   --spacing-card-x: 13px;
 }
 
+/* ==========================================================================
+   Phone width: the gutters, and the one variant that means "a thumb".
+
+   M3 fixed the gutters at 32px (work) and 40px (reading), sized for a laptop.
+   On a 390px phone 40px is a fifth of the screen spent on margin twice, so
+   below `md` (768px, where the sidebar becomes a bar) both step down, and
+   between `md` and `lg` they step half way. At 1024px and above they are the
+   signed-off numbers, unchanged — every utility reads the same two custom
+   properties, so redefining them here moves every `px-gutter`, `-mx-gutter`
+   and `py-gutter-reading` in the application at once.
+
+   `@layer base` rather than `@layer theme` or unlayered: base is after theme,
+   so it overrides the `@theme` defaults, and it is before utilities, so a
+   component that sets its own padding still wins.
+   ========================================================================== */
+
+@layer base {
+  @media (width < 48rem) {
+    :root {
+      --spacing-gutter: 16px;
+      --spacing-gutter-reading: 20px;
+    }
+
+    /* The bar is pinned to the top at this width, so an in-page jump
+       (`#packaging-hooks`, a `/now` row scrolled into view) must stop below it
+       rather than under it. 56px bar, its 1px rule and 7px of air. */
+    html {
+      scroll-padding-top: 64px;
+    }
+  }
+
+  @media (48rem <= width < 64rem) {
+    :root {
+      --spacing-gutter: 24px;
+      --spacing-gutter-reading: 32px;
+    }
+  }
+}
+
+/* `thumb:` — a control is likely to be pressed by a finger: the screen is
+   phone-narrow, or the primary pointer is coarse (a tablet, a touch laptop, a
+   phone in landscape wider than `md`). Used for target sizes and nothing else,
+   so a mouse on a desktop keeps the density the design asked for and a thumb
+   gets 44px. */
+@custom-variant thumb {
+  @media (width < 48rem), (pointer: coarse) {
+    @slot;
+  }
+}
+
 @layer base {
   body {
     background: var(--ground);

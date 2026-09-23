@@ -510,8 +510,8 @@ export function ScheduleDayDialog({
  * `components/post-publish/confirm-live.tsx` settled on: nothing changed, and
  * nothing you typed has gone. Without the `catch` these live in, a failed POST
  * escaped as an unhandled rejection, React unwound to the nearest boundary and
- * — the app has no `app/error.tsx` — Next replaced the whole route with its own
- * error page, taking the date, the notes and the ticks with it.
+ * the whole route was replaced by an error page (Next's own until M9, now
+ * `app/error.tsx`), taking the date, the notes and the ticks with it.
  */
 const UNREACHABLE =
   "Could not reach the server, so nothing was changed. Nothing you typed has been lost — try again.";

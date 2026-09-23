@@ -1,8 +1,9 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useRef } from "react";
 
 import { AXIS_LABEL } from "@/lib/buckets";
+import { useShortcuts } from "@/lib/shortcuts";
 
 import type { IdeaBucket, IdeaFilters } from "./types";
 
@@ -55,6 +56,29 @@ export function IdeaFilterBar({
 }) {
   const ids = useId();
   const searchId = `${ids}-search`;
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  /*
+    `/` — the one search box in the application, reached without the mouse.
+    Bound here, by the component that draws the box, so the key exists exactly
+    where the box does. The registry never fires from inside a field, so a `/`
+    typed into the search itself is a slash.
+  */
+  useShortcuts(
+    [
+      {
+        key: "/",
+        description: "Search the idea bank",
+        hint: { keys: "/", text: "search", label: "Search titles and hooks", bar: false },
+        run: (event) => {
+          event.preventDefault();
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        },
+      },
+    ],
+    { group: "In the idea bank" },
+  );
   const tagId = `${ids}-tag`;
   const verticalId = `${ids}-vertical`;
   const horizontalId = `${ids}-horizontal`;
@@ -71,8 +95,10 @@ export function IdeaFilterBar({
       <label className={labelClass} htmlFor={searchId}>
         <span className="sr-only">Search titles and hooks</span>
         <input
+          ref={searchRef}
           id={searchId}
           type="search"
+          aria-keyshortcuts="/"
           data-testid="idea-search"
           value={filters.search}
           placeholder="Search title and hook"

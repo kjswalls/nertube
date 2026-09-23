@@ -148,6 +148,9 @@ export function TemplateRow({
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
             if (event.key === "Escape") {
+              // Consumed: reverting this field is the whole of what Escape
+              // means here (the order is in `lib/shortcuts.ts`).
+              event.preventDefault();
               setTextDraft(item.text);
               event.currentTarget.blur();
             }
