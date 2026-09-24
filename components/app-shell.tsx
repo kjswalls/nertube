@@ -126,41 +126,49 @@ export async function AppShell({
   now?: number;
   children: ReactNode;
 }) {
-  const { user } = await requireUser();
-  const timeZone = await readTimeZone();
-
-  const clock = now ?? (await readClock());
+  // Independent reads, started together. They used to be awaited one after
+  // another, and each is a round trip to Supabase, so every click on a
+  // signed-in route paid for all of them in series before anything drew.
+  // The chrome degrades; the page does not disappear. See the note above.
+  const nowInputs = readNowInputs().catch(() => null);
+  const [{ user }, timeZone, clock] = await Promise.all([
+    requireUser(),
+    readTimeZone(),
+    now ?? readClock(),
+  ]);
 
   // Same order as `/`, which redirects to `/now` and falls back to the first
   // channel's board: `readNowInputs` reads `channels` ordered by `created_at`,
   // so a stable "first channel" means the two never disagree.
   let channels: { id: string; name: string; slug: string }[] = [];
   let nowCount = 0;
-  try {
-    // Both from the one `cache()`d read: the second call costs nothing, and
-    // the ranking stays in the file that owns it.
-    const inputs = await readNowInputs();
-    channels = inputs.channels.map((channel) => ({
-      id: channel.id,
-      name: channel.name,
-      slug: channel.slug,
-    }));
-    nowCount = await countNowRows(clock, timeZone.zone);
-  } catch {
-    // The chrome degrades; the page does not disappear. See the note above.
+  const inputs = await nowInputs;
+  if (inputs !== null) {
+    try {
+      channels = inputs.channels.map((channel) => ({
+        id: channel.id,
+        name: channel.name,
+        slug: channel.slug,
+      }));
+      // From the same `cache()`d read: this call costs nothing, and the
+      // ranking stays in the file that owns it.
+      nowCount = await countNowRows(clock, timeZone.zone);
+    } catch {
+      channels = [];
+      nowCount = 0;
+    }
   }
 
-  // The bank the Ideas row opens, and therefore the bank it counts. Its own
-  // reader swallows its own failures, so there is nothing to catch here.
+  // The bank the Ideas row opens, and therefore the bank it counts, and the
+  // month `/calendar` opens on, from this request's one clock read. Both
+  // readers swallow their own failures, so there is nothing to catch here, and
+  // neither waits for the other.
   const ideasChannel = boardChannelOf(channels, currentSlug);
-  const ideasCount =
-    ideasChannel === undefined ? null : await countIdeas(ideasChannel.id);
-
-  // The month `/calendar` opens on, from this request's one clock read. Its
-  // reader swallows its own failures, like the bank's.
   const thisMonth = monthOf(todayColumn(clock, timeZone.zone));
-  const calendarCount =
-    thisMonth === null ? null : await countTargetsIn(monthKey(thisMonth));
+  const [ideasCount, calendarCount] = await Promise.all([
+    ideasChannel === undefined ? null : countIdeas(ideasChannel.id),
+    thisMonth === null ? null : countTargetsIn(monthKey(thisMonth)),
+  ]);
 
   return (
     /*

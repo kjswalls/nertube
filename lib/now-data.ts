@@ -103,10 +103,21 @@ export interface NowInputs {
 export const readNowInputs = cache(async (): Promise<NowInputs> => {
   const { supabase } = await requireUser();
 
-  const { data: channelRows, error: channelsError } = await supabase
-    .from("channels")
-    .select("id, name, slug, expected_ctr")
-    .order("created_at", { ascending: true });
+  // Channels and stages together: neither needs the other, and each is a
+  // round trip. The stages are thrown away when there are no channels, which
+  // costs one empty read on an account that has nothing yet.
+  const [{ data: channelRows, error: channelsError }, { data: stageRows, error: stagesError }] =
+    await Promise.all([
+      supabase
+        .from("channels")
+        .select("id, name, slug, expected_ctr")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("stages")
+        .select("id, channel_id, name, kind")
+        .eq("is_enabled", true)
+        .order("position", { ascending: true }),
+    ]);
 
   if (channelsError) {
     throw new Error(`Could not load the channels: ${channelsError.message}`);
@@ -117,12 +128,6 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
   if (!channelRows || channelRows.length === 0) {
     return { channels: [], videos: [] };
   }
-
-  const { data: stageRows, error: stagesError } = await supabase
-    .from("stages")
-    .select("id, channel_id, name, kind")
-    .eq("is_enabled", true)
-    .order("position", { ascending: true });
 
   if (stagesError) {
     throw new Error(`Could not load the stages: ${stagesError.message}`);
@@ -152,23 +157,25 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     simpler and reads the same rows.
   */
   const itemsByVideoAndStage = new Map<string, ChecklistItem[]>();
-  for (const ids of chunked(videoIds)) {
-    const itemRows = await readPaged("checklists", (from, to) =>
-      supabase
-        .from("checklist_items")
-        .select(`${CHECKLIST_COLUMNS}, video_id, stage_id`)
-        .in("video_id", ids)
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
+  const readItems = async () => {
+    for (const ids of chunked(videoIds)) {
+      const itemRows = await readPaged("checklists", (from, to) =>
+        supabase
+          .from("checklist_items")
+          .select(`${CHECKLIST_COLUMNS}, video_id, stage_id`)
+          .in("video_id", ids)
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
 
-    for (const row of itemRows) {
-      const key = `${row.video_id}:${row.stage_id}`;
-      const list = itemsByVideoAndStage.get(key);
-      if (list) list.push(readChecklistItem(row));
-      else itemsByVideoAndStage.set(key, [readChecklistItem(row)]);
+      for (const row of itemRows) {
+        const key = `${row.video_id}:${row.stage_id}`;
+        const list = itemsByVideoAndStage.get(key);
+        if (list) list.push(readChecklistItem(row));
+        else itemsByVideoAndStage.set(key, [readChecklistItem(row)]);
+      }
     }
-  }
+  };
 
   /*
     The most recent swap per video — rule 3's "no swap after
@@ -177,23 +184,29 @@ export const readNowInputs = cache(async (): Promise<NowInputs> => {
     videos is one read and the max is taken here.
   */
   const lastSwapAt = new Map<string, string>();
-  for (const ids of chunked(videoIds)) {
-    const swapRows = await readPaged("thumbnail swaps", (from, to) =>
-      supabase
-        .from("thumbnail_swaps")
-        .select("video_id, swapped_at")
-        .in("video_id", ids)
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
+  const readSwaps = async () => {
+    for (const ids of chunked(videoIds)) {
+      const swapRows = await readPaged("thumbnail swaps", (from, to) =>
+        supabase
+          .from("thumbnail_swaps")
+          .select("video_id, swapped_at")
+          .in("video_id", ids)
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
 
-    for (const row of swapRows) {
-      const current = lastSwapAt.get(row.video_id);
-      if (!current || current < row.swapped_at) {
-        lastSwapAt.set(row.video_id, row.swapped_at);
+      for (const row of swapRows) {
+        const current = lastSwapAt.get(row.video_id);
+        if (!current || current < row.swapped_at) {
+          lastSwapAt.set(row.video_id, row.swapped_at);
+        }
       }
     }
-  }
+  };
+
+  // The two reads above share nothing but the video ids, so they run together
+  // rather than one round trip after the other.
+  await Promise.all([readItems(), readSwaps()]);
 
   /* ------------------------------------------------------------------------ */
   /* Shaping                                                                   */

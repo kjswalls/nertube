@@ -3,6 +3,7 @@ import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { AppSidebarMenu } from "@/components/app-sidebar-menu";
 import { CaptureHost } from "@/components/capture/capture-host";
+import { LinkPending } from "@/components/link-pending";
 import { settingsPath } from "@/components/settings/settings-nav";
 import { ShortcutHints } from "@/components/shortcuts/hint-bar";
 import { KeyboardShortcuts } from "@/components/shortcuts/keyboard-shortcuts";
@@ -654,7 +655,9 @@ function SidebarLink({
           data-current-marker=""
           className="absolute top-1/2 left-0 h-3.5 w-[3px] -translate-y-1/2 rounded-full bg-accent"
         />
-      ) : null}
+      ) : (
+        <LinkPending />
+      )}
       <span className="min-w-0 truncate">{children}</span>
       {trailing}
     </Link>
