@@ -253,9 +253,9 @@ this repository.
 |---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | the app | `.env.local`, Vercel | The project URL. Public by design. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the app | `.env.local`, Vercel | The anon/publishable key. Public by design: RLS is what protects the data. |
-| `ANTHROPIC_API_KEY` | `lib/assist/anthropic.ts` only | Vercel (server-side), optionally `.env.local` | **Secret.** Never with a `NEXT_PUBLIC_` prefix — that prefix inlines a value into the browser bundle. Every call it pays for is priced and counted against the monthly cap (below). |
+| `ANTHROPIC_API_KEY` | `lib/assist/anthropic.ts` only | Vercel (server-side), optionally `.env.local` | **Secret.** Never with a `NEXT_PUBLIC_` prefix — that prefix inlines a value into the browser bundle. Every call it pays for has its worst case reserved against the monthly cap before it is sent, and is then counted at its measured cost (below). Without it, every assist is Open in Claude and nothing is spent. |
 | `ANTHROPIC_MODEL` | `lib/assist/anthropic.ts` | Vercel, optional | Overrides the pinned model id (`claude-opus-5`). |
-| `ASSIST_PROVIDER` | `lib/assist/select.ts` (the action and the video page) | **Unset in production** | `fake` forces the built-in fixtures; `manual` makes Open in Claude every assist's only action, key or no key. Unset with no key is Open in Claude too. See the tables below. |
+| `ASSIST_PROVIDER` | `lib/assist/select.ts` (the action and the video page) | **Unset in production** | `fake` forces the built-in fixtures; `manual` makes Open in Claude every assist's only action, key or no key, and the API actions refuse every request even when a key is set. Unset with no key is Open in Claude too. See the tables below. |
 | `ASSIST_FAKE_SCENARIO` | `lib/assist/fake.ts` only | dev and tests only | Makes the fixtures fail in a named way, to walk the error paths. |
 | `SUPABASE_SERVICE_ROLE_KEY` | `scripts/` only, never the app | a local shell, never Vercel | **Secret.** Used by `scripts/seed-demo.ts`. |
 | `SEED_EMAIL`, `SEED_PASSWORD` | `scripts/` only | a local shell | The account `seed-demo.ts` creates, and the harness's login. |
@@ -281,11 +281,15 @@ with a unit test per row, decide which.
 
 | `ASSIST_PROVIDER` | key present | primary action | the other one |
 |---|---|---|---|
-| `manual` | either | **Open in Claude** | — the panels never call the API |
-| `fake` | either | the pill asks the fixtures, exactly as before M11 | Open in Claude, a quiet disclosure |
-| anything else non-empty | either | the pill asks the API | Open in Claude, a quiet disclosure |
-| unset | yes | the pill asks the API | Open in Claude, a quiet disclosure |
+| `manual` | either | **Open in Claude** | — the panels never call the API, and the API actions refuse every request (a hand-made one included) |
+| `fake` | either | the pill asks the fixtures, exactly as before M11 | "or Open in Claude" beside each pill, and a quiet disclosure in each panel |
+| anything else non-empty | either | the pill asks the API | "or Open in Claude" beside each pill, and a quiet disclosure in each panel |
+| unset | yes | the pill asks the API | "or Open in Claude" beside each pill, and a quiet disclosure in each panel |
 | unset | **no** | **Open in Claude**, in every `NODE_ENV` | — |
+
+"or Open in Claude" opens the same panel on the steps and asks nothing, so the
+free path never costs a paid call first — including after a phone reloaded the
+page while you were in claude.ai.
 
 **And the cap.** Whenever the table says "the pill asks the API" and the API
 would really be called, the video page also reads this month's spend
@@ -294,10 +298,11 @@ cap, the page is drawn as in the `manual` rows instead: every panel opens on
 Open in Claude, with a note above it saying what the month has cost, what the
 cap is, the day it resets, and a link to Settings. The pill asks nothing, so
 there is no refusal to read first. If the cap is crossed while a page is
-already open, the pill's ask is refused by the server action's own check (it
-runs before every call regardless), and that refusal opens Open in Claude on
-the same panel, under the sentence. The fixtures and the keyless mode never
-read the spend.
+already open, the pill's ask is refused by the server action's own reservation
+(it runs before every call regardless), and that refusal opens Open in Claude
+on the same panel, under the sentence; it stays there while you paste, until
+a reply reads or you ask again. The fixtures and the keyless mode never read
+the spend.
 
 So with no key the brainstorm costs nothing and still works: that is the
 default a deployment gets. Running locally, `.env.local` says
@@ -315,7 +320,11 @@ plain-text answer shape instead of a JSON schema (`lib/assist/manual.ts`) —
 copies it, and opens `claude.ai/new` in a new tab. You paste it there, send
 it, copy Claude's reply, paste it into the panel's "Paste Claude's reply" box
 and press Read; the steps then fold to one row ("Open in Claude again",
-"Paste another reply") so the proposals lead. The reply goes through the same clamp, caps and
+"Paste another reply") so the proposals lead, focus moves to "Paste another
+reply", and a status line says how many proposals were read. Pasting the
+prompt itself back by mistake is refused as the prompt, and nothing is
+written. A read that never reached the server stays with the paste box, and
+Read tries it again. The reply goes through the same clamp, caps and
 de-duplication as an API answer, becomes the same proposal list with the same
 Accept buttons, and is stored in `brainstorm_last` the same way (with
 `provider: "manual"`, so a reopened panel says "pasted from claude.ai"). For
@@ -332,7 +341,8 @@ stored or sent by this app, and nothing on this path spends the API key.
 | `ASSIST_PROVIDER` | key present | `NODE_ENV` | answers |
 |---|---|---|---|
 | `fake` | either | any | the fixtures |
-| anything else non-empty (including `manual`) | either | any | Claude |
+| `manual` | either | any | nobody: the API actions refuse (M11 review) |
+| anything else non-empty | either | any | Claude |
 | unset | yes | any | Claude |
 | unset | no | `production` | Claude — which fails with "no API key configured"; since M11 no panel asks in this state |
 | unset | no | anything else | the fixtures; likewise never asked by a panel since M11 |
@@ -354,11 +364,12 @@ else in the suite does.
 
 #### The monthly spending cap (M11)
 
-Every response that comes back from the API is priced and recorded
-(`assist_usage`, migration 0011): who, when, the model that actually served it
-(a server-side fallback can answer with a different model from the one asked
+Every real API call is written to `assist_usage` (migration 0011) **before**
+it is sent, at the most it can cost, and settled to its measured cost when the
+response comes back: who, when, the model that actually served it (a
+server-side fallback can answer with a different model from the one asked
 for), input, output, cache-read and cache-write tokens, and the cost in integer
-micro-dollars. Refused answers and unreadable ones are recorded too, because
+micro-dollars. Refused answers and unreadable ones are settled too, because
 they were billed.
 
 - **Prices** are a table in code (`lib/assist/spend.ts`), per million tokens:
@@ -373,18 +384,34 @@ they were billed.
   is **$10**; an empty box means no cap; $0 means never call the API. "This
   month" is the calendar month in your time zone, turning over at your
   midnight on the 1st.
-- **Before every real call** the month's spend is read. At or over the cap the
-  call is not made — nothing leaves the server — and the panel says the cap and
-  the spend, links to Settings, and opens Open in Claude under the sentence.
-  A page drawn when the cap is already reached leads with Open in Claude from
-  the start (above). If the spend
-  cannot be read, the call is refused the same way: a cap that is skipped
-  whenever it is unreadable would not be a cap.
-- **What it does not stop.** A call already in flight when the cap is crossed
-  finishes and is recorded, so the month can end a call's worth over. Two calls
-  started at the same moment both see the spend from before either landed, so
-  together they can pass the cap by one call's worth. The cap is checked, not
-  reserved.
+- **Before every real call its worst case is reserved** (`reserve_assist_spend`):
+  under a per-user lock in the database, the month is summed — settled calls
+  at their cost, calls still in flight and calls that got no response at their
+  worst case — and at or over the cap the call is not made: nothing leaves the
+  server, and the panel says the cap and the spend, links to Settings, and
+  opens Open in Claude under the sentence. Under the cap, a pending row
+  carrying the call's worst case is written first, so every other ask — any
+  tab, any video, any kind — waits for the lock and then counts it. A page
+  drawn when the cap is already reached leads with Open in Claude from the
+  start (above). If the spend cannot be read, the call is refused the same
+  way: a cap that is skipped whenever it is unreadable would not be a cap.
+- **The worst case** is every text byte of the request as a token, 5,000
+  tokens per image, 2,000 for the API's own framing, and all 16,000
+  `max_tokens` of output, at the dearest rate in the table ($10/$50 per million)
+  — a little under $1 for a brainstorm and about $1.05 for a three-image
+  critique. That is far above what a call normally costs, and it is replaced
+  by the measured cost the moment the answer is back.
+- **After the call.** A response that came back replaces the reservation with
+  its measured cost. A call that got none — our 45-second deadline, a dropped
+  connection — may still have been billed, so it **stays at its worst case**,
+  marked failed; Settings says how many calls are counted that way. A call the
+  API refused with an error status (a 429, a 5xx, a 400) bills nothing, and
+  its reservation is removed.
+- **What it does not stop.** The call that crosses the line is let through,
+  because the check is "at or over the cap, refuse": the month can end over
+  the cap by at most that one call — its worst case, about $0.90 — however
+  many asks start together. Settings rounds the spend **down** to the cent, so
+  it never shows the cap as reached while the next call would still go.
 
 ## Where writes happen
 
@@ -413,13 +440,18 @@ what makes the invariants enforceable rather than conventional:
   written only by `set_time_zone()`, which refuses a name the database's tz
   catalogue does not know and never lets a detected zone replace a chosen one.
 - `assist_usage` (what each real API call cost) is readable by its owner and
-  written only by `record_assist_usage()`, which stamps the owner and the time
-  itself and refuses negative or absurd numbers; no client can update or delete
-  a row, so a month's spend can only go up. `assist_caps` (the monthly cap) is
-  written only by `set_assist_cap()` (M11). The recording function *can* be
-  called by a signed-in client with made-up numbers — the app has no
-  service-role key, so the server holds nothing the browser does not — but a
-  forged row can only add to the forger's own month.
+  written only by `reserve_assist_spend()` (a pending row at the call's worst
+  case, under a per-user lock, refused at the cap), `settle_assist_spend()` (the
+  measured cost) and `close_assist_reservation()` (no response: kept at the
+  worst case, or removed after an error status). They stamp the owner and the
+  time themselves and refuse negative or absurd numbers; no client can update or
+  delete a row directly, and a settled row is never rewritten. `assist_caps`
+  (the monthly cap) is written only by `set_assist_cap()` (M11). The functions
+  *can* be called by a signed-in client with made-up numbers — the app has no
+  service-role key, so the server holds nothing the browser does not — so a
+  client could settle its own open reservation low; it could as easily raise
+  its own cap in Settings. The cap is the account holder's ceiling on what the
+  app does, not a defence against the account holder.
 
 Storage has one private bucket, `thumbnails`, with stable object paths
 (`{user_id}/{video_id}/{concept|wild_card|moderate|safe}.{ext}`, uploaded with
@@ -504,23 +536,16 @@ found.
   is a hosted Supabase project and a Vercel project, both created by hand on
   17 September. Migrations 0001–0009 were applied to the hosted database, one
   at a time, through Supabase's management API (the MCP connector), and each
-  was read back afterwards. **`0010_time_zone.sql` (M10) has not been applied
-  there.** Until it is, a deployed M10 build runs as M9 did as far as dates
-  go: every page reads no zone, draws in UTC and says so ("your time zone
-  could not be read"), and saving a zone in Settings is refused with a
-  sentence. It sends nothing on its own: the browser's zone is only recorded
-  when the read works and finds no row. The video page's stage select uses
-  0010's `move_video_versioned` and, without it, falls back to M9's plain
-  move (and M9's unconditional version adoption — see "Two tabs do not
-  merge"). **`0011_assist_spend.sql` (M11) has not been applied there
-  either.** Until it is, a deployed build with a key refuses every real API
-  call with "this month's API spending could not be read" (a cap that cannot
-  be checked is not enforced by skipping it) — the refusal opens Open in
-  Claude on the same panel, so the brainstorm still works by hand — and
-  Settings says the spending cannot be read; the fixtures and Open in Claude
-  are unaffected. (The M11 brief states that the hosted database now has
-  0001–0010; that could not be checked from this container, so the 0010
-  sentence above is left as the last thing verified here.) But no test
+  was read back afterwards; M11's brief states that `0010_time_zone.sql` (M10)
+  has since been applied there too, so the hosted database has 0001–0010.
+  **`0011_assist_spend.sql` (M11) has not been applied there.** Until it is,
+  a deployed build with a key refuses every real API call with "this month's
+  API spending could not be read" (a cap that cannot be checked is not
+  enforced by skipping it) — the refusal opens Open in Claude on the same
+  panel, so the brainstorm still works by hand — and Settings says the
+  spending cannot be read; the fixtures and Open in Claude are unaffected.
+  (No hosted row was read from this container to confirm 0010: the claim is
+  the brief's.) But no test
   in this repository has run against either one:
   - no spec has signed in to the live site;
   - no upload has gone to a hosted bucket (M1's one unfinished acceptance
@@ -547,7 +572,9 @@ found.
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
 - **The SQL tests have never run on Postgres 17.** The hosted database is
-  17.6, and 0001–0009 applied to it cleanly; 0010 has not been tried there. `supabase/config.toml`
+  17.6, and 0001–0009 applied to it cleanly; per M11's brief 0010 is there
+  too. 0011 has been run only on the local Postgres 16 and uses nothing newer
+  than `hashtextextended` (Postgres 11). `supabase/config.toml`
   pins `major_version = 17` to match. `supabase/tests/` has only ever run on
   PostgreSQL 16 (16.15, the harness's version). Nothing in the tests is known to
   behave differently on 17, but nothing has checked.
@@ -761,20 +788,26 @@ found.
 - **The critique is the most expensive call in the app** (three images plus
   a prompt). Settings shows this month's spend and the mean cost of a call,
   but the panel does not say what the call it just made cost (M8, M11).
-- **The spending cap is monthly and checked, not reserved** (M11). Real API
-  calls stop at the cap — $10 a calendar month in your time zone unless you
-  set another — and the refusal says so before anything is sent. But a call
-  already running when the cap is crossed finishes and is billed and counted,
-  and two calls started at the same moment can pass the cap together by one
-  call's worth. There is still no per-hour or per-day limit, and closing a
-  panel stops the waiting, not the call, which runs to completion and is
-  billed (M8 review) — and counted.
+- **The spending cap can be passed by one call, and only one** (M11, and its
+  review). Real API calls stop at the cap — $10 a calendar month in your time
+  zone unless you set another — and each call's worst case is reserved under a
+  per-user lock before it is sent, so asks started together are counted one
+  after another. The call that crosses the line is still let through (the
+  rule is "at or over, refuse"), so the month can end over the cap by that one
+  call: at most its worst case, a little under $1 for a brainstorm and about
+  $1.05 for a critique. The worst case covers one billed attempt; a fallback
+  chain in which two models both wrote output before one answered is billed
+  twice and could exceed it. There is still no per-hour or per-day limit, and
+  closing a panel stops the waiting, not the call, which runs to completion
+  and is billed (M8 review) — and counted.
 - **What the cap counts is this app's arithmetic, not Anthropic's invoice**
   (M11). Each call is priced from the token counts in its response, with the
   price table in `lib/assist/spend.ts`; the account's real bill is not read.
-  A request that timed out on this side, or lost its connection, may still
-  have been billed by the API and is not recorded, because no usage came
-  back. Cache reads on Opus 5.5 and Fable 5.1, and one-hour cache writes, are
+  A request that timed out on this side, or lost its connection, got no usage
+  back, so it is counted at its worst case rather than at what it really cost
+  — over-counted, never under, and Settings says how many calls are counted
+  that way. A server that dies mid-call leaves its reservation open, counted
+  the same way, for the rest of the month. Cache reads on Opus 5.5 and Fable 5.1, and one-hour cache writes, are
   priced above their list rate (the flat 1.25×/0.1× multipliers), which errs
   towards stopping early; the app sends no cache control today, so neither
   arises. A model missing from the table is priced at the dearest entry, and
@@ -787,26 +820,33 @@ found.
   and what it does with a reply; not how claude.ai answers this prompt, nor
   how often a real reply comes back in a shape the reader accepts first time.
   The reader is forgiving (fences, bold, numbered lists without the `||`,
-  dashes, reasons on the next line, markdown tables, chatter around the list)
-  and a reply it cannot read keeps the pasted text and says what it expected.
+  dashes, reasons on the next line or in a nested "- Why:" bullet, italic
+  "*Why it works:*" labels, a hook quoted over two lines, markdown tables,
+  chatter around the list) and a reply it cannot read keeps the pasted text
+  and says what it expected. The prompt itself, pasted back, is refused as the
+  prompt.
 - **A pasted reply is taken on trust as Claude's.** The app cannot know what
   wrote the text in the box, so the panel says "pasted from claude.ai"
   rather than naming a model, and stores `model: "claude.ai"`. It is clamped
   to the columns' limits like any answer, and it only ever lands in fields
-  after you press Accept, as with every proposal.
+  after you press Accept, as with every proposal. There is no plausibility
+  check beyond shape (M11 review, finding 4, left as it is): any numbered or
+  bulleted list — a recipe pasted by mistake — reads as proposals, and like
+  any answer it replaces that question's stored answer in `brainstorm_last`.
+  Only the prompt itself is recognised and refused. Telling a wrong list from
+  a right one would need the app to judge the text, which is the model's job.
 - **The critique's images are attached by hand.** claude.ai cannot be handed
   an image by this app, so the panel links to each uploaded file (a signed URL
   that lasts an hour) and names the order to attach them in; the reply is read
   by role name, so a reply that swaps two images' names is taken at its word.
   As with the API's, a pasted critique is not kept.
-- **On a phone the steps rely on the page surviving the trip to claude.ai.**
-  The pasted-reply box is always there in the keyless mode, so a page the
-  browser reloaded while you were away still takes the reply; but with the API
-  primary the steps are behind "Open in Claude…", and pressing Open in Claude
-  again copies the prompt over whatever was on the clipboard. Once a reply has
-  been read the steps fold away, so pasting a second reply is one more press
-  ("Paste another reply"). Walked in
-  Chromium at 390×844 with touch, not on a real phone.
+- **On a phone, coming back to a reloaded page takes one press.** The
+  pasted-reply box is always there in the keyless mode; with the API primary,
+  "or Open in Claude" beside the pill opens the panel on the box without
+  asking anything. Pressing Open in Claude again copies the prompt over
+  whatever was on the clipboard. Once a reply has been read the steps fold
+  away, so pasting a second reply is one more press ("Paste another reply").
+  Walked in Chromium at 390×844 with touch, not on a real phone.
 - **What a panel leads with is decided when the page is drawn** (M11). With a
   key, the video page reads the month's spend once per render to choose
   between the API and Open in Claude — one more database read per video page,
@@ -814,12 +854,14 @@ found.
   load; a page drawn at the cap keeps leading with Open in Claude (and hides
   "Ask") until it is reloaded. If that read fails, the page leads with the API
   and the pill's ask is what refuses.
-- **A signed-in session can add made-up spend to its own month** (M11).
-  `record_assist_usage()` has to be callable by the signed-in user, because
-  the server action that records a call holds only that user's session. Rows
-  cannot be edited, deleted, backdated or charged to anyone else, so the worst
-  a forged row can do is lock its own account out of API calls until the cap
-  is raised.
+- **A signed-in session can write made-up numbers into its own month** (M11).
+  `reserve_assist_spend()` and `settle_assist_spend()` have to be callable by
+  the signed-in user, because the server action that reserves and settles a
+  call holds only that user's session. Rows cannot be backdated or charged to
+  anyone else, and a settled row is never rewritten; but a client can reserve
+  spend it never uses (locking itself out until the cap is raised) or settle
+  its own open reservation low. The cap is the account holder's own ceiling —
+  they can equally raise it in Settings — not a defence against them.
 - **A signed-out save is recognised in some places, not all.** When a session
   ends mid-edit (signed out in another tab, a revoked refresh token), the video
   page's fields, capture, checklist ticks and `/now`'s rows say "You have been

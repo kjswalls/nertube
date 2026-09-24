@@ -345,16 +345,13 @@ for (const device of ['laptop', 'phone'] as const) {
 
     test('no key: every assist done by hand — copy, paste, read, accept', async ({ page }) => {
       await setMonth(0);
-      // Every response carrying the manual prompt's own words, and what asked
-      // for it: the prompt must reach the browser only as the answer to a
-      // press of Open in Claude, never with the page.
+      // The prompt must reach the browser only as the answer to a press of
+      // Open in Claude, never with the page. The server action's response is
+      // read *while it is intercepted* (M11 review, finding 18): reading a
+      // body after the fact from a 'response' listener could come back empty
+      // and fail the walk although the product did the right thing.
+      const MARKER = 'I will copy your answer into an app';
       const carried: { method: string; url: string }[] = [];
-      page.on('response', async (response) => {
-        const body = await response.text().catch(() => '');
-        if (body.includes('I will copy your answer into an app')) {
-          carried.push({ method: response.request().method(), url: response.url() });
-        }
-      });
       await prepare(page, 'manual');
       const videoId = await capture(`Filming on a cheap phone (${device})`);
       await page.goto(`/videos/${videoId}`);
@@ -366,11 +363,25 @@ for (const device of ['laptop', 'phone'] as const) {
       await expect(panel.getByTestId('brainstorm-ask-again')).toHaveCount(0);
       await panel.screenshot({ path: shot('manual-titles-open') });
       // The page and the open panel hold no prompt: nothing has been pressed.
-      expect(await page.content()).not.toContain('I will copy your answer into an app');
-      expect(carried).toEqual([]);
-      const prompt = await byHand(page, panel, 'brainstorm', TITLES_REPLY, touch);
-      // One press, one response, and it is the server action's (a POST).
-      await expect.poll(() => carried.length).toBe(1);
+      expect(await page.content()).not.toContain(MARKER);
+      // Every request the page makes from here until the prompt arrives, intercepted
+      // and its answer read in full before it is handed on.
+      const watch = async (route: import('@playwright/test').Route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes(MARKER)) {
+          carried.push({ method: route.request().method(), url: route.request().url() });
+        }
+        await route.fulfill({ response, body });
+      };
+      await page.route(`**/videos/${videoId}**`, watch);
+      // Unrouted once the prompt has arrived (the next sentence is on screen)
+      // and before the read, so no intercepted request is still in flight.
+      const prompt = await byHand(page, panel, 'brainstorm', TITLES_REPLY, touch, () =>
+        page.unroute(`**/videos/${videoId}**`, watch),
+      );
+      // One press, one response carrying it, and it is the server action's (a POST).
+      expect(carried).toHaveLength(1);
       expect(carried[0].method).toBe('POST');
       expect(prompt).toContain(VOICE_GUIDE);
       await expect(panel.getByTestId('brainstorm-suggestion')).toHaveCount(6);

@@ -761,3 +761,178 @@ test.describe('on a phone', () => {
     ).toBe(true);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* 8. M11's adversarial review                                                 */
+/* -------------------------------------------------------------------------- */
+
+test('the prompt pasted back is refused as the prompt, for every assist, and nothing is overwritten', async ({
+  page,
+}) => {
+  await manualMode(page);
+  const videoId = await capture('Pasting the wrong thing back');
+  await openVideo(page, videoId);
+
+  // Titles, with an answer already stored: pasting the prompt must not replace it.
+  await openAssist(page, 'Generate 20', 'brainstorm-panel');
+  let panel = page.getByTestId('brainstorm-panel');
+  await panel.getByTestId('brainstorm-open-in-claude').click();
+  await panel.getByTestId('brainstorm-paste').fill(TITLES_REPLY);
+  await panel.getByTestId('brainstorm-read').click();
+  await expect(panel.getByTestId('brainstorm-suggestion')).toHaveCount(5);
+  const stored = (await rowOf(videoId)).brainstorm_last?.titles;
+  expect(stored?.suggestions).toHaveLength(5);
+
+  const refusedAs = async (prefix: string, prompt: string) => {
+    await panel.getByTestId(`${prefix}-paste`).fill(prompt);
+    await panel.getByTestId(`${prefix}-read`).click();
+    const failure = panel.getByTestId(`${prefix}-paste-failure`);
+    await expect(failure).toContainText('That is the prompt, not Claude’s reply');
+    await expect(panel.getByTestId(`${prefix}-paste`)).toHaveValue(prompt);
+  };
+
+  await panel.getByTestId('brainstorm-paste-another').click();
+  await panel.getByTestId('brainstorm-open-in-claude').click();
+  await expect(panel.getByTestId('brainstorm-manual-next')).toBeVisible();
+  await refusedAs('brainstorm', (await claudeCalls(page)).copied.at(-1)!);
+  // The earlier answer is still on screen and still stored, untouched.
+  await expect(panel.getByTestId('brainstorm-suggestion')).toHaveCount(5);
+  expect((await rowOf(videoId)).brainstorm_last?.titles).toEqual(stored);
+
+  // Hooks.
+  await panel.getByTestId('brainstorm-tab-hooks').click();
+  await panel.getByTestId('brainstorm-open-in-claude').click();
+  await expect(panel.getByTestId('brainstorm-manual-next')).toBeVisible();
+  await refusedAs('brainstorm', (await claudeCalls(page)).copied.at(-1)!);
+  expect((await rowOf(videoId)).brainstorm_last?.hooks).toBeUndefined();
+  await panel.getByTestId('brainstorm-close').click();
+
+  // Concepts.
+  await openAssist(page, 'Suggest concepts', 'concept-assist-panel');
+  panel = page.getByTestId('concept-assist-panel');
+  await panel.getByTestId('concept-assist-open-in-claude').click();
+  await expect(panel.getByTestId('concept-assist-manual-next')).toBeVisible();
+  await refusedAs('concept-assist', (await claudeCalls(page)).copied.at(-1)!);
+  expect((await rowOf(videoId)).brainstorm_last?.concepts).toBeUndefined();
+
+  // The critique: no verdict is invented from "reads: yes or no".
+  await page.goto(`/videos/${videoId}?section=thumbnails`);
+  await upload(page, 'wild_card', WILD);
+  await openAssist(page, 'Critique at tile size', 'critique-panel');
+  panel = page.getByTestId('critique-panel');
+  await panel.getByTestId('critique-open-in-claude').click();
+  await expect(panel.getByTestId('critique-manual-next')).toBeVisible();
+  await refusedAs('critique', (await claudeCalls(page)).copied.at(-1)!);
+  await expect(panel.getByTestId('critique-verdict')).toHaveCount(0);
+  await expect(panel.getByTestId('critique-ship')).toHaveCount(0);
+});
+
+test('a read that never reached the server stays with the paste box, and Read — not the API — tries again', async ({
+  page,
+}) => {
+  await manualMode(page);
+  const videoId = await capture('A flaky train connection');
+  await openVideo(page, videoId);
+
+  await openAssist(page, 'Generate 20', 'brainstorm-panel');
+  const panel = page.getByTestId('brainstorm-panel');
+  const reply = '1. Editing between stations || The setting is the premise.\nPICK: 1 || The only one.';
+
+  // The first read's request is dropped on the way; every server action the
+  // page sends is recorded, so an API ask would show up here.
+  const posted: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST') posted.push(request.postData() ?? '');
+  });
+  let dropped = false;
+  await page.route(`**/videos/${videoId}**`, async (route) => {
+    if (!dropped && route.request().method() === 'POST' && (route.request().postData() ?? '').includes('Editing between stations')) {
+      dropped = true;
+      await route.abort('internetdisconnected');
+      return;
+    }
+    await route.continue();
+  });
+
+  await panel.getByTestId('brainstorm-paste').fill(reply);
+  await panel.getByTestId('brainstorm-read').click();
+
+  // The failure is the paste's, under the box, with the text still there —
+  // and no API failure block, no "Try again" that would ask the API.
+  const failure = panel.getByTestId('brainstorm-paste-failure');
+  await expect(failure).toContainText('never reached the server');
+  await expect(failure).toContainText('press Read again');
+  await expect(panel.getByTestId('brainstorm-failure')).toHaveCount(0);
+  await expect(panel.getByTestId('brainstorm-retry')).toHaveCount(0);
+  await expect(panel.getByTestId('brainstorm-paste')).toHaveValue(reply);
+
+  // Read again reads the same text.
+  await panel.getByTestId('brainstorm-read').focus();
+  await page.keyboard.press('Enter');
+  await expect(panel.getByTestId('brainstorm-suggestion')).toHaveCount(1);
+  await expect(panel.getByTestId('brainstorm-fixtures')).toHaveCount(0);
+  expect((await rowOf(videoId)).brainstorm_last?.titles.provider).toBe('manual');
+  // Two reads went out, and no ask: an API ask is `{videoId, kind}` alone.
+  expect(posted.filter((body) => body.includes('Editing between stations'))).toHaveLength(2);
+  expect(
+    posted.filter((body) => body.includes('"kind":"titles"') && !body.includes('Editing between stations')),
+  ).toEqual([]);
+
+  // Focus did not fall to <body> when the steps folded: it is on the fold's
+  // own button, and a status line says what happened (review, finding 9, 15).
+  await expect(panel.getByTestId('brainstorm-paste-another')).toBeFocused();
+  await expect(panel.getByTestId('brainstorm-manual-status')).toHaveText(
+    'Read 1 proposal from Claude’s reply. It is below.',
+  );
+  await page.keyboard.press('Enter');
+  await expect(panel.getByTestId('brainstorm-paste')).toBeFocused();
+});
+
+test('with the API primary, "or Open in Claude" opens every panel on the steps without asking', async ({
+  page,
+}) => {
+  // No cookie: the API mode (the fixtures stand in for the API here).
+  const videoId = await capture('Asking nothing of the API');
+  await openVideo(page, videoId);
+
+  // Titles: the panel opens on the steps, and nothing was asked.
+  await untilTaken(
+    async () => {
+      if ((await page.getByTestId('brainstorm-panel').count()) === 0) {
+        await page.getByTestId('brainstorm-manual-entry').click();
+      }
+    },
+    () => expect(page.getByTestId('brainstorm-panel')).toBeVisible({ timeout: 2_000 }),
+  );
+  let panel = page.getByTestId('brainstorm-panel');
+  await expect(panel.getByTestId('brainstorm-manual')).toHaveAttribute('data-mode', 'primary');
+  await expect(panel.getByTestId('brainstorm-paste')).toBeVisible();
+  await expect(panel.getByTestId('brainstorm-pending')).toHaveCount(0);
+  await expect(panel.getByTestId('brainstorm-suggestion')).toHaveCount(0);
+  // "Ask" is still there for whoever wants the API.
+  await expect(panel.getByTestId('brainstorm-ask-again')).toBeVisible();
+  expect((await rowOf(videoId)).brainstorm_last).toBeNull();
+  await panel.getByTestId('brainstorm-close').click();
+
+  // Concepts.
+  await page.getByTestId('concept-assist-manual-entry').click();
+  panel = page.getByTestId('concept-assist-panel');
+  await expect(panel.getByTestId('concept-assist-paste')).toBeVisible();
+  await expect(panel.getByTestId('concept-assist-pending')).toHaveCount(0);
+  expect((await rowOf(videoId)).brainstorm_last).toBeNull();
+  await panel.getByTestId('concept-assist-close').click();
+
+  // The critique — the one whose only way to the paste box was a paid
+  // multi-image call, every time, because it is never stored.
+  await page.goto(`/videos/${videoId}?section=thumbnails`);
+  await upload(page, 'wild_card', WILD);
+  await page.getByTestId('critique-manual-entry').click();
+  panel = page.getByTestId('critique-panel');
+  await expect(panel.getByTestId('critique-manual')).toHaveAttribute('data-mode', 'primary');
+  await expect(panel.getByTestId('critique-pending')).toHaveCount(0);
+  await expect(panel.getByTestId('critique-verdict')).toHaveCount(0);
+  await panel.getByTestId('critique-paste').fill('WILD CARD || reads: yes || adds: yes || Ship it.\nSHIP: wild card');
+  await panel.getByTestId('critique-read').click();
+  await expect(panel.getByTestId('critique-verdict')).toHaveCount(1);
+  await expect(panel.getByTestId('critique-provenance')).toContainText('Read from your claude.ai reply');
+});

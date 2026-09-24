@@ -11001,3 +11001,141 @@ and no egress; no other agent was writing.
 The server log carries M10's "The destination stream closed early" line 84
 times over the run (a navigation abandoning a streamed response); no spec
 failed with it.
+
+---
+
+## M11 — Review: what the adversarial pass found, and what was done about it
+
+> Scope: the twenty-two findings of M11's adversarial review, each verified
+> against the tree before anything was changed. The user's request,
+> verbatim: *"let's build the button for now, but also add the api key cap to
+> the app"*. **The milestone's one migration is still
+> `supabase/migrations/0011_assist_spend.sql`** — revised in place, because it
+> has not reached the hosted database (which has 0001–0010); no 0012.
+> **Changed:** `0011_assist_spend.sql`, `supabase/tests/87_assist_spend.test.sql`,
+> `supabase/tests/90_schema_contract.test.sql`, `lib/database.types.ts`,
+> `lib/assist/spend.ts` (+ test), `lib/assist/anthropic.ts` (+ test),
+> `lib/assist/reply.ts` (+ test), `lib/assist/prompts.ts`, `lib/assist/manual.ts`
+> (+ test), `lib/assist/select.ts` (doc only), `app/actions/assist.ts`,
+> `app/settings/account/page.tsx`, `components/settings/spending-form.tsx`,
+> `components/assist/manual.tsx`, `chrome.tsx` (`AssistManualEntry`),
+> `brainstorm-assist.tsx`, `brainstorm-panel.tsx`, `concept-assist.tsx`,
+> `critique-assist.tsx`, `e2e/assist-stub.ts`, `e2e/spend-cap.spec.ts`,
+> `e2e/assist-manual.spec.ts`, `e2e/m11-walk.spec.ts`, `README.md`,
+> `.env.example`. No new runtime dependency. Shared files touched:
+> `app/actions/assist.ts` (the cap moved from a check to a reservation; a
+> refusal under `ASSIST_PROVIDER=manual`; a lane for the critique) and
+> `lib/assist/select.ts` (one doc comment) — no other agent was writing.
+
+### The findings, one by one
+
+| # | Sev. | Verified? | What was done |
+|---|---|---|---|
+| 1 | blocker | **Yes**, by reading: the cap was read before each call and nothing was set aside; only one lane per user/video/kind, none on the critique. | **Reserved, not checked.** `reserve_assist_spend()` (security definer) takes `pg_advisory_xact_lock(hashtextextended('assist_spend:'‖uid))`, sums the window (open reservations at their worst case), refuses at or over the cap, otherwise writes a `pending` row at the call's worst case and returns its id. `settle_assist_spend()` writes the measured cost over it; `close_assist_reservation()` handles no response. The provider calls `beforeSend` (the reservation) after building the request and before sending it. New spec: four tabs, four videos, $0.99 of a $1 cap, the stub answering in 3 s — **one** request reaches the stub, three panels show `spend_cap`, the month closes at $1.08, no row left pending. The critique got a lane too. README, Settings hint, `isOverCap`'s comment corrected: the month can pass the cap by at most one call's worst case. |
+| 2 | major | **Yes**: `mapSdkError` threw before `measureCall`/`reportUsage`, so a timed-out call wrote nothing. | The reservation fixes it: `onNoUsage(mayHaveBilled)` keeps the worst case (outcome `failed`, `estimated = true`) after our timeout, an abort or a dropped connection, and removes the reservation after an error *status* (4xx/5xx bill nothing). Settings says how many calls are counted at their worst case. Unit-tested on the provider (timeout, dropped socket, 429/500/400); a browser spec proves a 500 from the stub leaves no row. Streaming was **not** adopted (below). |
+| 3 | minor | **Yes** (`formatMicros(9_996_000)` was `$10.00`, `isOverCap` false). | `formatMicros` rounds **down**; Settings' meter reads 100 and "Cap reached" shows only when `isOverCap` agrees (`atCap` from the server). Unit test added. |
+| 4 | blocker | **Yes**, by unit harness: the prompt pasted back read as proposals and as a critique with invented verdicts. | `guard()` refuses a paste carrying the prompt's own markers ("I will copy your answer into an app", `<<<VOICE GUIDE`, "How to answer — please follow this exactly", `|| reads: yes or no ||`) with *"That is the prompt, not Claude's reply…"*, before anything is read or written. `<placeholder>` lines are never proposals (even cut out of the prompt), and "yes or no" is never a verdict. Unit tests for all four kinds from the real `buildManualPrompt`; a browser spec pastes the copied prompt into all four panels and checks the stored titles answer is byte-for-byte unchanged. The recipe case (any list reads as proposals) is **not** fixed — Honest limits. |
+| 5 | blocker | **Yes**: `TRANSPORT_FAILURE` has `provider: null`, so it routed as an API failure with `onRetry={onAsk}`. | `useManualRoute` (manual.tsx, the one rule all three panels use): a failure while a paste was being read — or any failure in the `manual` mode — is the paste box's, whose retry is Read (it says "press Read again"). Defence in depth: `assist()` and `critiqueThumbnails()` refuse every request while `ASSIST_PROVIDER=manual`. Browser spec: the first Read's POST is aborted; the failure is under the box, no "Try again", the second Read reads, and no `{videoId, kind}` POST (an ask) was ever sent. |
+| 6 | major | **Yes**, by reading: `key={… manualFirst …}` and `run.ask` clearing `failure`. | `OpenInClaude` is keyed by question only; `primary` can open the steps, never close them. The cap refusal is latched per question until the next ask or a reply that reads. Browser spec in `spend-cap.spec.ts`: refused mid-session → Open in Claude → unreadable paste → the failure shows, the text stays, the refusal stays; a readable paste then folds. |
+| 7 | major | **Yes**, by unit harness (the reviewer's exact reply). | `PICK_LINE` no longer accepts `best`, `winner` or `choice`, never matches a **listed** line, and the **last** pick line wins. Unit tests with the reviewer's titles. |
+| 8 | major | **Yes**, by reading `press()` and `close()`. | "or Open in Claude" beside the Generate 20, Suggest concepts and Critique pills in the `api` mode: opens the panel on the steps and asks nothing (`AssistManualEntry` in chrome.tsx). Browser spec for all three: no pending row, nothing stored, the critique read from a paste. |
+| 9 | major | **Yes**, by reading: the fold unmounts Read. | After a read, focus goes to "Paste another reply"; unfolding focuses the paste box. Asserted with `toBeFocused()` in `assist-manual.spec.ts`. |
+| 10 | minor | **Yes** (unit harness). | A numbered line with no separator takes the plain lines under it up to the one that carries `||`; unbalanced wrapping quotes are stripped. Unit tests for both of the reviewer's shapes. |
+| 11 | minor | **Yes** (unit harness). | Lines that quote `||` in inline code, or end with a colon, are never proposals; when any numbered line carries `||`, only numbered lines are read. Unit tests. |
+| 12 | minor | **Yes** (unit harness). | `unLabelReason` strips `*Why it works:*` / `_Why it works:_` italics. Unit test. |
+| 13 | minor | **Yes**. | With the tab blocked the sentence says "The prompt is copied, but the new tab was blocked. Open claude.ai with the link that follows…". |
+| 14 | minor | **Yes**. | The role line is per kind ("judges the thumbnails before one is shipped" for the critique; no "twenty options" anywhere); the manual critique says "attached to this message" and names a locked concept only when there is one; `## The video` is followed by one blank line. Unit tests; the API prompt still shares the brief byte for byte. |
+| 15 | minor | **Yes**. | An always-mounted `sr-only` `role="status"` region per block (first child of every branch, so it survives the fold) is set on each step and says "Read N proposals from Claude's reply. They are below." The visible sentence is no longer a live region. |
+| 16 | minor | **Yes**. | The fallback prompt box is in the chrome sans, 13px (16px under a thumb). |
+| 17 | major | Same defect as 6. | Same fix and spec. |
+| 18 | major | **Plausible**: not reproduced here, but a body read after the fact from a `response` listener can come back empty. | The walk now intercepts the requests with `page.route`, reads each answer in full with `route.fetch()`, fulfils it, and unroutes before the read. Run 1 of the integration gates (the failure) is recorded below as the reviewer reported it. |
+| 19 | minor | Same defect as 1. | Fixed by the reservation; wording corrected everywhere it appeared. |
+| 20 | minor | **Yes** (unit harness). | A bullet indented under a numbered item, or one starting with a reason label, is that item's reason. Unit test; a plain bulleted list still reads as proposals. |
+| 21 | minor | Same defect as 7. | Same fix and tests. |
+| 22 | minor | **Yes**. | The hosted-database paragraph and the Postgres 17 bullet now say 0001–0010 are there (per the brief, stated as the brief's claim) and 0011 is not. |
+
+### Decisions taken without the user
+
+1. **0011 was revised in place rather than followed by a 0012.** The brief
+   allows exactly one migration for this milestone and says the hosted
+   database has 0001–0010; 0011 has never been applied anywhere but a test
+   database, so rewriting it breaks nothing. `record_assist_usage()` is gone,
+   replaced by `reserve_assist_spend()`, `settle_assist_spend()` and
+   `close_assist_reservation()`; `assist_usage` gained `estimated` and the
+   `pending` outcome; `assist_budget()` gained `estimated_calls`.
+2. **The rule stays "at or over the cap, refuse", so the last call before the
+   line still goes.** The alternative — refuse when spend + worst case would
+   pass the cap — would stop a $10 month at about $9.10, a dollar short of
+   what the person set, to guard against a worst case that almost never
+   happens. The bound is stated instead: over by at most one call's worst case.
+3. **The worst case is deliberately generous**: one token per UTF-8 byte of
+   text (a byte-level tokenizer cannot produce more), 5,000 tokens per image,
+   2,000 for the API's framing, all of `max_tokens`, and the dearest rate in
+   the table whatever model was asked for (a fallback may answer). A little
+   under $1 for a brainstorm. It only matters while a call is in flight and
+   when no usage ever comes back, and in both cases over-counting is the safe
+   direction.
+4. **An error status releases the reservation; a timeout, abort or dropped
+   connection keeps it.** An HTTP error is the API refusing the request; the
+   others may have cut off a call the API ran to the end.
+5. **Streaming was not adopted.** The review suggested `messages.stream()` so
+   a call cut off at the deadline records the tokens actually produced. It
+   would change the one request shape the stub and the unit tests pin, for a
+   case the reservation already covers conservatively. Recorded under Honest
+   limits.
+6. **"or Open in Claude" is a quiet text button beside the pill**, not a
+   second pill: in the `api` mode the API is still what the person chose to
+   pay for, and the free path should be findable, not competing.
+7. **The critique got a lane** although the reservation no longer needs it:
+   the same critique twice at once is two multi-image calls for one answer.
+8. **The recipe-paste case was left.** The review's plausibility concern goes
+   beyond the prompt pasted back; telling a wrong list from a right one would
+   need the app to judge the text. Only the prompt itself is recognised.
+
+### Deviations, stated plainly
+
+- None from PLAN.md or BRIEF.md. The spending design changed from "checked"
+  to "reserved", which is the review's own suggestion.
+
+### Honest limits (new in this pass)
+
+- **A server that dies mid-call leaves its reservation `pending` at its worst
+  case for the rest of the month.** Over-counted, never under; Settings counts
+  it among the calls "counted at the most such a call can cost".
+- **Two billed attempts in one fallback chain can exceed the reserved worst
+  case**, which covers one.
+- **The concurrency proof is four tabs on one server.** The lock is in the
+  database, so it holds across server instances too, but only one instance was
+  run here.
+- **Nothing here has reached Anthropic or claude.ai**, still.
+
+### Gates
+
+Run after the last code edit of this pass, in this container, with no
+`ANTHROPIC_API_KEY` and no egress; no other agent was writing. The only edits
+after browser run 1 started were to this file.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npx tsc --noEmit` (and `-p tsconfig.harness.json`) | clean |
+| Lint | `npm run lint` | clean |
+| Build | `npm run build` | OK |
+| Database | `./scripts/verify-db.sh m11_final` | **OK — migrations applied (0001–0011), 19 SQL test files passed.** `87_assist_spend` rewritten for reserve/settle/close (the lock is asserted held; the cap refuses the second reservation at $1.03 of $1; a timeout keeps its worst case; an error status removes it); `90_schema_contract` expects thirteen definer functions |
+| Unit | `npx vitest run` | **38 files, 712 tests passed** (683 before this pass: +29 — reservation and pricing in `spend.test.ts` and `anthropic.test.ts`, the reader's review cases in `reply.test.ts`, prompt wording in `manual.test.ts`) |
+| Bundle | grep of `.next/static` vs `.next/server` after run 1's build | **0 static files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `@anthropic-ai`, `claude-opus`, `claude-fable`, `server-side-fallback`, `ASSIST_PROVIDER`, `NERTUBE_TEST_ANTHROPIC_STUB`, `PRICES_PER_MILLION`, `reserve_assist_spend`, `settle_assist_spend`, `close_assist_reservation`, `assist_budget`, `worstCaseMicros`, and the prompt's and reader's prose (`I will copy your answer into an app`, `VOICE GUIDE`, `Rules of the craft`, `That is the prompt, not Claude`, `It expects one per line`, `judges the thumbnails`); each found in 2–7 `.next/server` files. `claude.ai/new`: one static chunk, as it must be |
+| Browser, run 1 | `E2E_REUSE=0 npm run e2e` | **369 passed, 1 skipped (`session-refresh`, as since M1), 0 failed — 16.3 min, exit 0** |
+| Browser, run 2 | `E2E_REUSE=0 npm run e2e` | **369 passed, 1 skipped, 0 failed — 16.2 min, exit 0** |
+
+369 = the integration's 363 + 6 new: three in `spend-cap.spec.ts` (four asks
+at once send one; an error status releases its reservation; a refusal, then
+an unreadable and a readable paste) and three in `assist-manual.spec.ts` (the
+prompt pasted back into all four panels; a dropped read retried by Read, with
+focus and the status line; "or Open in Claude" on all three pills). The
+integration pass's own full run 1, as the reviewer reported it, was **1
+failed** (`m11-walk.spec.ts:346`, the `carried.length` poll), **1 skipped, 5
+did not run, 357 passed** (17.0 min, exit 1); its run 2 was 363 passed. That
+is finding 18, fixed above; `m11-walk` passed in both runs of this pass.
+
+The server log carries M10's "The destination stream closed early" line 84
+times in run 1 and 100 in run 2 (a navigation abandoning a streamed
+response); no spec failed with it.

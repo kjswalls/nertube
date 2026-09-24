@@ -117,10 +117,12 @@ export function assistFallbackWarning(env: AssistEnvironment): string | null {
  * reaches the manual mode by setting `ASSIST_PROVIDER=manual` (or by leaving
  * it unset with no key).
  *
- * `ASSIST_PROVIDER=manual` with a key present means "never spend the key from
- * the panels"; `selectAssistProvider` still reads `manual` as "not fake", so
- * the API action itself is not removed — the panels simply never call it, and
- * the spend ceiling is what bounds a hand-made request.
+ * `ASSIST_PROVIDER=manual` with a key present means "never spend the key":
+ * the panels never offer an ask, and — since M11's review, which found a
+ * panel's "Try again" reaching the API in this mode — `assist()` and
+ * `critiqueThumbnails()` refuse every request themselves (`manualOnly` in
+ * `app/actions/assist.ts`), so a hand-made request cannot spend it either.
+ * `selectAssistProvider` still reads `manual` as "not fake"; nothing asks it.
  */
 export type AssistMode = "api" | "manual";
 

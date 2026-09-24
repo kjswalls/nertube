@@ -520,3 +520,48 @@ test('a call the API refuses with an error status releases its reservation', asy
   );
   expect(Number(rows.rows[0].n)).toBe(rowsBefore);
 });
+
+test('after a cap refusal, a paste that cannot be read keeps its text and says so; one that can, reads', async ({
+  page,
+}) => {
+  // M11 review, findings 6 and 17: pressing Read cleared the refusal, and with
+  // it the steps remounted collapsed — the pasted text and the read's failure
+  // both gone.
+  await db.query('update public.assist_caps set cap_dollars = null where user_id = $1', [userId]);
+  const videoId = await capture('Refused, then pasted');
+  await signIn(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => {} },
+    });
+    window.open = (() => ({ opener: null, closed: false }) as unknown as Window) as typeof window.open;
+  });
+  await page.goto(`/videos/${videoId}`);
+  await expect(pill(page)).toBeVisible();
+
+  // The page was drawn with no cap; the month is over $1 when the cap arrives.
+  await db.query('update public.assist_caps set cap_dollars = 1 where user_id = $1', [userId]);
+  const before = stub.requests.length;
+  await pressPill(page);
+  await expect(page.getByTestId('brainstorm-failure')).toHaveAttribute('data-code', 'spend_cap');
+  expect(stub.requests.length).toBe(before);
+
+  const p = panel(page);
+  await p.getByTestId('brainstorm-open-in-claude').click();
+  const garbage = 'Sorry, I cannot help with that.';
+  await p.getByTestId('brainstorm-paste').fill(garbage);
+  await p.getByTestId('brainstorm-read').click();
+
+  await expect(p.getByTestId('brainstorm-paste-failure')).toBeVisible();
+  await expect(p.getByTestId('brainstorm-paste')).toHaveValue(garbage);
+  await expect(p.getByTestId('brainstorm-manual')).toHaveAttribute('data-mode', 'primary');
+  // The refusal is still the reason on screen.
+  await expect(p.getByTestId('brainstorm-failure')).toHaveAttribute('data-code', 'spend_cap');
+
+  await p.getByTestId('brainstorm-paste').fill('1. Refused, then pasted || It happened.\nPICK: 1 || The only one.');
+  await p.getByTestId('brainstorm-read').click();
+  await expect(p.getByTestId('brainstorm-suggestion')).toHaveCount(1);
+  await expect(p.getByTestId('brainstorm-paste-another')).toBeVisible();
+  expect(stub.requests.length).toBe(before);
+});
