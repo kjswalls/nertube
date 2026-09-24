@@ -41,6 +41,14 @@ import {
  *    ` - ` — or with the reason on the line underneath ("Why: …").
  * 4. Markdown table rows (`| 1 | Title | Why |`) are read as cells.
  *
+ * M11's adversarial review tightened five things: the prompt pasted back is
+ * refused as the prompt (its example lines are shaped like an answer); a
+ * `<placeholder>` is never a proposal; "Best:" or "Winner —" at the start of
+ * a *listed* line is a title, not the pick, and the last pick line wins; a
+ * numbered proposal may run over more than one line, and a reason may sit in
+ * a bullet nested under its item; and prose that quotes the separator is not
+ * a proposal.
+ *
  * What it will not do is guess: a line that is not shaped like a proposal is
  * not one, and a reply with none of them is an {@link AssistError} whose
  * message says exactly what was expected. It never throws anything else, and
@@ -91,6 +99,12 @@ interface Line {
   readonly blank: boolean;
   /** `| a | b |` — a markdown table row. */
   readonly tableRow: boolean;
+  /** Leading whitespace before any quote mark or list marker. */
+  readonly indent: number;
+  /** A bullet (not a number) — the shape of a nested "Why:" under an item. */
+  readonly bullet: boolean;
+  /** The line quotes the separator in inline code: prose about the format. */
+  readonly quotesSeparator: boolean;
   readonly raw: string;
 }
 
@@ -157,6 +171,9 @@ function linesOf(text: string): Line[] {
       heading,
       blank: body === "",
       tableRow,
+      indent: /^\s*/.exec(rawLine.replace(/\t/g, "    "))![0].length,
+      bullet: listed && number === null,
+      quotesSeparator: /`[^`]*(?:\|\||‖)[^`]*`/.test(rawLine),
       raw: rawLine,
     });
   }
@@ -173,23 +190,67 @@ function splitOn(body: string, separator: RegExp): [string, string] | null {
   return [body.slice(0, match.index), body.slice(match.index + match[0].length)];
 }
 
-/** "Why: …", "Reason — …", "— …": the label a reason line tends to carry. */
+const REASON_LABEL = /^(?:why( it works| this works)?|reason|rationale|because)\s*[:—–-]\s*/i;
+
+/**
+ * "Why: …", "Reason — …", "— …", "*Why it works:* …": the label a reason line
+ * tends to carry, in claude.ai's usual italics too (M11 review, finding 12).
+ */
 function unLabelReason(value: string): string {
   return unQuote(
     value
       .trim()
+      .replace(/^[*_]+\s*((?:why|reason|rationale|because)[^*_]*?)\s*[*_]+\s*/i, "$1 ")
       .replace(/^[-—–:]\s*/, "")
-      .replace(/^(?:why( it works)?|reason|rationale|because)\s*[:—–-]\s*/i, "")
+      .replace(REASON_LABEL, "")
       .trim(),
   );
+}
+
+/** A line whose body is a labelled reason: "Why: …", "*Why it works:* …". */
+function isReasonLine(line: Line): boolean {
+  return REASON_LABEL.test(line.body.replace(/^[*_]+/, ""));
+}
+
+/**
+ * The prompt's own placeholder — `<the title>`, `<one sentence: why it
+ * works>` — which is what a reply looks like when the prompt itself was
+ * pasted back (M11 review, finding 4). Never a proposal.
+ */
+function isPlaceholder(value: string): boolean {
+  return /^<[^<>]*>$/.test(value.trim());
+}
+
+/**
+ * Wrapping quotes that only half survived a join: a hook quoted across two
+ * lines keeps its opening mark on the first and its closing mark on the last.
+ */
+function unQuoteUnbalanced(value: string): string {
+  const trimmed = value.trim();
+  const count = (mark: string) => trimmed.split(mark).length - 1;
+  for (const [open, close] of [['"', '"'], ["“", "”"]] as const) {
+    if (open === close) {
+      if (count(open) === 1) return trimmed.replace(open, "").trim();
+    } else if (count(open) + count(close) === 1) {
+      return trimmed.replace(open, "").replace(close, "").trim();
+    }
+  }
+  return trimmed;
 }
 
 /* -------------------------------------------------------------------------- */
 /* The three list kinds                                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The pick: `PICK:`, `Recommended:`, `Recommendation:`, `My pick:`, `Top
+ * pick:` — the words the prompt uses and the ones a model drifts to. Not
+ * "Best:", "Winner —" or "Choice:", which are how ordinary titles begin, and
+ * never a *listed* line: a numbered "1. Best: The $5 Tent vs the $500 Tent"
+ * is a proposal (M11 review, findings 7 and 21).
+ */
 const PICK_LINE =
-  /^(?:(?:my|top|the)\s+)?(?:pick|recommended|recommendation|strongest|best|winner|choice)(?:\s+pick)?\s*[:=—–-]\s*(.*)$/i;
+  /^(?:(?:my|top|the)\s+)?(?:pick|recommended|recommendation|strongest(?:\s+pick)?)\s*[:=—–-]\s*(.*)$/i;
 
 interface Proposal {
   readonly text: string;
@@ -204,7 +265,7 @@ interface Pick {
 }
 
 function readPick(line: Line): Pick | null {
-  if (line.tableRow) return null;
+  if (line.tableRow || line.listed) return null;
   const match = PICK_LINE.exec(line.body);
   if (!match) return null;
   const rest = match[1].trim();
@@ -219,47 +280,129 @@ function readPick(line: Line): Pick | null {
   };
 }
 
-/** Pass 2: every line that carries the separator the prompt asked for. */
+const SEPARATOR_IN = /\|\||‖/;
+
+/**
+ * Pass 2: every line that carries the separator the prompt asked for.
+ *
+ * - A numbered line with no separator yet takes the plain lines under it, up
+ *   to the one that carries it: a hook quoted across two lines, or a reason
+ *   that wrapped onto the next line, is one proposal (review, finding 10).
+ * - When any *numbered* line carries the separator, only numbered lines are
+ *   read, so a bulleted aside or a preamble that mentions the format is not a
+ *   proposal; prose that quotes the separator in inline code, or ends in a
+ *   colon, never is (finding 11).
+ * - The prompt's own `<placeholder>` lines are not proposals (finding 4).
+ */
 function withSeparator(lines: readonly Line[]): Proposal[] {
-  const out: Proposal[] = [];
-  for (const line of lines) {
-    if (line.heading || line.tableRow || line.blank) continue;
+  const candidates: { body: string; number: number | null }[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.heading || line.tableRow || line.blank || line.quotesSeparator) continue;
     if (readPick(line)) continue;
-    const split = splitOn(line.body, PRIMARY);
+    let body = line.body;
+    if (line.number !== null && !SEPARATOR_IN.test(body)) {
+      const joined = [body];
+      let next = index + 1;
+      for (; next < lines.length; next += 1) {
+        const following = lines[next];
+        if (following.blank || following.listed || following.heading || following.tableRow) break;
+        if (readPick(following)) break;
+        joined.push(following.body);
+        if (SEPARATOR_IN.test(following.body)) break;
+      }
+      if (next < lines.length && SEPARATOR_IN.test(joined[joined.length - 1]) && joined.length > 1) {
+        body = joined.join(" ");
+        index = next;
+      }
+    }
+    if (!SEPARATOR_IN.test(body) || /:\s*$/.test(body)) continue;
+    candidates.push({ body, number: line.number });
+  }
+
+  const numbered = candidates.some((candidate) => candidate.number !== null);
+  const out: Proposal[] = [];
+  for (const candidate of candidates) {
+    if (numbered && candidate.number === null) continue;
+    const split = splitOn(candidate.body, PRIMARY);
     if (!split) continue;
-    const text = unQuote(split[0]);
-    if (text === "") continue;
-    out.push({ text, rationale: unLabelReason(split[1]), number: line.number });
+    const text = unQuote(unQuoteUnbalanced(split[0]));
+    if (text === "" || isPlaceholder(text)) continue;
+    const rationale = unLabelReason(split[1]);
+    out.push({
+      text,
+      rationale: isPlaceholder(rationale) ? "" : rationale,
+      number: candidate.number,
+    });
   }
   return out;
+}
+
+/**
+ * Is this listed line the reason for the numbered item above it, rather than
+ * a proposal of its own? A bullet indented under a numbered item, or one that
+ * starts with a reason label ("- Why: …") — the common markdown shape of a
+ * list with its reasons nested underneath (M11 review, finding 20).
+ */
+function reasonBulletsOf(lines: readonly Line[]): boolean[] {
+  const flags = lines.map(() => false);
+  let parent: Line | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.heading) {
+      parent = null;
+      continue;
+    }
+    if (!line.listed) continue;
+    if (line.number !== null) {
+      parent = line;
+      continue;
+    }
+    if (parent !== null && (line.indent > parent.indent || isReasonLine(line))) {
+      flags[index] = true;
+    }
+  }
+  return flags;
 }
 
 /** Pass 3: a numbered or bulleted list, with whatever separator it used. */
 function fromList(lines: readonly Line[]): Proposal[] {
   const out: Proposal[] = [];
+  const reasonBullet = reasonBulletsOf(lines);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line.listed || line.heading || line.blank || readPick(line)) continue;
+    if (!line.listed || line.heading || line.blank || reasonBullet[index]) continue;
+    // A line carrying the separator was pass 2's to read; if pass 2 found
+    // nothing in it (the prompt's own example, a placeholder), neither does this.
+    if (SEPARATOR_IN.test(line.body)) continue;
+
+    // The reason on the line(s) underneath — plain lines, or bullets nested
+    // under this item — up to the next item or a blank.
+    const reason: string[] = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const following = lines[next];
+      if (following.blank || following.heading) break;
+      if (following.listed && !reasonBullet[next]) break;
+      if (readPick(following)) break;
+      reason.push(unLabelReason(following.body));
+    }
 
     const split = FALLBACKS.map((sep) => splitOn(line.body, sep)).find(Boolean) ?? null;
     if (split) {
       const text = unQuote(split[0]);
-      if (text !== "") {
-        out.push({ text, rationale: unLabelReason(split[1]), number: line.number });
+      if (text !== "" && !isPlaceholder(text)) {
+        const own = unLabelReason(split[1]);
+        out.push({
+          text,
+          rationale: [own, ...reason].filter((part) => part !== "").join(" "),
+          number: line.number,
+        });
       }
       continue;
     }
 
-    // The reason on the line(s) underneath, up to the next item or a blank.
-    const reason: string[] = [];
-    for (let next = index + 1; next < lines.length; next += 1) {
-      const following = lines[next];
-      if (following.blank || following.listed || following.heading) break;
-      if (readPick(following)) break;
-      reason.push(following.body);
-    }
     const text = unQuote(line.body.replace(/:$/, ""));
-    if (text !== "") {
+    if (text !== "" && !isPlaceholder(text)) {
       out.push({ text, rationale: unLabelReason(reason.join(" ")), number: line.number });
     }
   }
@@ -339,7 +482,13 @@ export function parseSuggestionsReply(
     });
   }
 
-  const pick = lines.map(readPick).find((found): found is Pick => found !== null) ?? null;
+  // The last pick-shaped line: a reply that mentions its pick early ("my pick
+  // is below") and then gives it is read by the one it ends on.
+  const pick =
+    lines
+      .map(readPick)
+      .filter((found): found is Pick => found !== null && !isPlaceholder(found.text))
+      .at(-1) ?? null;
   const index = pick === null ? -1 : pickIndex(pick, proposals);
 
   return {
@@ -421,8 +570,9 @@ function readVerdictParts(role: ThumbnailVerdict["role"], parts: string[]): Verd
   // Written inline without separators: "Reads: yes. Adds: no. Brighten it."
   if (verdict.reads === null || verdict.adds === null) {
     const joined = verdict.note.join(" ");
-    const inlineReads = /\breads?(?:\s+at\s+tile\s+size)?\s*[:=]?\s*(yes|no)\b[.,;]?/i.exec(joined);
-    const inlineAdds = /\b(?:adds?|complements?)(?:\s+to\s+(?:the\s+)?title)?\s*[:=]?\s*(yes|no)\b[.,;]?/i.exec(joined);
+    // "yes or no" is the prompt's own wording, never an answer (finding 4).
+    const inlineReads = /\breads?(?:\s+at\s+tile\s+size)?\s*[:=]?\s*(yes|no)\b(?!\s+or\b)[.,;]?/i.exec(joined);
+    const inlineAdds = /\b(?:adds?|complements?)(?:\s+to\s+(?:the\s+)?title)?\s*[:=]?\s*(yes|no)\b(?!\s+or\b)[.,;]?/i.exec(joined);
     let rest = joined;
     if (verdict.reads === null && inlineReads) {
       verdict.reads = yesNo(inlineReads[1]);
@@ -525,7 +675,28 @@ export function parseCritiqueReply(text: string): CritiquePayload {
 /* Guards, and the provider                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Lines only the prompt carries. Open in Claude has just put the prompt on the
+ * clipboard, so the likeliest wrong paste is the prompt itself — and its own
+ * example lines are shaped exactly like an answer (M11 review, finding 4).
+ */
+const PROMPT_MARKERS: readonly RegExp[] = [
+  /I will copy your answer into an app/i,
+  /<<<VOICE GUIDE/,
+  /How to answer — please follow this exactly/i,
+  /\|\|\s*reads:\s*yes or no\s*\|\|/i,
+];
+
+export const PROMPT_PASTED =
+  "That is the prompt, not Claude’s reply. Copy Claude’s answer from claude.ai and paste that instead — nothing was changed.";
+
 function guard(kind: AssistKind, text: string): void {
+  if (PROMPT_MARKERS.some((marker) => marker.test(text))) {
+    throw new AssistError("wrong_shape", {
+      message: PROMPT_PASTED,
+      detail: `A pasted ${kind} reply was the prompt itself.`,
+    });
+  }
   if (text.length > MAX_REPLY_LENGTH) {
     throw new AssistError("rejected", {
       message: TOO_LONG,

@@ -13,7 +13,12 @@ import {
   PRICES_PER_MILLION,
   priceFor,
   readBudget,
-  recordCall,
+  reserveSpend,
+  settleSpend,
+  closeReservation,
+  worstCaseMicros,
+  IMAGE_TOKEN_CEILING,
+  INPUT_OVERHEAD_TOKENS,
   wasBilled,
   type SpendBudget,
   type SpendClient,
@@ -251,6 +256,7 @@ const budget = (over: Partial<SpendBudget> = {}): SpendBudget => ({
   spendMicros: 0,
   calls: 0,
   assumedCalls: 0,
+  estimatedCalls: 0,
   cap: { dollars: DEFAULT_CAP_DOLLARS, source: "default" },
   month: { label: "September 2026", resets: "1 Oct" },
   ...over,
@@ -307,11 +313,20 @@ describe("the cap", () => {
 describe("formatting money", () => {
   it("is dollars and cents", () => {
     expect(formatMicros(0)).toBe("$0.00");
-    expect(formatMicros(55_000)).toBe("$0.06");
+    expect(formatMicros(55_000)).toBe("$0.05");
     expect(formatMicros(10_020_000)).toBe("$10.02");
     expect(formatMicros(1_204_000_000)).toBe("$1,204.00");
     expect(formatMicros(4_000)).toBe("under $0.01");
     expect(formatCap(1500)).toBe("$1,500");
+  });
+
+  it("never shows the cap as met while the check says it is not (review, finding 3)", () => {
+    // $9.996 used to read "$10.00" beside a $10 cap that still let calls go.
+    const nearly = budget({ spendMicros: 9_996_000 });
+    expect(isOverCap(nearly)).toBe(false);
+    expect(formatMicros(nearly.spendMicros)).toBe("$9.99");
+    expect(formatMicros(10_000_000)).toBe("$10.00");
+    expect(formatMicros(9_999)).toBe("under $0.01");
   });
 });
 
@@ -334,7 +349,7 @@ describe("readBudget", () => {
 
   it("asks for the month in the user's zone and applies the $10 default", async () => {
     const { calls, stub } = client([
-      { spend_micros: "2500000", calls: 4, assumed_calls: 1, cap_set: false, cap_dollars: null },
+      { spend_micros: "2500000", calls: 4, assumed_calls: 1, estimated_calls: 2, cap_set: false, cap_dollars: null },
     ]);
     const read = await readBudget(stub, NOW, "Pacific/Kiritimati");
     // 10:30 UTC on the 30th is already 1 October in Kiritimati.
@@ -346,6 +361,7 @@ describe("readBudget", () => {
       spendMicros: 2_500_000,
       calls: 4,
       assumedCalls: 1,
+      estimatedCalls: 2,
       cap: { dollars: 10, source: "default" },
       month: { label: "October 2026", resets: "1 Nov" },
     });
@@ -373,23 +389,79 @@ describe("readBudget", () => {
   });
 });
 
-describe("recordCall", () => {
-  it("sends every column through record_assist_usage and never throws", async () => {
+describe("the worst case", () => {
+  it("is every text byte as a token, the image ceiling per image, and all of max_tokens, at the dearest rates", () => {
+    // Fable 5.1, $10 in / $50 out: (1,000 + 2 × 5,000 + overhead) × 10 + 16,000 × 50.
+    expect(worstCaseMicros({ textBytes: 1_000, images: 2, maxTokens: 16_000 })).toBe(
+      (1_000 + 2 * IMAGE_TOKEN_CEILING + INPUT_OVERHEAD_TOKENS) * 10 + 16_000 * 50,
+    );
+    // Above what the stub's real call costs ($0.09) by an order of magnitude.
+    expect(worstCaseMicros({ textBytes: 8_000, images: 0, maxTokens: 16_000 })).toBeGreaterThan(800_000);
+  });
+});
+
+describe("reserving, settling and closing", () => {
+  const NOW = Date.parse("2026-09-30T10:30:00Z");
+
+  it("reserves the estimate for the month in the user's zone, with the default cap", async () => {
+    const { calls, stub } = client([
+      { reservation: "r1", spend_micros: 100, calls: 1, assumed_calls: 0, estimated_calls: 0, cap_set: false, cap_dollars: null },
+    ]);
+    const reserved = await reserveSpend(stub, NOW, "UTC", {
+      videoId: "v1",
+      kind: "titles",
+      requestedModel: "claude-opus-5",
+      estimateMicros: 890_000.2,
+    });
+    expect(calls[0]).toEqual({
+      fn: "reserve_assist_spend",
+      args: {
+        p_from: "2026-09-01T00:00:00.000Z",
+        p_to: "2026-10-01T00:00:00.000Z",
+        p_video: "v1",
+        p_kind: "titles",
+        p_requested_model: "claude-opus-5",
+        p_estimate_micros: 890_001,
+        p_default_cap_dollars: 10,
+      },
+    });
+    expect(reserved).toMatchObject({ ok: true, id: "r1", budget: { spendMicros: 100, calls: 1 } });
+  });
+
+  it("hands back the budget that refused, for the sentence", async () => {
+    const { stub } = client([
+      { reservation: null, spend_micros: 10_000_000, calls: 7, assumed_calls: 0, estimated_calls: 1, cap_set: true, cap_dollars: 10 },
+    ]);
+    const reserved = await reserveSpend(stub, NOW, "UTC", {
+      videoId: null,
+      kind: "hooks",
+      requestedModel: "m",
+      estimateMicros: 1,
+    });
+    expect(reserved.ok).toBe(false);
+    expect(capRefusalMessage(reserved.budget)).toContain("your cap of $10");
+    await expect(
+      reserveSpend(client(null, { message: "boom" }).stub, NOW, "UTC", {
+        videoId: null,
+        kind: "hooks",
+        requestedModel: "m",
+        estimateMicros: 1,
+      }),
+    ).rejects.toThrow("boom");
+  });
+
+  it("settles every measured column, and never throws", async () => {
     const { calls, stub } = client(null);
     const call = measureCall(
       response("claude-opus-4-8", { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 5 }),
       "claude-opus-5",
     );
-    await expect(
-      recordCall(stub, { videoId: "v1", kind: "titles", outcome: "answered", call }),
-    ).resolves.toEqual({ ok: true });
+    await expect(settleSpend(stub, "r1", "answered", call)).resolves.toEqual({ ok: true });
     expect(calls[0]).toEqual({
-      fn: "record_assist_usage",
+      fn: "settle_assist_spend",
       args: {
-        p_video: "v1",
-        p_kind: "titles",
+        p_id: "r1",
         p_outcome: "answered",
-        p_requested_model: "claude-opus-5",
         p_model: "claude-opus-4-8",
         p_price_assumed: false,
         p_input: 10,
@@ -402,8 +474,24 @@ describe("recordCall", () => {
     });
 
     const failing = client(null, { message: "denied" });
-    await expect(
-      recordCall(failing.stub, { videoId: null, kind: "hooks", outcome: "failed", call }),
-    ).resolves.toEqual({ ok: false, error: "denied" });
+    await expect(settleSpend(failing.stub, "r1", "failed", call)).resolves.toEqual({
+      ok: false,
+      error: "denied",
+    });
+  });
+
+  it("closes a reservation whose response billed nothing, instead of settling it", async () => {
+    const { calls, stub } = client(null);
+    const nothing = measureCall(response("claude-opus-5", { input_tokens: 0, output_tokens: 0 }), "claude-opus-5");
+    await settleSpend(stub, "r2", "refused", nothing);
+    expect(calls[0]).toEqual({
+      fn: "close_assist_reservation",
+      args: { p_id: "r2", p_may_have_billed: false },
+    });
+    await closeReservation(stub, "r3", true);
+    expect(calls[1]).toEqual({
+      fn: "close_assist_reservation",
+      args: { p_id: "r3", p_may_have_billed: true },
+    });
   });
 });

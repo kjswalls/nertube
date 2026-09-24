@@ -378,9 +378,10 @@ export type Database = {
         Relationships: [];
       };
       /**
-       * 0011. One row per real API call that billed something. Readable by
-       * its owner; written only by `record_assist_usage()`, never updated or
-       * deleted by a client.
+       * 0011. One row per real API call: reserved at its worst case before the
+       * call (`reserve_assist_spend()`), settled to its measured cost after
+       * (`settle_assist_spend()`) or closed (`close_assist_reservation()`).
+       * Readable by its owner; never written directly by a client.
        */
       assist_usage: {
         Row: {
@@ -389,10 +390,11 @@ export type Database = {
           created_at: string;
           video_id: string | null;
           kind: string;
-          outcome: "answered" | "failed" | "refused";
+          outcome: "pending" | "answered" | "failed" | "refused";
           requested_model: string;
           model: string;
           price_assumed: boolean;
+          estimated: boolean;
           input_tokens: number;
           output_tokens: number;
           cache_read_input_tokens: number;
@@ -672,13 +674,37 @@ export type Database = {
         Args: { p_zone: string; p_detected?: boolean };
         Returns: Database["public"]["Tables"]["profiles"]["Row"];
       };
-      /** 0011. Records one billed API call as the caller, stamped now(). */
-      record_assist_usage: {
+      /**
+       * 0011. Under a per-user lock: the caller's spend in [p_from, p_to)
+       * (open reservations at their worst case) and the cap; at or over the
+       * cap `reservation` is null, otherwise a pending row carrying
+       * `p_estimate_micros` was written and this is its id.
+       */
+      reserve_assist_spend: {
         Args: {
+          p_from: string;
+          p_to: string;
           p_video: string | null;
           p_kind: string;
-          p_outcome: string;
           p_requested_model: string;
+          p_estimate_micros: number;
+          p_default_cap_dollars: number;
+        };
+        Returns: {
+          reservation: string | null;
+          spend_micros: number;
+          calls: number;
+          assumed_calls: number;
+          estimated_calls: number;
+          cap_set: boolean;
+          cap_dollars: number | null;
+        }[];
+      };
+      /** 0011. An open reservation → the call's measured cost. P0002 if not open. */
+      settle_assist_spend: {
+        Args: {
+          p_id: string;
+          p_outcome: string;
           p_model: string;
           p_price_assumed: boolean;
           p_input: number;
@@ -687,7 +713,16 @@ export type Database = {
           p_cache_write: number;
           p_cost_micros: number;
         };
-        Returns: string;
+        Returns: undefined;
+      };
+      /**
+       * 0011. An open reservation whose call got no response: kept at its
+       * worst case (`failed`, estimated) when it may have been billed,
+       * removed when it cannot have been.
+       */
+      close_assist_reservation: {
+        Args: { p_id: string; p_may_have_billed: boolean };
+        Returns: undefined;
       };
       /** 0011. Sets the monthly cap in whole dollars; null means no cap. */
       set_assist_cap: {
@@ -701,6 +736,7 @@ export type Database = {
           spend_micros: number;
           calls: number;
           assumed_calls: number;
+          estimated_calls: number;
           cap_set: boolean;
           cap_dollars: number | null;
         }[];

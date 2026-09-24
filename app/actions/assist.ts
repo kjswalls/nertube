@@ -33,10 +33,9 @@ import { chooseProvider, type ChosenProvider } from "@/lib/assist/mode";
 import { assistFallbackWarning, selectAssistProvider } from "@/lib/assist/select";
 import {
   capRefusalMessage,
-  isOverCap,
-  readBudget,
-  recordCall,
-  wasBilled,
+  closeReservation,
+  reserveSpend,
+  settleSpend,
 } from "@/lib/assist/spend";
 import { STUB_API_KEY } from "@/lib/assist/test-stub";
 import { readClock } from "@/lib/request-clock";
@@ -166,44 +165,86 @@ async function provider(
   }
 
   /*
-    The monthly cap (M11), checked before every real call and never before a
-    fixture: the fixtures cost nothing. At or over the cap, nothing leaves
-    this server — the refusal is thrown here, inside the caller's `try`, and
-    becomes the panel's sentence. A budget that cannot be read refuses too: a
-    ceiling that is skipped whenever it is unreadable is not a ceiling.
+    The monthly cap (M11), **reserved** before every real call and never
+    before a fixture: the fixtures cost nothing.
 
-    Checked, not reserved (`isOverCap` in lib/assist/spend.ts says why two
-    calls can pass it together by one call's worth).
+    Once the request is built, and before it is sent, `beforeSend` asks the
+    database to reserve the call's worst case (`reserveSpend`,
+    `reserve_assist_spend` in 0011). That runs under a per-user lock, so asks
+    started together — other videos, other kinds, other tabs — are counted
+    one after another: at or over the cap nothing is sent, and at most one
+    call can cross the line. When the answer comes back the reservation
+    becomes the measured cost (`onUsage`); when none does (`onNoUsage`), it
+    stays at its worst case if the API may have billed it anyway, and is
+    removed if the API refused with a status. A budget that cannot be read
+    refuses too: a ceiling that is skipped whenever it is unreadable is not a
+    ceiling. (M11's adversarial review, findings 1 and 2: the first version
+    only *checked* the spend, and twenty-one parallel asks all passed a $1
+    cap at $0.99; a call that timed out was never counted at all.)
   */
-  let budget;
-  try {
-    budget = await readBudget(supabase, await readClock(), (await readTimeZone()).zone);
-  } catch (error) {
-    throw new AssistError("spend_cap", {
-      message:
-        "This month's API spending could not be read, so this was not sent — a cap that cannot be checked would not be a cap. Try again in a moment, or use Open in Claude.",
-      detail: error instanceof Error ? error.message : String(error),
-    });
-  }
-  if (isOverCap(budget)) {
-    throw new AssistError("spend_cap", {
-      message: capRefusalMessage(budget),
-      detail: `spend ${budget.spendMicros} µ$ against a cap of $${budget.cap.dollars} (${budget.cap.source}).`,
-    });
-  }
+  const now = await readClock();
+  const zone = (await readTimeZone()).zone;
+  let reservation: string | null = null;
 
   const { createAnthropicProvider } = await import("@/lib/assist/anthropic");
   return createAnthropicProvider({
     ...(chosen.stub ? { baseURL: chosen.stub.baseURL, apiKey: STUB_API_KEY } : {}),
-    // Every response that came back is priced and written to assist_usage —
-    // answered, refused or unreadable — before the answer is returned.
+    beforeSend: async (worst) => {
+      let reserved;
+      try {
+        reserved = await reserveSpend(supabase, now, zone, {
+          videoId,
+          kind,
+          requestedModel: worst.requestedModel,
+          estimateMicros: worst.costMicros,
+        });
+      } catch (error) {
+        throw new AssistError("spend_cap", {
+          message:
+            "This month's API spending could not be read, so this was not sent — a cap that cannot be checked would not be a cap. Try again in a moment, or use Open in Claude.",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (!reserved.ok) {
+        throw new AssistError("spend_cap", {
+          message: capRefusalMessage(reserved.budget),
+          detail: `spend ${reserved.budget.spendMicros} µ$ against a cap of $${reserved.budget.cap.dollars} (${reserved.budget.cap.source}).`,
+        });
+      }
+      reservation = reserved.id;
+    },
     onUsage: async (call, outcome) => {
-      if (!wasBilled(call)) return;
-      const written = await recordCall(supabase, { videoId, kind, outcome, call });
+      if (reservation === null) return;
+      const written = await settleSpend(supabase, reservation, outcome, call);
       if (!written.ok) {
-        console.error(`[assist] a ${kind} call costing ${call.costMicros} µ$ was not recorded: ${written.error}`);
+        console.error(
+          `[assist] a ${kind} call costing ${call.costMicros} µ$ could not be settled, so it stays at its worst case: ${written.error}`,
+        );
       }
     },
+    onNoUsage: async (mayHaveBilled) => {
+      if (reservation === null) return;
+      const closed = await closeReservation(supabase, reservation, mayHaveBilled);
+      if (!closed.ok) {
+        console.error(`[assist] a ${kind} reservation could not be closed: ${closed.error}`);
+      }
+    },
+  });
+}
+
+/**
+ * `ASSIST_PROVIDER=manual` means the panels never call the API (README, "Which
+ * assist implementation answers"). The panels honour that by never offering an
+ * ask; this is the same promise kept on the server, so a hand-made request, or
+ * a panel bug, cannot spend the key either (M11 review, finding 5). Null when
+ * the API may be called.
+ */
+function manualOnly(): AssistError | null {
+  if ((process.env.ASSIST_PROVIDER ?? "").trim().toLowerCase() !== "manual") return null;
+  return new AssistError("not_configured", {
+    message:
+      "This app is set to use Open in Claude only, so the API was not called and nothing was spent. Use Open in Claude.",
+    detail: "ASSIST_PROVIDER=manual: the API actions refuse every request.",
   });
 }
 
@@ -245,6 +286,9 @@ export async function assist(input: {
   const { videoId, kind } = parsed.data;
 
   const { supabase, user } = await requireUser();
+
+  const manual = manualOnly();
+  if (manual) return failure(kind, manual);
 
   /*
     One ask of one question about one video at a time.
@@ -541,8 +585,45 @@ export async function critiqueThumbnails(input: {
   }
   const { videoId } = parsed.data;
 
-  const { supabase } = await requireUser();
-  const chosen = await chooseProvider();
+  const { supabase, user } = await requireUser();
+
+  const manual = manualOnly();
+  if (manual) return { ok: false, provider: providerName(), ...failureOf(manual) };
+
+  /*
+    One critique of one video at a time, as `assist()` has one ask of one
+    question: the same critique twice at once is two billed multi-image calls
+    for one answer. (The spend cap no longer depends on this — the
+    reservation holds the line whatever is in flight — but the waste is the
+    same as it ever was.)
+  */
+  const lane = `${user.id}:${videoId}:thumbnail_critique`;
+  if (IN_FLIGHT.has(lane)) {
+    return {
+      ok: false,
+      provider: providerName(),
+      ...failureOf(
+        new AssistError("rate_limited", {
+          message: "That critique is already running. Wait for the answer rather than asking twice.",
+          detail: `A critique for video ${videoId} is already in flight for this user.`,
+        }),
+      ),
+    };
+  }
+  IN_FLIGHT.add(lane);
+  try {
+    return await critiqueFor(supabase, videoId, await chooseProvider());
+  } finally {
+    IN_FLIGHT.delete(lane);
+  }
+}
+
+/** The critique itself, once the caller and the video are known to be sound. */
+async function critiqueFor(
+  supabase: Supabase,
+  videoId: string,
+  chosen: ChosenProvider,
+): Promise<CritiqueState> {
 
   /*
     The video, the channel and which slots hold an image, read by

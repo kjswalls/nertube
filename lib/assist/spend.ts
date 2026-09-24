@@ -8,6 +8,7 @@ import {
   formatMonth,
   monthInstants,
   shiftMonth,
+  type CalendarMonth,
   type TimeZone,
 } from "@/lib/calendar-dates";
 import type { Database } from "@/lib/database.types";
@@ -26,9 +27,13 @@ import type { AssistKind, CapReached } from "./types";
  * 2. **Read the month.** {@link readBudget} asks the database for this
  *    calendar month's spend (in the user's zone, via `lib/calendar-dates.ts`)
  *    and the cap, in one round trip (`assist_budget`, migration 0011).
- * 3. **Decide and say.** {@link isOverCap} and {@link capRefusalMessage}: the
- *    check the server action runs before every real call, and the sentence a
- *    refused call shows.
+ * 3. **Hold the line.** {@link reserveSpend} runs before every real call: under
+ *    a per-user lock in the database it refuses at or over the cap, and
+ *    otherwise writes the call's worst case ({@link worstCaseMicros}) as a
+ *    pending row, which {@link settleSpend} or {@link closeReservation}
+ *    replace once the call ends. {@link capRefusalMessage} is the sentence a
+ *    refused call shows; {@link isOverCap} is the page's lighter check of what
+ *    to lead with.
  *
  * `server-only` because it names models and prices, and PLAN.md's bundle check
  * (M8) greps `.next/static` for `claude-opus`: nothing a browser loads may
@@ -261,6 +266,12 @@ export interface SpendBudget {
   /** Of those, how many were priced by assumption (an unknown model). */
   readonly assumedCalls: number;
   /**
+   * Of those, how many are counted at their worst case because no measured
+   * cost exists: a call still in flight, or one that got no response back
+   * (our timeout, a dropped connection) and may have been billed anyway.
+   */
+  readonly estimatedCalls: number;
+  /**
    * The cap in force: `dollars` null means no cap. `source` says whether the
    * person chose it or it is {@link DEFAULT_CAP_DOLLARS} because they never
    * set one.
@@ -275,6 +286,7 @@ interface BudgetRow {
   spend_micros: number | string | null;
   calls: number | null;
   assumed_calls: number | null;
+  estimated_calls?: number | null;
   cap_set: boolean | null;
   cap_dollars: number | null;
 }
@@ -302,30 +314,34 @@ export async function readBudget(
     p_to: new Date(window.to).toISOString(),
   });
   if (error) throw new Error(error.message);
-  const row = (Array.isArray(data) ? data[0] : data) as BudgetRow | undefined;
+  return budgetOf((Array.isArray(data) ? data[0] : data) as BudgetRow | undefined, window.month);
+}
 
+/** A row from `assist_budget` or `reserve_assist_spend`, as a {@link SpendBudget}. */
+function budgetOf(row: BudgetRow | undefined, month: CalendarMonth): SpendBudget {
   return {
     spendMicros: Number(row?.spend_micros ?? 0),
     calls: row?.calls ?? 0,
     assumedCalls: row?.assumed_calls ?? 0,
+    estimatedCalls: row?.estimated_calls ?? 0,
     cap: row?.cap_set
       ? { dollars: row.cap_dollars ?? null, source: "chosen" }
       : { dollars: DEFAULT_CAP_DOLLARS, source: "default" },
     month: {
-      label: formatMonth(window.month),
-      resets: formatDateColumn(firstOfMonth(shiftMonth(window.month, 1)), "short") ?? "",
+      label: formatMonth(month),
+      resets: formatDateColumn(firstOfMonth(shiftMonth(month, 1)), "short") ?? "",
     },
   };
 }
 
 /**
- * At or over the cap? Checked before every real call. A cap of `$0` refuses
- * everything; no cap refuses nothing.
+ * At or over the cap? A cap of `$0` refuses everything; no cap refuses
+ * nothing. The same comparison `reserve_assist_spend` makes in the database.
  *
- * Checked, not reserved: two calls that start together both see the spend
- * before either lands, so the month can pass the cap by one call's worth.
- * A call already in flight when the cap is crossed finishes and is recorded.
- * Both are in the README.
+ * This is the page's check (`readAssistView`: what the panels lead with) and
+ * Settings'. It holds no line by itself: the line is {@link reserveSpend},
+ * which compares under a per-user lock and writes the call's worst case
+ * before anything is sent, so calls started together cannot all pass it.
  */
 export function isOverCap(budget: SpendBudget): boolean {
   return budget.cap.dollars !== null && budget.spendMicros >= budget.cap.dollars * 1_000_000;
@@ -338,10 +354,16 @@ export function meanCallMicros(budget: SpendBudget): number | null {
 
 /**
  * Micro-dollars as a person reads money: `$3.42`, `$1,204.00`. A non-zero
- * amount under half a cent says so rather than claiming `$0.00`.
+ * amount under a cent says so rather than claiming `$0.00`.
+ *
+ * Rounded **down** to the cent. Beside a cap, a figure rounded to the nearest
+ * cent could read `$10.00` at $9.996 — the cap shown as met while the check,
+ * which compares exact micro-dollars, still lets the next call go (M11 review,
+ * finding 3). Rounded down, the figure never claims a line the check has not
+ * reached.
  */
 export function formatMicros(micros: number): string {
-  const cents = Math.round(micros / 10_000);
+  const cents = Math.floor(micros / 10_000);
   if (micros > 0 && cents === 0) return "under $0.01";
   return `$${(cents / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -395,35 +417,151 @@ export function capReachedOf(budget: SpendBudget): CapReached {
 /** How a real call ended, as `assist_usage.outcome` spells it. */
 export type CallOutcome = "answered" | "failed" | "refused";
 
+/* -------------------------------------------------------------------------- */
+/* The worst case, reserved before a call                                      */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Write one call to `assist_usage` through `record_assist_usage` (0011), the
- * table's only write path. The database stamps the owner and the time.
- *
- * Never throws: a call that has already been made and billed must still hand
- * its answer back, so a failed write is returned as a message for the log.
+ * The input tokens one image can cost, at most. Anthropic's vision guide puts
+ * an image at about width × height / 750 tokens, with the long edge capped
+ * (about 1,600 tokens at the classic 1,568 px, under 4,800 on the models that
+ * take larger images). 5,000 is above both.
  */
-export async function recordCall(
+export const IMAGE_TOKEN_CEILING = 5_000;
+
+/**
+ * Tokens the API adds around what this app sends — the structured-output
+ * instructions, the turn framing. Not documented as a number; 2,000 is a
+ * generous allowance on top of an already generous bound (below).
+ */
+export const INPUT_OVERHEAD_TOKENS = 2_000;
+
+/**
+ * The most one call can cost, in integer micro-dollars: what is reserved
+ * before it is sent, and what it is counted at if no usage ever comes back.
+ *
+ * - **Input**: one token per UTF-8 byte of everything the request says in
+ *   text — a byte-level tokenizer never produces more tokens than bytes — plus
+ *   {@link IMAGE_TOKEN_CEILING} per image and {@link INPUT_OVERHEAD_TOKENS}.
+ * - **Output**: the request's `max_tokens`, all of it (adaptive thinking
+ *   included — it is billed as output).
+ * - **Rate**: {@link MOST_EXPENSIVE} for both, whatever model was asked for,
+ *   because a server-side fallback may answer with another.
+ *
+ * Rounded up. Not covered: a fallback chain in which *two* attempts both
+ * produced output before the second answered is billed twice; the reserve
+ * covers one. Written down in the README.
+ */
+export function worstCaseMicros(request: {
+  readonly textBytes: number;
+  readonly images: number;
+  readonly maxTokens: number;
+}): number {
+  const input =
+    Math.max(0, Math.ceil(request.textBytes)) +
+    Math.max(0, request.images) * IMAGE_TOKEN_CEILING +
+    INPUT_OVERHEAD_TOKENS;
+  return input * MOST_EXPENSIVE.input + Math.max(0, request.maxTokens) * MOST_EXPENSIVE.output;
+}
+
+/** A reservation, or the budget that refused one. */
+export type Reserved =
+  | { readonly ok: true; readonly id: string; readonly budget: SpendBudget }
+  | { readonly ok: false; readonly budget: SpendBudget };
+
+/**
+ * Before a real call: reserve its worst case against this month's cap.
+ *
+ * `reserve_assist_spend` (0011) takes a per-user transaction lock, sums the
+ * month — settled calls at their cost, open reservations and unanswered calls
+ * at their worst case — and, under the cap, writes a pending row for this
+ * call. So asks started together, from any tab, video or kind, are counted
+ * one after another and at most one of them can cross the line. The month can
+ * therefore end over the cap by at most that one call's worst case.
+ *
+ * Throws the database's message on a failed read; the caller refuses the call
+ * (a ceiling that is skipped whenever it cannot be read is not a ceiling).
+ */
+export async function reserveSpend(
   supabase: SpendClient,
-  entry: {
+  now: number,
+  zone: TimeZone,
+  call: {
     readonly videoId: string | null;
     readonly kind: AssistKind;
-    readonly outcome: CallOutcome;
-    readonly call: MeasuredCall;
+    readonly requestedModel: string;
+    readonly estimateMicros: number;
   },
+): Promise<Reserved> {
+  const window = monthInstants(now, zone);
+  const { data, error } = await supabase.rpc("reserve_assist_spend", {
+    p_from: new Date(window.from).toISOString(),
+    p_to: new Date(window.to).toISOString(),
+    p_video: call.videoId,
+    p_kind: call.kind,
+    p_requested_model: call.requestedModel,
+    p_estimate_micros: Math.ceil(call.estimateMicros),
+    p_default_cap_dollars: DEFAULT_CAP_DOLLARS,
+  });
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | (BudgetRow & { reservation: string | null })
+    | undefined;
+  const budget = budgetOf(row, window.month);
+  return row?.reservation ? { ok: true, id: row.reservation, budget } : { ok: false, budget };
+}
+
+/**
+ * After a call whose response came back: the reservation becomes the
+ * measured cost, tokens and served model (`settle_assist_spend`, 0011). A
+ * response that billed nothing (declined before any output) closes the
+ * reservation instead, as nothing to count.
+ *
+ * Never throws: a call that has been made and billed must still hand its
+ * answer back. A failed write leaves the reservation at its worst case —
+ * over-counted, never under — and is returned as a message for the log.
+ */
+export async function settleSpend(
+  supabase: SpendClient,
+  id: string,
+  outcome: CallOutcome,
+  call: MeasuredCall,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!wasBilled(call)) return closeReservation(supabase, id, false);
+  try {
+    const { error } = await supabase.rpc("settle_assist_spend", {
+      p_id: id,
+      p_outcome: outcome,
+      p_model: call.model,
+      p_price_assumed: call.priceAssumed,
+      p_input: call.tokens.input,
+      p_output: call.tokens.output,
+      p_cache_read: call.tokens.cacheRead,
+      p_cache_write: call.tokens.cacheWrite,
+      p_cost_micros: call.costMicros,
+    });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * After a call that got no response: when it may still have been billed (our
+ * own timeout, a dropped connection, an abort), the reservation stays at its
+ * worst case, marked failed; when it cannot have been (the API answered with
+ * an error status), it is removed (`close_assist_reservation`, 0011).
+ * Never throws, for the same reason as {@link settleSpend}.
+ */
+export async function closeReservation(
+  supabase: SpendClient,
+  id: string,
+  mayHaveBilled: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { error } = await supabase.rpc("record_assist_usage", {
-      p_video: entry.videoId,
-      p_kind: entry.kind,
-      p_outcome: entry.outcome,
-      p_requested_model: entry.call.requestedModel,
-      p_model: entry.call.model,
-      p_price_assumed: entry.call.priceAssumed,
-      p_input: entry.call.tokens.input,
-      p_output: entry.call.tokens.output,
-      p_cache_read: entry.call.tokens.cacheRead,
-      p_cache_write: entry.call.tokens.cacheWrite,
-      p_cost_micros: entry.call.costMicros,
+    const { error } = await supabase.rpc("close_assist_reservation", {
+      p_id: id,
+      p_may_have_billed: mayHaveBilled,
     });
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (error) {

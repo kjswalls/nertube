@@ -420,3 +420,103 @@ test('the spending section is usable by thumb on a phone', async ({ page }) => {
   expect(scroll.width).toBeLessThanOrEqual(scroll.client);
   await page.getByTestId('settings-spending').screenshot({ path: 'e2e/screenshots/m11-spending-phone.png' });
 });
+
+test('asks started together are counted one after another: at $0.99 of $1, four at once send one', async ({
+  page,
+}) => {
+  // M11 review, finding 1: the cap used to be read before each call with
+  // nothing set aside, so every ask in flight saw the same $0.99 and all of
+  // them went. Now each reserves its worst case under a per-user lock first.
+  await db.query('delete from public.assist_usage where user_id = $1', [userId]);
+  await db.query(
+    `insert into public.assist_caps (user_id, cap_dollars) values ($1, 1)
+     on conflict (user_id) do update set cap_dollars = 1`,
+    [userId],
+  );
+  await db.query(
+    `insert into public.assist_usage (user_id, kind, outcome, requested_model, model, cost_micros)
+     values ($1, 'titles', 'answered', 'claude-opus-5', 'claude-opus-5', 990000)`,
+    [userId],
+  );
+  // One at a time: `capture` runs a transaction on the spec's one connection.
+  const videos: string[] = [];
+  for (const n of ['one', 'two', 'three', 'four']) videos.push(await capture(`Asked together, video ${n}`));
+
+  await signIn(page);
+  const pages = [page, ...(await Promise.all(videos.slice(1).map(() => page.context().newPage())))];
+  await Promise.all(pages.map((p, index) => p.goto(`/videos/${videos[index]}`)));
+  for (const p of pages) await expect(pill(p)).toBeVisible();
+
+  // Each answer takes three seconds, so all four are in flight at once.
+  stub.delayMs = 3_000;
+  const before = stub.requests.length;
+  try {
+    await Promise.all(
+      pages.map((p) =>
+        untilTaken(
+          async () => {
+            if ((await panel(p).count()) === 0) await pill(p).click();
+          },
+          () => expect(panel(p)).toBeVisible({ timeout: 2_000 }),
+        ),
+      ),
+    );
+    for (const p of pages) {
+      await expect(p.getByTestId('brainstorm-pending')).toHaveCount(0, { timeout: 30_000 });
+    }
+  } finally {
+    stub.delayMs = 0;
+  }
+
+  // One went and was answered; three were refused at the cap, sending nothing.
+  expect(stub.requests.length - before).toBe(1);
+  let answered = 0;
+  let refused = 0;
+  for (const p of pages) {
+    if ((await p.getByTestId('brainstorm-suggestion').count()) > 0) answered += 1;
+    const failure = p.getByTestId('brainstorm-failure');
+    if ((await failure.count()) > 0 && (await failure.getAttribute('data-code')) === 'spend_cap') refused += 1;
+  }
+  expect({ answered, refused }).toEqual({ answered: 1, refused: 3 });
+
+  // The month is $0.99 plus the one call that crossed the line — settled to
+  // its measured cost, with no reservation left open.
+  const month = await db.query<{ total: string; pending: string; rows: string }>(
+    `select sum(cost_micros)::text as total,
+            count(*) filter (where outcome = 'pending')::text as pending,
+            count(*)::text as rows
+       from public.assist_usage where user_id = $1`,
+    [userId],
+  );
+  expect(month.rows[0]).toEqual({
+    total: String(990_000 + STUB_COST_MICROS),
+    pending: '0',
+    rows: '2',
+  });
+
+  await page.goto('/settings/account');
+  await expect(page.getByTestId('spending-spent')).toHaveText('$1.08');
+  await expect(page.getByTestId('spending-at-cap')).toContainText('Cap reached');
+  for (const p of pages.slice(1)) await p.close();
+});
+
+test('a call the API refuses with an error status releases its reservation', async ({ page }) => {
+  await db.query('update public.assist_caps set cap_dollars = null where user_id = $1', [userId]);
+  const rowsBefore = (await usageRows()).length;
+  const videoId = await capture('A video the API falls over on');
+  await signIn(page);
+  stub.errorStatus = 500;
+  try {
+    await openPanel(page, videoId);
+  } finally {
+    stub.errorStatus = null;
+  }
+  await expect(page.getByTestId('brainstorm-failure')).toHaveAttribute('data-code', 'upstream');
+  // The worst case was reserved before the request left, and removed when the
+  // API answered with a status that bills nothing.
+  const rows = await db.query<{ n: string }>(
+    `select count(*)::text as n from public.assist_usage where user_id = $1`,
+    [userId],
+  );
+  expect(Number(rows.rows[0].n)).toBe(rowsBefore);
+});

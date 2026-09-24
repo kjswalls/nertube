@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import { buildManualPrompt } from "./manual";
 import {
   createPastedProvider,
   MAX_REPLY_LENGTH,
   parseCritiqueReply,
   parseSuggestionsReply,
+  PROMPT_PASTED,
 } from "./reply";
-import { critiqueRequest, hooksRequest, titlesRequest } from "./test-fixtures";
+import {
+  conceptsRequest,
+  critiqueRequest,
+  hooksRequest,
+  titlesRequest,
+} from "./test-fixtures";
 import { AssistError, MANUAL_PROVIDER, type SuggestionsResult } from "./types";
 
 /**
@@ -351,5 +358,154 @@ describe("createPastedProvider", () => {
     expect(result.verdicts.map((v) => v.role)).toEqual(["wild_card"]);
     expect(result.recommendedRole).toBeNull();
     expect(result.meta.droppedUnusable).toBe(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* M11's adversarial review                                                    */
+/* -------------------------------------------------------------------------- */
+
+describe("the prompt pasted back instead of the reply (review, finding 4)", () => {
+  const requests = {
+    titles: () => titlesRequest(),
+    concepts: () => conceptsRequest(),
+    hooks: () => hooksRequest(),
+    thumbnail_critique: () => critiqueRequest(),
+  } as const;
+
+  for (const [kind, make] of Object.entries(requests)) {
+    it(`is refused for ${kind}, saying it is the prompt, and nothing is read`, async () => {
+      const request = make();
+      const error = await createPastedProvider(buildManualPrompt(request))
+        .run(request)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AssistError);
+      expect((error as AssistError).code).toBe("wrong_shape");
+      expect((error as AssistError).message).toBe(PROMPT_PASTED);
+    });
+  }
+
+  it("never reads the prompt's example lines as proposals, even cut out of it", () => {
+    expect(() =>
+      parseSuggestionsReply(
+        "titles",
+        "```\n1. <the title> || <one sentence: why it works>\n2. <the title> || <one sentence: why it works>\nPICK: <the number of the strongest> || <one sentence: why it beats the others>\n```",
+      ),
+    ).toThrow(AssistError);
+  });
+
+  it("never reads 'yes or no' as a verdict", () => {
+    expect(() =>
+      parseCritiqueReply("WILD CARD — reads: yes or no, adds: yes or no. <one or two sentences to act on>"),
+    ).toThrow(AssistError);
+  });
+});
+
+describe("titles that start like a pick (review, findings 7 and 21)", () => {
+  it("keeps 'Best:', 'Winner —' and 'Choice:' titles, and reads the real PICK", () => {
+    const { payload } = parseSuggestionsReply(
+      "titles",
+      "1. Best: The $5 Tent vs the $500 Tent || Contrast.\n2. Winner — My Ten Year Old Laptop || Ironic.\n3. Six Edits on a 2015 MacBook || Concrete number.\n4. Choice: Film It or Skip It || A dilemma.\nPICK: 3 || Most concrete.",
+    );
+    expect(payload.suggestions.map((s) => s.text)).toEqual([
+      "Best: The $5 Tent vs the $500 Tent",
+      "Winner — My Ten Year Old Laptop",
+      "Six Edits on a 2015 MacBook",
+      "Choice: Film It or Skip It",
+    ]);
+    expect(payload.recommended_index).toBe(2);
+    expect(payload.recommended_reason).toBe("Most concrete.");
+  });
+
+  it("keeps a listed 'Pick:' title and the unlisted PICK line wins", () => {
+    const { payload } = parseSuggestionsReply(
+      "titles",
+      "1. Winner: the $50 mic beat my $400 one || contrast\n2. Best - budget mic of 2026 || search term\n3. Plain title || fine\nPICK: 3 || simplest",
+    );
+    expect(payload.suggestions).toHaveLength(3);
+    expect(payload.recommended_index).toBe(2);
+    expect(payload.recommended_reason).toBe("simplest");
+  });
+
+  it("prefers the last pick-shaped line", () => {
+    const { payload } = parseSuggestionsReply(
+      "titles",
+      "My pick: see the end.\n1. One || a\n2. Two || b\nPICK: 2 || the one",
+    );
+    expect(payload.recommended_index).toBe(1);
+  });
+});
+
+describe("hooks across more than one line (review, finding 10)", () => {
+  it("joins a quoted hook written over two lines", () => {
+    const { payload } = parseSuggestionsReply(
+      "hooks",
+      '1. "I edited six videos on a laptop from 2015.\nThe machine was fine. I wasn\'t." || Concrete.\n2. Forty-minute renders. One setting fixed it. || Number.',
+    );
+    expect(payload.suggestions.map((s) => s.text)).toEqual([
+      "I edited six videos on a laptop from 2015. The machine was fine. I wasn't.",
+      "Forty-minute renders. One setting fixed it.",
+    ]);
+    expect(payload.suggestions[0].rationale).toBe("Concrete.");
+  });
+
+  it("joins a reason that wrapped onto the next line", () => {
+    const { payload } = parseSuggestionsReply(
+      "hooks",
+      "1. I edited six videos on a laptop from 2015. The machine was fine.\n   || Concrete.\n2. Forty-minute renders. One setting fixed it. || Number.",
+    );
+    expect(payload.suggestions.map((s) => s.text)).toEqual([
+      "I edited six videos on a laptop from 2015. The machine was fine.",
+      "Forty-minute renders. One setting fixed it.",
+    ]);
+  });
+});
+
+describe("prose around the list that mentions the separator (review, finding 11)", () => {
+  it("does not read a preamble quoting the format", () => {
+    expect(
+      texts(
+        "Here are 20 titles in the format you asked for (`1. title || why`):\n\n1. The Laptop Was Never the Problem || Reversal.\n2. Proxy Files Saved My MacBook || Names the trick.",
+      ),
+    ).toEqual(["The Laptop Was Never the Problem", "Proxy Files Saved My MacBook"]);
+  });
+
+  it("reads only numbered lines when the answer is numbered", () => {
+    expect(
+      texts(
+        "1. The Laptop Was Never the Problem || Reversal.\n2. Proxy Files Saved My MacBook || Names the trick.\n\n- I kept them under 55 characters || mostly",
+      ),
+    ).toEqual(["The Laptop Was Never the Problem", "Proxy Files Saved My MacBook"]);
+  });
+});
+
+describe("claude.ai's italic reason label (review, finding 12)", () => {
+  it("is not kept in the rationale", () => {
+    const { payload } = parseSuggestionsReply(
+      "hooks",
+      '**1.** "I edited six videos on a laptop from 2015."\n*Why it works:* Concrete and self-deprecating.\n\n**2.** "Forty-minute renders."\n_Why it works:_ Leads with a number.',
+    );
+    expect(payload.suggestions.map((s) => s.rationale)).toEqual([
+      "Concrete and self-deprecating.",
+      "Leads with a number.",
+    ]);
+  });
+});
+
+describe("reasons nested as bullets under each item (review, finding 20)", () => {
+  it("attaches the bullet to the item above it", () => {
+    const { payload } = parseSuggestionsReply(
+      "titles",
+      "1. I Tried Every Budget Mic\n   - Why: curiosity gap\n2. The $50 Mic That Won\n   - Why: price anchor\n\nPICK: 2 || it has a number",
+    );
+    expect(payload.suggestions).toEqual([
+      { text: "I Tried Every Budget Mic", rationale: "curiosity gap" },
+      { text: "The $50 Mic That Won", rationale: "price anchor" },
+    ]);
+    expect(payload.recommended_index).toBe(1);
+  });
+
+  it("still reads a plain bulleted list as proposals", () => {
+    expect(texts("- One title - a\n- Another title - b")).toEqual(["One title", "Another title"]);
   });
 });

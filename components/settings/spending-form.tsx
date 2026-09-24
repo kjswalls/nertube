@@ -32,6 +32,8 @@ export interface SpendingView {
   readonly mean: string | null;
   /** Calls priced by assumption (an unknown model). */
   readonly assumedCalls: number;
+  /** Calls counted at their worst case: in flight, or no response came back. */
+  readonly estimatedCalls: number;
   /** The cap in force, in dollars; null for no cap. */
   readonly capDollars: number | null;
   /** Whether the person chose it or it is the default. */
@@ -40,6 +42,8 @@ export interface SpendingView {
   readonly defaultCap: number;
   /** 0–1, how much of the cap is used; null with no cap. */
   readonly used: number | null;
+  /** The server's own check (`isOverCap`): the next call would be refused. */
+  readonly atCap: boolean;
   /** The most expensive rate, per million tokens, for the assumed-price note. */
   readonly assumedRate: string;
 }
@@ -76,7 +80,10 @@ export function SpendingForm({ view }: { view: SpendingView }) {
   // default into "no cap".
   const changed = valid && trimmed !== shown;
 
-  const atCap = view.used !== null && view.used >= 1;
+  const atCap = view.atCap;
+  // The meter reads full only when the check agrees; short of it, at most 99.
+  const meterShare =
+    view.used === null ? 0 : atCap ? 1 : Math.min(view.used, 0.99);
   const capText =
     view.capDollars === null ? "No cap" : `$${view.capDollars.toLocaleString("en-US")}`;
 
@@ -127,14 +134,14 @@ export function SpendingForm({ view }: { view: SpendingView }) {
             aria-label="Share of this month's cap used"
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={Math.round(Math.min(view.used, 1) * 100)}
+            aria-valuenow={atCap ? 100 : Math.min(99, Math.round(meterShare * 100))}
             aria-valuetext={`${view.spent} of ${capText}`}
             data-testid="spending-meter"
             className="h-1.5 w-full overflow-hidden rounded-full bg-border"
           >
             <div
               className={["h-full rounded-full", atCap ? "bg-attention" : "bg-accent"].join(" ")}
-              style={{ width: `${Math.min(view.used, 1) * 100}%` }}
+              style={{ width: `${meterShare * 100}%` }}
             />
           </div>
           {atCap ? (
@@ -156,6 +163,15 @@ export function SpendingForm({ view }: { view: SpendingView }) {
           <>No API calls yet this month. The count starts again on {view.resets}.</>
         )}
       </p>
+
+      {view.estimatedCalls > 0 ? (
+        <p data-testid="spending-estimated" className="text-[13px] leading-5 text-muted">
+          {view.estimatedCalls === 1 ? "One call is" : `${view.estimatedCalls} calls are`} counted
+          at the most such a call can cost, because no usage came back for it: it was still running,
+          or it timed out or lost its connection, and the API may have billed it anyway. The real
+          cost was probably lower.
+        </p>
+      ) : null}
 
       {view.assumedCalls > 0 ? (
         <p data-testid="spending-assumed" className="text-[13px] leading-5 text-muted">
@@ -216,9 +232,10 @@ export function SpendingForm({ view }: { view: SpendingView }) {
 
       <p id={hintId} className="text-[12px] leading-5 text-muted">
         Whole dollars a calendar month; leave it empty for no cap. With no setting the cap is $
-        {view.defaultCap}. It is checked before every call: at the cap the brainstorm stops calling
-        the API and says so. A call already running when the cap is reached finishes and is counted,
-        and two calls started at the same moment can pass it by one call.
+        {view.defaultCap}. Before every call the most it can cost is set aside against the cap, so
+        calls started together are counted one after another: at the cap the brainstorm stops
+        calling the API and says so. The last call before the cap can take the month past it, by
+        at most that one call.
       </p>
 
       <SaveStatus

@@ -139,8 +139,8 @@ function attachedSection(
  */
 export function buildManualPrompt(request: AssistRequest): string {
   const sections = [
-    ...briefSections(request),
-    ["## The video", "", ...videoParts(request).slice(1)].join("\n\n"),
+    ...briefSections(request, "attached"),
+    ["## The video", ...videoParts(request).slice(1)].join("\n\n"),
   ];
   if (request.kind === "thumbnail_critique") sections.push(attachedSection(request));
   sections.push(listShape(request));

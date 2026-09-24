@@ -7,7 +7,7 @@ import { assistPrompt, readPastedReply } from "@/app/actions/assist-manual";
 import type { AssistMode } from "@/lib/assist/select";
 import type { CapReached } from "@/lib/assist/types";
 
-import { AssistPillButton } from "./chrome";
+import { AssistManualEntry, AssistPillButton } from "./chrome";
 import { BrainstormPanel, type PanelKind } from "./brainstorm-panel";
 import { useAssistPanel, useAssistTarget } from "./packaging-assist";
 import { useAssistRun, type AssistRun } from "./run";
@@ -149,16 +149,16 @@ export function BrainstormAssist({
    * ordinary answer: same list, same accept, same "from earlier" next time.
    */
   const read = useCallback(
-    async (kind: PanelKind, reply: string): Promise<boolean> => {
+    async (kind: PanelKind, reply: string): Promise<number | null> => {
       setVia((previous) => ({ ...previous, [kind]: "paste" }));
-      let ok = false;
+      let count: number | null = null;
       const attempt = async () => {
         const answer = await readPastedReply({ videoId, kind, reply });
-        ok = answer.ok;
+        count = answer.ok ? answer.data.suggestions.length : null;
         return answer;
       };
       await (kind === "hooks" ? askHooks(attempt) : askTitles(attempt));
-      return ok;
+      return count;
     },
     [askHooks, askTitles, videoId],
   );
@@ -196,10 +196,18 @@ export function BrainstormAssist({
    * the ask. Pressing it when the column already holds an answer must not cost
    * a call, and must not cost one again when the panel is closed and reopened.
    */
+  /**
+   * Opened with "or Open in Claude" (M11 review, finding 8): the panel opens
+   * on the steps and asks nothing, so the free path never costs a paid call
+   * first — including after a phone reloaded the page mid-trip.
+   */
+  const [manualEntry, setManualEntry] = useState(false);
+
   const open = useCallback(
     (requested: StoredAssistKind) => {
       const kind = panelKind(requested);
       setNow(Date.now());
+      setManualEntry(false);
       panel?.show(kind);
       // With no API key there is nothing to ask: the panel opens on Open in
       // Claude, and the ask is the person's own, in claude.ai.
@@ -236,7 +244,17 @@ export function BrainstormAssist({
 
   return (
     <div className="flex w-full flex-col gap-2">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-1">
+        {mode === "api" && !panel.open ? (
+          <AssistManualEntry
+            prefix="brainstorm"
+            onClick={() => {
+              setNow(Date.now());
+              setManualEntry(true);
+              panel.show("titles");
+            }}
+          />
+        ) : null}
         <AssistPillButton
           verb="Generate 20"
           label={panel.open ? "Hide brainstorm" : "Generate 20"}
@@ -260,6 +278,7 @@ export function BrainstormAssist({
           mode={mode}
           capReached={capReached}
           reading={via[current] === "paste"}
+          manualEntry={manualEntry}
           getPrompt={() => assistPrompt({ videoId, kind: current })}
           onRead={(reply) => read(current, reply)}
           otherHasAnswer={

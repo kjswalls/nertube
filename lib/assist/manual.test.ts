@@ -136,3 +136,25 @@ describe("the shape it asks for", () => {
     expect(critique.recommended_role).toBe("wild_card");
   });
 });
+
+describe("wording that says what is true (M11 review, finding 14)", () => {
+  it("names the job per kind rather than 'twenty options' everywhere", () => {
+    expect(buildManualPrompt(hooksRequest())).not.toContain("twenty options");
+    expect(buildManualPrompt(critiqueRequest())).toContain("judges the thumbnails");
+    expect(buildSystemPrompt(critiqueRequest())).toContain("judges the thumbnails");
+  });
+
+  it("says the critique's images are attached, and names a concept only when there is one", () => {
+    const withConcept = critiqueRequest();
+    expect(buildManualPrompt(withConcept)).toContain("attached to this message against the video's title and its locked thumbnail concept");
+    expect(buildSystemPrompt(withConcept)).toContain("images below against the video's title and its locked thumbnail concept");
+    const without = { ...critiqueRequest(), video: { ...critiqueRequest().video, thumbnailConcept: null } };
+    expect(buildManualPrompt(without)).toContain("attached to this message against the video's title.");
+    expect(buildManualPrompt(without)).not.toContain("locked thumbnail concept.");
+  });
+
+  it("puts one blank line, not three, under the video's heading", () => {
+    expect(buildManualPrompt(titlesRequest())).not.toContain("## The video\n\n\n");
+    expect(buildManualPrompt(titlesRequest())).toMatch(/## The video\n\nWorking title:/);
+  });
+});

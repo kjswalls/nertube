@@ -1,7 +1,7 @@
 -- The shape PLAN.md's data model promises, asserted against the catalogue:
 -- the table set, the common columns, RLS on everything, unique (id, user_id) on
--- every parent, and the eleven security-definer SQL functions with a pinned
--- search_path (0011 added two). Plus the delete cascades.
+-- every parent, and the thirteen security-definer SQL functions with a pinned
+-- search_path (0011 added four). Plus the delete cascades.
 
 begin;
 
@@ -65,7 +65,8 @@ begin
               and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel',
                                 'reorder_stages','set_stage_enabled','set_video_archived',
                                 'set_time_zone','move_video_versioned',
-                                'record_assist_usage','set_assist_cap')
+                                'reserve_assist_spend','settle_assist_spend',
+                                'close_assist_reservation','set_assist_cap')
   loop
     n := n + 1;
     if not f.prosecdef then raise exception 'FAILED: %() is not security definer', f.proname; end if;
@@ -73,7 +74,7 @@ begin
       raise exception 'FAILED: %() does not pin search_path (%)', f.proname, f.proconfig;
     end if;
   end loop;
-  if n <> 11 then raise exception 'FAILED: expected 11 SQL functions, found %', n; end if;
+  if n <> 13 then raise exception 'FAILED: expected 13 SQL functions, found %', n; end if;
 end $$;
 
 do $$
@@ -121,7 +122,7 @@ begin
   end if;
 
   -- assist_usage and assist_caps (0011): readable by their owner, written only
-  -- by record_assist_usage() and set_assist_cap(); the month's sum is
+  -- by reserve/settle/close_assist_* and set_assist_cap(); the month's sum is
   -- assist_budget(), which reads through the caller's own RLS.
   if has_table_privilege('authenticated', 'public.assist_usage', 'INSERT')
      or has_table_privilege('authenticated', 'public.assist_usage', 'UPDATE')
@@ -131,7 +132,9 @@ begin
      or has_table_privilege('authenticated', 'public.assist_caps', 'DELETE') then
     raise exception 'FAILED: a client can write assist_usage or assist_caps directly';
   end if;
-  if has_function_privilege('anon', 'public.record_assist_usage(uuid,text,text,text,text,boolean,integer,integer,integer,integer,bigint)', 'execute')
+  if has_function_privilege('anon', 'public.reserve_assist_spend(timestamptz,timestamptz,uuid,text,text,bigint,integer)', 'execute')
+     or has_function_privilege('anon', 'public.settle_assist_spend(uuid,text,text,boolean,integer,integer,integer,integer,bigint)', 'execute')
+     or has_function_privilege('anon', 'public.close_assist_reservation(uuid,boolean)', 'execute')
      or has_function_privilege('anon', 'public.set_assist_cap(integer)', 'execute')
      or has_function_privilege('anon', 'public.assist_budget(timestamptz,timestamptz)', 'execute') then
     raise exception 'FAILED: anon can execute an assist spend function';

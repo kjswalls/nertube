@@ -15,7 +15,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaMessage } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 
 import { assemble } from "./clamp";
-import { measureCall, type CallOutcome, type MeasuredCall } from "./spend";
+import { measureCall, worstCaseMicros, type CallOutcome, type MeasuredCall } from "./spend";
 import { buildSystemPrompt, buildUserMessage } from "./prompts";
 import { parseModelText, payloadSchemaFor } from "./schema";
 import {
@@ -111,7 +111,7 @@ export const DEFAULT_MODEL = "claude-opus-5";
  * model. 16k is the documented default for a non-streaming request — large
  * enough not to truncate, small enough to stay inside HTTP timeouts.
  */
-const MAX_TOKENS = 16_000;
+export const MAX_TOKENS = 16_000;
 
 /** Pairs with the scalar `fallbacks: "default"`. Present in `AnthropicBeta`. */
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -161,7 +161,7 @@ export interface AnthropicProviderOptions {
    * body could not be used: not JSON, the wrong shape, empty, cut off). All
    * three were billed, so all three are reported. A request that got no
    * response at all — a 4xx or 5xx, a dropped socket, our own timeout — has
-   * no usage to report and is not.
+   * no usage to report; it goes to `onNoUsage` instead.
    *
    * Awaited before `run()` settles, so a recorder that writes to the
    * database has written by the time the answer is shown. Whatever it
@@ -169,6 +169,25 @@ export interface AnthropicProviderOptions {
    * must still hand back its answer.
    */
   readonly onUsage?: (call: MeasuredCall, outcome: CallOutcome) => unknown;
+  /**
+   * Called once the request is built and before it is sent (M11 review,
+   * finding 1), with the most it can cost (`worstCaseMicros` in `spend.ts`).
+   * Whatever it throws is what `run()` throws, and **nothing is sent**: this
+   * is where the server action reserves the worst case against the monthly
+   * cap, and refuses.
+   */
+  readonly beforeSend?: (worst: {
+    readonly requestedModel: string;
+    readonly costMicros: number;
+  }) => Promise<void> | void;
+  /**
+   * Told when the request got no response to price (M11 review, finding 2):
+   * `mayHaveBilled` is true for our own timeout, an abort or a dropped
+   * connection — the API may have run the whole call and billed it — and
+   * false when the API answered with an error status, which bills nothing.
+   * Awaited, and whatever it throws is logged and swallowed.
+   */
+  readonly onNoUsage?: (mayHaveBilled: boolean) => unknown;
 }
 
 /**
@@ -213,6 +232,25 @@ async function callAnthropic(
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 
+  const system = buildSystemPrompt(request);
+  const format = betaZodOutputFormat(payloadSchemaFor(request.kind));
+  const content = buildContent(request);
+
+  // The most this can cost, reserved before anything leaves (see `beforeSend`).
+  if (options.beforeSend) {
+    await options.beforeSend({
+      requestedModel: model,
+      costMicros: worstCaseMicros({
+        textBytes:
+          Buffer.byteLength(system) +
+          Buffer.byteLength(buildUserMessage(request)) +
+          Buffer.byteLength(JSON.stringify(format)),
+        images: request.kind === "thumbnail_critique" ? request.variants.length : 0,
+        maxTokens: MAX_TOKENS,
+      }),
+    });
+  }
+
   const startedAt = Date.now();
   let message;
   try {
@@ -226,10 +264,10 @@ async function callAnthropic(
         fallbacks: "default",
         output_config: {
           effort: "medium",
-          format: betaZodOutputFormat(payloadSchemaFor(request.kind)),
+          format,
         },
-        system: buildSystemPrompt(request),
-        messages: [{ role: "user", content: buildContent(request) }],
+        system,
+        messages: [{ role: "user", content }],
       },
       {
         timeout: callOptions.timeoutMs ?? DEFAULT_ASSIST_TIMEOUT_MS,
@@ -239,6 +277,7 @@ async function callAnthropic(
       },
     );
   } catch (error) {
+    await reportNoUsage(options.onNoUsage, mayHaveBilled(error));
     throw mapSdkError(error);
   }
 
@@ -271,6 +310,35 @@ async function reportUsage(
   } catch (error) {
     console.error(
       "[assist] a billed call could not be recorded:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/**
+ * Could a request that failed this way still have been billed? Only when the
+ * API never told us otherwise: an error *status* is the API refusing the
+ * request, which bills nothing; a timeout, an abort or a dropped connection
+ * may have cut off a call the API ran to the end.
+ */
+function mayHaveBilled(error: unknown): boolean {
+  if (error instanceof APIConnectionError) return true; // includes our timeout
+  if (error instanceof APIUserAbortError) return true;
+  if (error instanceof APIError) return typeof error.status !== "number" || error.status === 0;
+  return true;
+}
+
+/** Tell the caller no usage came back, never letting it fail the call. */
+async function reportNoUsage(
+  onNoUsage: AnthropicProviderOptions["onNoUsage"],
+  billed: boolean,
+): Promise<void> {
+  if (!onNoUsage) return;
+  try {
+    await onNoUsage(billed);
+  } catch (error) {
+    console.error(
+      "[assist] a call with no response could not be closed:",
       error instanceof Error ? error.message : error,
     );
   }

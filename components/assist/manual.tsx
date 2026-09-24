@@ -3,6 +3,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { ROLE_LABEL } from "@/components/thumbnails/roles";
+import type { AssistMode } from "@/lib/assist/select";
+import { MANUAL_PROVIDER } from "@/lib/assist/types";
 import type { ThumbnailRole } from "@/lib/storage";
 
 import type { AssistFailureView } from "./run";
@@ -51,6 +53,68 @@ import type { AssistFailureView } from "./run";
 
 export const CLAUDE_NEW_URL = "https://claude.ai/new";
 
+/**
+ * Which failure belongs to which box, and whether Open in Claude leads — the
+ * one routing rule every assist panel uses (M11 review, findings 5, 6, 17).
+ *
+ * - **A failure while a paste was being read is the paste's**, whoever
+ *   produced it: a read the server never received (`provider: null`, the
+ *   transport) used to be routed as an API failure, and its "Try again" asked
+ *   the *API* — in the manual mode too. In the `manual` mode every failure is
+ *   the paste's: nothing there ever asks an API.
+ * - **The cap's refusal is latched** until the next API ask or a reply that
+ *   reads: pressing Read clears the run's failure, and when the refusal went
+ *   with it the steps demoted themselves mid-read and the pasted text was
+ *   lost. `latchKey` is the question the refusal was about (the brainstorm's
+ *   two tabs share one panel).
+ * - **Open in Claude leads** in the `manual` mode, after a cap refusal, or when
+ *   the person opened the panel with "or Open in Claude" (finding 8).
+ */
+export function useManualRoute({
+  mode,
+  failure,
+  reading,
+  manualEntry = false,
+  latchKey = "",
+}: {
+  mode: AssistMode;
+  failure: AssistFailureView | null;
+  /** The last attempt on this question was a paste being read. */
+  reading: boolean;
+  /** The panel was opened on Open in Claude rather than on an ask. */
+  manualEntry?: boolean;
+  latchKey?: string;
+}) {
+  const [latched, setLatched] = useState<{
+    key: string;
+    failure: AssistFailureView;
+  } | null>(null);
+
+  const pasteFailure =
+    failure && (failure.provider === MANUAL_PROVIDER || reading || mode === "manual")
+      ? failure
+      : null;
+  const apiFailure = failure && !pasteFailure ? failure : null;
+  const liveCap = apiFailure?.code === "spend_cap" ? apiFailure : null;
+  if (liveCap && (latched?.failure !== liveCap || latched.key !== latchKey)) {
+    setLatched({ key: latchKey, failure: liveCap });
+  }
+  const capFailure =
+    liveCap ?? (latched && latched.key === latchKey ? latched.failure : null);
+
+  return {
+    /** Drawn under the paste box, beside the text it is about. */
+    pasteFailure,
+    /** Drawn as the API's failure block, with its "Try again". */
+    apiFailure: apiFailure && !liveCap ? apiFailure : null,
+    /** The cap's refusal, drawn above Open in Claude. */
+    capFailure,
+    manualFirst: mode === "manual" || manualEntry || capFailure !== null,
+    /** An API ask started, or a reply read: the refusal has been answered. */
+    clearCap: () => setLatched(null),
+  };
+}
+
 /** What the server hands back when Open in Claude is pressed. */
 export type ManualPromptAnswer =
   | {
@@ -92,8 +156,11 @@ export function OpenInClaude({
   /** What Claude will be asked for, in a few words: "twenty titles". */
   what: string;
   getPrompt: () => Promise<ManualPromptAnswer>;
-  /** Read the pasted reply. Resolves true when it became proposals. */
-  onRead: (reply: string) => Promise<boolean>;
+  /**
+   * Read the pasted reply. Resolves to how many proposals (or verdicts) it
+   * became, or null when it could not be read.
+   */
+  onRead: (reply: string) => Promise<number | null>;
   /** A pasted reply is being read right now. */
   reading: boolean;
   /**
@@ -107,7 +174,14 @@ export function OpenInClaude({
   /** The critique: claude.ai needs the images attached by hand. */
   images?: boolean;
 }) {
+  /*
+    Shown once, shown until the person hides it. `primary` can open the steps
+    but never close them: it used to be the component's key, so a cap refusal
+    cleared by pressing Read remounted this collapsed, with the pasted text
+    and the read's failure gone (M11 review, findings 6 and 17).
+  */
   const [shown, setShown] = useState(primary);
+  if (primary && !shown) setShown(true);
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [prompt, setPrompt] = useState<string | null>(null);
   const [files, setFiles] = useState<
@@ -122,8 +196,24 @@ export function OpenInClaude({
   */
   const [folded, setFolded] = useState(false);
   const fallbackRef = useRef<HTMLTextAreaElement>(null);
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
+  const anotherRef = useRef<HTMLButtonElement>(null);
   const pasteId = useId();
   const nextId = useId();
+  /*
+    What a screen reader is told, in a live region that is always in the DOM
+    (finding 15): a region created already holding its text is not reliably
+    announced. Set on each step, and when a reply has been read.
+  */
+  const [announcement, setAnnouncement] = useState("");
+  /** Where focus goes after the fold changes the tree under it (finding 9). */
+  const refocus = useRef<"another" | "paste" | null>(null);
+
+  useEffect(() => {
+    if (refocus.current === "another" && folded) anotherRef.current?.focus();
+    if (refocus.current === "paste" && !folded) pasteRef.current?.focus();
+    refocus.current = null;
+  }, [folded]);
 
   /*
     The prompt the browser would not copy, selected, so the next gesture is
@@ -185,23 +275,38 @@ export function OpenInClaude({
     }
 
     setStep(copied ? { kind: "copied", opened } : { kind: "refused", opened });
+    setAnnouncement(nextSentence(copied ? "copied" : "refused", opened, attach));
   }
 
   async function read() {
     const text = reply;
     if (text.trim() === "") return;
-    const ok = await onRead(text);
+    const count = await onRead(text);
     // The box keeps what was pasted until it has become proposals: a reply
     // that could not be read is the person's to fix, not ours to throw away.
-    if (ok) {
+    if (count !== null) {
       setReply("");
       setStep({ kind: "idle" });
+      // The Read button is about to leave the tree; focus goes to the fold's
+      // own button rather than falling to <body> (finding 9).
+      refocus.current = "another";
       setFolded(true);
+      setAnnouncement(
+        `Read ${count} ${attach ? (count === 1 ? "verdict" : "verdicts") : count === 1 ? "proposal" : "proposals"} from Claude’s reply. ${attach ? "They are" : count === 1 ? "It is" : "They are"} below.`,
+      );
     }
   }
 
+  const status = (
+    <p role="status" data-testid={`${prefix}-manual-status`} className="sr-only">
+      {announcement}
+    </p>
+  );
+
   if (!shown) {
     return (
+      <>
+      {status}
       <div data-testid={`${prefix}-manual`} data-mode="secondary" className="flex flex-wrap items-center gap-2 text-xs text-muted">
         <span>Or ask in your own claude.ai conversation, at no cost to this app:</span>
         <button
@@ -214,11 +319,14 @@ export function OpenInClaude({
           Open in Claude…
         </button>
       </div>
+      </>
     );
   }
 
   if (folded) {
     return (
+      <>
+      {status}
       <div
         data-testid={`${prefix}-manual`}
         data-mode={primary ? "primary" : "secondary"}
@@ -234,14 +342,19 @@ export function OpenInClaude({
           Open in Claude again
         </button>
         <button
+          ref={anotherRef}
           type="button"
           data-testid={`${prefix}-paste-another`}
-          onClick={() => setFolded(false)}
+          onClick={() => {
+            refocus.current = "paste";
+            setFolded(false);
+          }}
           className={QUIET_BUTTON}
         >
           Paste another reply
         </button>
       </div>
+      </>
     );
   }
 
@@ -249,6 +362,8 @@ export function OpenInClaude({
     step.kind === "copied" || step.kind === "refused" ? step : null;
 
   return (
+    <>
+    {status}
     <div
       data-testid={`${prefix}-manual`}
       data-mode={primary ? "primary" : "secondary"}
@@ -297,12 +412,9 @@ export function OpenInClaude({
         <p
           id={nextId}
           data-testid={`${prefix}-manual-next`}
-          role="status"
           className="text-xs"
         >
-          {next.kind === "copied"
-            ? `The prompt is copied${next.opened ? " and claude.ai is open in a new tab" : ""}. Paste it there${attach ? ", attach the images below" : ""} and send it, then copy Claude’s whole reply and paste it here.`
-            : `This browser would not let the page copy, so the prompt is below, selected — copy it, paste it into claude.ai${attach ? ", attach the images below" : ""} and send it, then paste Claude’s whole reply here.`}{" "}
+          {nextSentence(next.kind, next.opened, attach)}{" "}
           {next.opened ? (
             <a
               href={CLAUDE_NEW_URL}
@@ -335,7 +447,7 @@ export function OpenInClaude({
           value={prompt}
           rows={6}
           onFocus={(event) => event.currentTarget.select()}
-          className="w-full resize-y rounded-input border border-border bg-background px-2 py-1.5 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base"
+          className="w-full resize-y rounded-input border border-border bg-background px-2 py-1.5 font-sans text-[13px] leading-5 outline-none focus-visible:ring-2 focus-visible:ring-accent max-md:text-base thumb:text-base"
         />
       ) : null}
 
@@ -381,6 +493,7 @@ export function OpenInClaude({
           Paste Claude’s reply
         </label>
         <textarea
+          ref={pasteRef}
           id={pasteId}
           data-testid={`${prefix}-paste`}
           value={reply}
@@ -402,7 +515,11 @@ export function OpenInClaude({
             role="alert"
             className="flex flex-col gap-1 rounded-input border border-attention/50 bg-attention/[0.06] px-3 py-2 text-xs"
           >
-            <p>{failure.message}</p>
+            <p>
+              {failure.provider === null
+                ? "Reading the reply never reached the server — check the connection and press Read again."
+                : failure.message}
+            </p>
             <p className="text-muted">
               Nothing was changed. What you pasted is still in the box.
             </p>
@@ -421,5 +538,22 @@ export function OpenInClaude({
         </div>
       </div>
     </div>
+    </>
   );
+}
+
+/**
+ * The one sentence saying what to do next. When the tab was blocked there is
+ * no "there" to paste into yet, so it says to open claude.ai first (finding 13).
+ */
+function nextSentence(kind: "copied" | "refused", opened: boolean, attach: boolean): string {
+  const images = attach ? ", attach the images below" : "";
+  if (kind === "copied") {
+    return opened
+      ? `The prompt is copied and claude.ai is open in a new tab. Paste it there${images} and send it, then copy Claude’s whole reply and paste it here.`
+      : `The prompt is copied, but the new tab was blocked. Open claude.ai with the link that follows, paste the prompt${images} and send it, then copy Claude’s whole reply and paste it here.`;
+  }
+  return `This browser would not let the page copy, so the prompt is below, selected — copy it, ${
+    opened ? "paste it into claude.ai" : "open claude.ai with the link that follows, paste it there"
+  }${images} and send it, then paste Claude’s whole reply here.`;
 }

@@ -1,9 +1,11 @@
 -- What the brainstorm has cost, and the cap on it (0011).
 --
--- assist_usage is append-only from the client's side: readable by its owner,
--- never inserted, edited or deleted directly, written only by
--- record_assist_usage(), which stamps the owner and the time itself. The cap
--- is written only by set_assist_cap(). assist_budget() sums a window the
+-- assist_usage is readable by its owner and never inserted, edited or deleted
+-- directly. A call is reserved at its worst case by reserve_assist_spend()
+-- (under a per-user lock, refused at the cap), then settled to its measured
+-- cost by settle_assist_spend() or closed by close_assist_reservation(); the
+-- functions stamp the owner and the time, and a settled row is never
+-- rewritten. The cap is written only by set_assist_cap(). assist_budget() sums a window the
 -- application computes in the user's zone; the last block walks one month
 -- boundary in the farthest-east and farthest-west zones.
 
@@ -42,30 +44,58 @@ begin
   end if;
 end $$;
 
--- 3. The function records a call, as the caller, now — whatever it is told.
+-- 3. A reservation is written before the call, as the caller, now, at the
+--    worst case; settling it writes the measured numbers over it.
 do $$
-declare v_id uuid; r public.assist_usage;
+declare r record; v_id uuid; u public.assist_usage; n int;
 begin
-  v_id := public.record_assist_usage(
-    fx.video_a(), 'titles', 'answered', 'claude-opus-5', 'claude-opus-4-8', false,
-    1200, 900, 300, 0, 28650);
-  select * into r from public.assist_usage where id = v_id;
-  if r.user_id <> fx.user_a() then raise exception 'FAILED: the row belongs to %', r.user_id; end if;
-  if r.created_at <> now() then raise exception 'FAILED: the row is stamped %, not now()', r.created_at; end if;
-  if r.model <> 'claude-opus-4-8' or r.requested_model <> 'claude-opus-5' then
-    raise exception 'FAILED: the served model was not kept apart from the requested one';
+  select * into r from public.reserve_assist_spend(
+    '-infinity', 'infinity', fx.video_a(), 'titles', 'claude-opus-5', 900000, 10);
+  if r.reservation is null then raise exception 'FAILED: an empty month refused a reservation'; end if;
+  if r.spend_micros <> 0 or r.calls <> 0 or r.cap_set then
+    raise exception 'FAILED: the reservation reported % / % / % before itself', r.spend_micros, r.calls, r.cap_set;
   end if;
-  if r.cost_micros <> 28650 or r.cache_read_input_tokens <> 300 then
-    raise exception 'FAILED: the numbers were not stored as sent';
+  v_id := r.reservation;
+  select * into u from public.assist_usage where id = v_id;
+  if u.user_id <> fx.user_a() or u.created_at <> now() then
+    raise exception 'FAILED: the reservation belongs to % at %', u.user_id, u.created_at;
+  end if;
+  if u.outcome <> 'pending' or not u.estimated or u.cost_micros <> 900000 or u.model <> 'claude-opus-5' then
+    raise exception 'FAILED: the reservation is % / % / % / %', u.outcome, u.estimated, u.cost_micros, u.model;
   end if;
 
-  -- A call with no video (none today, but the column allows it).
-  perform public.record_assist_usage(
-    null, 'thumbnail_critique', 'refused', 'claude-opus-5', 'mystery-model', true,
-    10, 5, 0, 0, 1350);
+  -- The advisory lock that serialises reservations is held by this transaction.
+  select count(*) into n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid() and granted;
+  if n < 1 then raise exception 'FAILED: reserve_assist_spend() took no advisory lock'; end if;
+
+  perform public.settle_assist_spend(v_id, 'answered', 'claude-opus-4-8', false, 1200, 900, 300, 0, 28650);
+  select * into u from public.assist_usage where id = v_id;
+  if u.outcome <> 'answered' or u.estimated or u.model <> 'claude-opus-4-8' or u.requested_model <> 'claude-opus-5' then
+    raise exception 'FAILED: settled as % / % / % / %', u.outcome, u.estimated, u.model, u.requested_model;
+  end if;
+  if u.cost_micros <> 28650 or u.cache_read_input_tokens <> 300 or u.input_tokens <> 1200 then
+    raise exception 'FAILED: the measured numbers were not stored as sent';
+  end if;
+
+  -- A settled row is never rewritten: not settled again, not closed.
+  begin
+    perform public.settle_assist_spend(v_id, 'answered', 'm', false, 0, 0, 0, 0, 0);
+    raise exception 'FAILED: a settled row was settled again';
+  exception when sqlstate 'P0002' then null;
+  end;
+  begin
+    perform public.close_assist_reservation(v_id, false);
+    raise exception 'FAILED: a settled row was closed (removed)';
+  exception when sqlstate 'P0002' then null;
+  end;
+
+  -- A call with no video, priced by assumption and refused mid-answer.
+  select * into r from public.reserve_assist_spend(
+    '-infinity', 'infinity', null, 'thumbnail_critique', 'claude-opus-5', 500000, 10);
+  perform public.settle_assist_spend(r.reservation, 'refused', 'mystery-model', true, 10, 5, 0, 0, 1350);
 end $$;
 
--- 4. The row cannot then be lowered, edited or removed by its owner.
+-- 4. The rows cannot be lowered, edited or removed by their owner directly.
 do $$
 begin
   begin
@@ -80,24 +110,26 @@ begin
   end;
 end $$;
 
--- 5. What the function refuses: another tenant's video, a negative or absurd
---    number, a kind or outcome that does not exist.
+-- 5. What the functions refuse: another tenant's video, a negative or absurd
+--    estimate, a kind that does not exist, an empty model, a window that is
+--    not one, no default, and a settle to an outcome that is not final.
 do $$
 declare
   calls text[] := array[
-    format($f$select public.record_assist_usage(%L::uuid, 'titles', 'answered', 'm', 'm', false, 1, 1, 0, 0, 1)$f$, fx.video_b()),
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 1, 1, 0, 0, -5000)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, -1, 1, 0, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 1, 1, -300, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 99999999, 1, 0, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 1, 1, 0, 0, 5000000000)$f$,
-    $f$select public.record_assist_usage(null, 'essays', 'answered', 'm', 'm', false, 1, 1, 0, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'maybe', 'm', 'm', false, 1, 1, 0, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', '', 'm', false, 1, 1, 0, 0, 1)$f$,
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 1, 1, 0, 0, null)$f$
+    format($f$select * from public.reserve_assist_spend('-infinity', 'infinity', %L::uuid, 'titles', 'm', 1, 10)$f$, fx.video_b()),
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'm', -5000, 10)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'm', 5000000000, 10)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'essays', 'm', 1, 10)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', '', 1, 10)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'm', null, 10)$f$,
+    $f$select * from public.reserve_assist_spend('infinity', '-infinity', null, 'titles', 'm', 1, 10)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'm', 1, null)$f$,
+    $f$select public.settle_assist_spend(gen_random_uuid(), 'pending', 'm', false, 0, 0, 0, 0, 0)$f$,
+    $f$select public.settle_assist_spend(gen_random_uuid(), 'answered', 'm', false, 0, 0, 0, 0, 0)$f$,
+    $f$select public.close_assist_reservation(gen_random_uuid(), true)$f$
   ];
-  expected text[] := array['23503', '23514', '23514', '23514', '23514', '23514',
-                           '23514', '23514', '23514', '23502'];
+  expected text[] := array['23503', '23514', '23514', '23514', '23514', '23502',
+                           '22023', '22023', '22023', 'P0002', 'P0002'];
   i int; ok boolean; st text; n int;
 begin
   for i in 1 .. array_length(calls, 1) loop
@@ -122,13 +154,75 @@ do $$
 declare b record;
 begin
   select * into b from public.assist_budget(now() - interval '1 minute', now() + interval '1 minute');
-  if b.spend_micros <> 30000 or b.calls <> 2 or b.assumed_calls <> 1 then
-    raise exception 'FAILED: budget is % micros / % calls / % assumed, expected 30000 / 2 / 1',
-      b.spend_micros, b.calls, b.assumed_calls;
+  if b.spend_micros <> 30000 or b.calls <> 2 or b.assumed_calls <> 1 or b.estimated_calls <> 0 then
+    raise exception 'FAILED: budget is % micros / % calls / % assumed / % estimated, expected 30000 / 2 / 1 / 0',
+      b.spend_micros, b.calls, b.assumed_calls, b.estimated_calls;
   end if;
   -- The window is half-open: a window ending at now() excludes a row stamped now().
   select * into b from public.assist_budget(now() - interval '1 day', now());
   if b.calls <> 0 then raise exception 'FAILED: [from, to) included a row stamped at to'; end if;
+end $$;
+
+-- 6b. A call that got no response: kept at its worst case when it may have
+--     been billed, removed when the API answered with an error status.
+do $$
+declare r record; u public.assist_usage; b record; n int;
+begin
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'hooks', 'claude-opus-5', 400000, 10);
+  perform public.close_assist_reservation(r.reservation, true);
+  select * into u from public.assist_usage where id = r.reservation;
+  if u.outcome <> 'failed' or not u.estimated or u.cost_micros <> 400000 then
+    raise exception 'FAILED: a timed-out call was kept as % / % / %', u.outcome, u.estimated, u.cost_micros;
+  end if;
+
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'hooks', 'claude-opus-5', 400000, 10);
+  -- While it is open, the reservation counts at its worst case.
+  select * into b from public.assist_budget('-infinity', 'infinity');
+  if b.spend_micros <> 830000 or b.estimated_calls <> 2 then
+    raise exception 'FAILED: an open reservation is not counted (% micros, % estimated)', b.spend_micros, b.estimated_calls;
+  end if;
+  perform public.close_assist_reservation(r.reservation, false);
+  select count(*) into n from public.assist_usage where id = r.reservation;
+  if n <> 0 then raise exception 'FAILED: a call the API refused with a status was kept'; end if;
+
+  select * into b from public.assist_budget('-infinity', 'infinity');
+  if b.spend_micros <> 430000 or b.calls <> 3 or b.estimated_calls <> 1 then
+    raise exception 'FAILED: after closing, the budget is % / % / %', b.spend_micros, b.calls, b.estimated_calls;
+  end if;
+end $$;
+
+-- 6c. The line: at or over the cap nothing is reserved; under it one call is
+--     let through, and its worst case is then counted against the next.
+do $$
+declare r record; n int;
+begin
+  -- $0.43 so far. A $1 default: the first reservation (worst case $0.60)
+  -- goes, and takes the month to $1.03; the second is refused, and reports
+  -- the month as it stands.
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'claude-opus-5', 600000, 1);
+  if r.reservation is null then raise exception 'FAILED: $0.43 of $1 refused a call'; end if;
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'claude-opus-5', 600000, 1);
+  if r.reservation is not null then raise exception 'FAILED: a second call passed a reached cap'; end if;
+  if r.spend_micros <> 1030000 or r.calls <> 4 or r.cap_set or r.cap_dollars is not null then
+    raise exception 'FAILED: the refusal reported % / % / % / %', r.spend_micros, r.calls, r.cap_set, r.cap_dollars;
+  end if;
+  select count(*) into n from public.assist_usage where outcome = 'pending';
+  if n <> 1 then raise exception 'FAILED: % open reservations, expected 1', n; end if;
+
+  -- A chosen cap outranks the default; "no cap" refuses nothing; $0 refuses all.
+  perform public.set_assist_cap(null);
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'claude-opus-5', 600000, 1);
+  if r.reservation is null or not r.cap_set then raise exception 'FAILED: no cap refused a call'; end if;
+  perform public.set_assist_cap(0);
+  select * into r from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'claude-opus-5', 1, 1000);
+  if r.reservation is not null or r.cap_dollars <> 0 then raise exception 'FAILED: a $0 cap let a call through'; end if;
+
+  -- Tidy the open reservations away for the blocks below (as the API refusing them would).
+  for r in select id from public.assist_usage where outcome = 'pending' loop
+    perform public.close_assist_reservation(r.id, false);
+  end loop;
+  select count(*) into n from public.assist_usage;
+  if n <> 3 then raise exception 'FAILED: A should have 3 usage rows, has %', n; end if;
 end $$;
 
 -- 7. The cap: set, changed to "no cap", refused out of range.
@@ -191,7 +285,16 @@ begin
   end if;
 
   -- And B's own write is B's alone.
-  perform public.record_assist_usage(fx.video_b(), 'hooks', 'answered', 'claude-opus-5', 'claude-opus-5', false, 1, 1, 0, 0, 30);
+  perform public.settle_assist_spend(
+    (select reservation from public.reserve_assist_spend('-infinity', 'infinity', fx.video_b(), 'hooks', 'claude-opus-5', 100, 10)),
+    'answered', 'claude-opus-5', false, 1, 1, 0, 0, 30);
+
+  -- B cannot settle or close A's rows, even knowing nothing but that they exist.
+  begin
+    perform public.close_assist_reservation(gen_random_uuid(), false);
+    raise exception 'FAILED: closed a reservation that is not B''s';
+  exception when sqlstate 'P0002' then null;
+  end;
   perform public.set_assist_cap(3);
 end $$;
 
@@ -200,11 +303,13 @@ reset role;
 set local request.jwt.claims = '';
 set local role anon;
 
--- 9. Signed out, nothing: no rows, and none of the three functions.
+-- 9. Signed out, nothing: no rows, and none of the functions.
 do $$
 declare
   calls text[] := array[
-    $f$select public.record_assist_usage(null, 'titles', 'answered', 'm', 'm', false, 1, 1, 0, 0, 1)$f$,
+    $f$select * from public.reserve_assist_spend('-infinity', 'infinity', null, 'titles', 'm', 1, 10)$f$,
+    $f$select public.settle_assist_spend(gen_random_uuid(), 'answered', 'm', false, 0, 0, 0, 0, 0)$f$,
+    $f$select public.close_assist_reservation(gen_random_uuid(), true)$f$,
     $f$select public.set_assist_cap(5)$f$,
     $f$select * from public.assist_budget('-infinity', 'infinity')$f$,
     $f$select count(*) from public.assist_usage$f$
@@ -231,7 +336,7 @@ do $$
 declare n int;
 begin
   select count(*) into n from public.assist_usage where user_id = fx.user_a();
-  if n <> 2 then raise exception 'FAILED: A has % usage rows after B wrote', n; end if;
+  if n <> 3 then raise exception 'FAILED: A has % usage rows after B wrote', n; end if;
   select cap_dollars into n from public.assist_caps where user_id = fx.user_a();
   if n <> 25 then raise exception 'FAILED: A''s cap is % after B set one', n; end if;
 end $$;
@@ -242,7 +347,7 @@ declare n int; c bigint;
 begin
   delete from public.videos where id = fx.video_a();
   select count(*), sum(cost_micros) into n, c from public.assist_usage where user_id = fx.user_a();
-  if n <> 2 or c <> 30000 then raise exception 'FAILED: deleting a video removed spend (% rows, % micros)', n, c; end if;
+  if n <> 3 or c <> 430000 then raise exception 'FAILED: deleting a video removed spend (% rows, % micros)', n, c; end if;
   select count(*) into n from public.assist_usage where user_id = fx.user_a() and video_id is not null;
   if n <> 0 then raise exception 'FAILED: the deleted video is still referenced'; end if;
 end $$;

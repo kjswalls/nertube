@@ -718,3 +718,33 @@ export function AssistPillButton({
     </button>
   );
 }
+
+/**
+ * "or Open in Claude", beside a pill in the `api` mode (M11 review, finding 8).
+ *
+ * With a key, pressing a pill asks the API, and Open in Claude lived inside
+ * the panel that ask opened — so the free path cost a paid call first, and a
+ * phone that reloaded the page while the person was in claude.ai had to pay
+ * another before the paste box came back. This opens the same panel on the
+ * steps and asks nothing. In the `manual` mode the pill itself does this, so
+ * it is not drawn there.
+ */
+export function AssistManualEntry({
+  prefix,
+  onClick,
+}: {
+  prefix: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`${prefix}-manual-entry`}
+      title="Opens the panel on Open in Claude without asking the API: the prompt runs in your own claude.ai conversation, at no cost to this app."
+      onClick={onClick}
+      className="rounded-button px-2 py-1 text-xs text-muted outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+    >
+      or Open in Claude
+    </button>
+  );
+}

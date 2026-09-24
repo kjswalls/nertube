@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createAnthropicProvider, DEFAULT_MODEL } from "./anthropic";
+import { createAnthropicProvider, DEFAULT_MODEL, MAX_TOKENS } from "./anthropic";
 import type { CallOutcome, MeasuredCall } from "./spend";
 import { critiqueRequest, titlesRequest, VOICE_GUIDE_ALPHA } from "./test-fixtures";
 import {
@@ -653,5 +653,111 @@ describe("every billed response is reported to onUsage", () => {
     );
     const result = (await broken.provider.run(titlesRequest())) as SuggestionsResult;
     expect(result.suggestions).toHaveLength(12);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The worst case, reserved before the request leaves (M11 review, 1 and 2)    */
+/* -------------------------------------------------------------------------- */
+
+describe("the worst case is reserved before anything is sent", () => {
+  function gated(
+    handler: (init: RequestInit) => Response | Promise<Response>,
+    beforeSend: (worst: { requestedModel: string; costMicros: number }) => Promise<void> | void,
+  ) {
+    const events: string[] = [];
+    const worst: { requestedModel: string; costMicros: number }[] = [];
+    const noUsage: boolean[] = [];
+    const { calls, fetchStub } = stub((init) => {
+      events.push("sent");
+      return handler(init);
+    });
+    return {
+      calls,
+      events,
+      worst,
+      noUsage,
+      provider: createAnthropicProvider({
+        apiKey: "sk-ant-test-key",
+        maxRetries: 0,
+        fetch: fetchStub,
+        beforeSend: async (w) => {
+          events.push("reserve");
+          worst.push(w);
+          await beforeSend(w);
+        },
+        onUsage: () => {
+          events.push("settle");
+        },
+        onNoUsage: (billed) => {
+          events.push("close");
+          noUsage.push(billed);
+        },
+      }),
+    };
+  }
+
+  it("reserves, then sends, then settles — with a worst case above any real answer", async () => {
+    const run = gated(() => jsonResponse(message(suggestions(12))), () => {});
+    await run.provider.run(titlesRequest());
+    expect(run.events).toEqual(["reserve", "sent", "settle"]);
+    expect(run.worst[0].requestedModel).toBe("claude-opus-5");
+    // All of max_tokens at the dearest output rate ($50/M) is the floor of it…
+    expect(run.worst[0].costMicros).toBeGreaterThan(MAX_TOKENS * 50);
+    // …and the prompt, one token per byte at $10/M, is on top.
+    const sent = JSON.parse(String(run.calls[0].init.body)) as { system: string };
+    expect(run.worst[0].costMicros).toBeGreaterThan(MAX_TOKENS * 50 + Buffer.byteLength(sent.system) * 10);
+  });
+
+  it("counts each image of a critique at the image ceiling", async () => {
+    const text = gated(() => jsonResponse(message(suggestions(12))), () => {});
+    await text.provider.run(titlesRequest()).catch(() => {});
+    const critique = gated(() => apiError(400, "invalid_request_error"), () => {});
+    await critique.provider.run(critiqueRequest()).catch(() => {});
+    // Three images at 5,000 tokens × $10/M each is at least 150,000 µ$ more.
+    expect(critique.worst[0].costMicros - text.worst[0].costMicros).toBeGreaterThan(100_000);
+  });
+
+  it("sends nothing when the reservation refuses, and throws its refusal", async () => {
+    const run = gated(
+      () => jsonResponse(message(suggestions(12))),
+      () => {
+        throw new AssistError("spend_cap", { message: "At the cap." });
+      },
+    );
+    expect(await codeOf(() => run.provider.run(titlesRequest()))).toBe("spend_cap");
+    expect(run.calls).toHaveLength(0);
+    expect(run.events).toEqual(["reserve"]);
+  });
+
+  it("keeps the worst case after our own timeout: the API may have billed it", async () => {
+    const run = gated(
+      (init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        }),
+      () => {},
+    );
+    expect(await codeOf(() => run.provider.run(titlesRequest(), { timeoutMs: 20 }))).toBe("timeout");
+    expect(run.events).toEqual(["reserve", "sent", "close"]);
+    expect(run.noUsage).toEqual([true]);
+  });
+
+  it("keeps it after a dropped connection, and releases it after an error status", async () => {
+    const dropped = gated(() => Promise.reject(new TypeError("fetch failed")), () => {});
+    expect(await codeOf(() => dropped.provider.run(titlesRequest()))).toBe("unreachable");
+    expect(dropped.noUsage).toEqual([true]);
+
+    for (const [status, type] of [
+      [429, "rate_limit_error"],
+      [500, "api_error"],
+      [400, "invalid_request_error"],
+    ] as const) {
+      const refused = gated(() => apiError(status, type), () => {});
+      await codeOf(() => refused.provider.run(titlesRequest()));
+      expect(refused.noUsage).toEqual([false]);
+    }
   });
 });

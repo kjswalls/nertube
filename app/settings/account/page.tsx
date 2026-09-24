@@ -11,6 +11,7 @@ import { SpendingForm, type SpendingView } from "@/components/settings/spending-
 import {
   DEFAULT_CAP_DOLLARS,
   formatMicros,
+  isOverCap,
   meanCallMicros,
   MOST_EXPENSIVE,
   readBudget,
@@ -110,10 +111,14 @@ function spendingView(budget: SpendBudget): SpendingView {
     calls: budget.calls,
     mean: mean === null ? null : formatMicros(mean),
     assumedCalls: budget.assumedCalls,
+    estimatedCalls: budget.estimatedCalls,
     capDollars: cap,
     capSource: budget.cap.source,
     defaultCap: DEFAULT_CAP_DOLLARS,
     used: cap === null ? null : cap === 0 ? 1 : budget.spendMicros / (cap * 1_000_000),
+    // The same comparison the reservation makes, so the meter and the words
+    // never say "reached" while the next call would still go (review, 3).
+    atCap: isOverCap(budget),
     assumedRate: `$${MOST_EXPENSIVE.input} in and $${MOST_EXPENSIVE.output} out per million tokens`,
   };
 }

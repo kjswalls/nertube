@@ -17,6 +17,7 @@ import {
   AssistCapNote,
   AssistFailure,
   AssistFixtureNotice,
+  AssistManualEntry,
   AssistMetaLine,
   AssistNoticeLine,
   AssistPanel,
@@ -25,7 +26,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
-import { OpenInClaude } from "./manual";
+import { OpenInClaude, useManualRoute } from "./manual";
 import { useAssistRun } from "./run";
 
 /**
@@ -101,6 +102,7 @@ export function ThumbnailCritiqueAssist({
 
   const ask = () => {
     setReading(false);
+    route.clearCap();
     void run.ask(() => critiqueThumbnails({ videoId }));
   };
 
@@ -108,30 +110,42 @@ export function ThumbnailCritiqueAssist({
    * A critique pasted back from claude.ai, into the same run. Not stored, as
    * the API's is not: it judges the images as they are now.
    */
-  const read = async (reply: string): Promise<boolean> => {
+  const read = async (reply: string): Promise<number | null> => {
     setReading(true);
-    let ok = false;
+    let count: number | null = null;
     await run.ask(async () => {
       const answer = await readPastedCritique({ videoId, reply });
-      ok = answer.ok;
+      count = answer.ok ? answer.data.verdicts.length : null;
       return answer;
     });
-    return ok;
+    if (count !== null) route.clearCap();
+    return count;
   };
 
-  const pasteFailure =
-    state.failure && state.failure.provider === MANUAL_PROVIDER ? state.failure : null;
-  const apiFailure = state.failure && !pasteFailure ? state.failure : null;
-  // The cap's refusal: drawn above Open in Claude, which it opens. See the brainstorm.
-  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
-  const manualFirst = mode === "manual" || capFailure !== null;
+  /**
+   * Opened with "or Open in Claude" (M11 review, finding 8): the only way to
+   * this panel's paste box used to be a paid multi-image critique, and a
+   * critique is never stored, so a reload mid-trip meant paying again.
+   */
+  const [manualEntry, setManualEntry] = useState(false);
+
+  // Which failure belongs to which box — the one rule, in manual.tsx.
+  const route = useManualRoute({ mode, failure: state.failure, reading, manualEntry });
+  const { pasteFailure, apiFailure, capFailure, manualFirst } = route;
   const pasted = state.meta?.provider === MANUAL_PROVIDER;
+
+  function openManual() {
+    setManualEntry(true);
+    setOpen(true);
+    setNonce((previous) => previous + 1);
+  }
 
   function press() {
     if (open) {
       close();
       return;
     }
+    setManualEntry(false);
     setOpen(true);
     setNonce((previous) => previous + 1);
     // The pill is the ask: pressing it with nothing to show is what starts the
@@ -175,6 +189,10 @@ export function ThumbnailCritiqueAssist({
         open ? "w-full" : "ml-auto",
       ].join(" ")}
     >
+      <div className="flex flex-wrap items-center justify-end gap-1">
+      {mode === "api" && !open && ready > 0 ? (
+        <AssistManualEntry prefix={PREFIX} onClick={openManual} />
+      ) : null}
       <AssistPillButton
         verb="Critique at tile size"
         title={
@@ -189,6 +207,7 @@ export function ThumbnailCritiqueAssist({
         badge={ready === 0 ? undefined : `${ready}/3`}
         onClick={press}
       />
+      </div>
 
       {ready === 0 ? (
         <p data-testid="critique-nothing" className="text-xs text-muted">
@@ -274,7 +293,6 @@ export function ThumbnailCritiqueAssist({
           ) : null}
 
           <OpenInClaude
-            key={manualFirst ? "first" : "quiet"}
             prefix={PREFIX}
             primary={manualFirst}
             what="a verdict on each uploaded variant"
@@ -299,7 +317,7 @@ export function ThumbnailCritiqueAssist({
             />
           ) : null}
 
-          {apiFailure && !capFailure ? (
+          {apiFailure ? (
             <>
               <AssistFailure
                 prefix={PREFIX}

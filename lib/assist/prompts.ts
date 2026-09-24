@@ -113,8 +113,14 @@ function pastTitlesSection(channel: ChannelContext): string | null {
   ].join("\n");
 }
 
+/**
+ * How the thumbnail images reach the model: as blocks in the API request
+ * ("below"), or as files the person attaches in claude.ai ("attached").
+ */
+export type ImageDelivery = "inline" | "attached";
+
 /** The craft rules for each kind, from BRIEF.md's seed checklists. */
-function craftSection(request: AssistRequest): string {
+function craftSection(request: AssistRequest, images: ImageDelivery): string {
   const want = wantedFor(request);
 
   switch (request.kind) {
@@ -177,7 +183,14 @@ function craftSection(request: AssistRequest): string {
       return [
         "## The job",
         "",
-        `Judge the ${request.variants.length} thumbnail image${request.variants.length === 1 ? "" : "s"} below against the video's title and its locked thumbnail concept.`,
+        // Where the images are, and what they are judged against, said as it
+        // is: attached by hand in claude.ai, and no "locked concept" when the
+        // video has none (M11 review, finding 14).
+        `Judge the ${request.variants.length} thumbnail image${request.variants.length === 1 ? "" : "s"} ${
+          images === "attached" ? "attached to this message" : "below"
+        } against the video's title${
+          isBlank(request.video.thumbnailConcept ?? "") ? "" : " and its locked thumbnail concept"
+        }.`,
         "",
         "Judge each one the way a viewer meets it: as a small tile on a crowded page, about 360 pixels wide, seen for less than a second alongside the title.",
         "",
@@ -237,6 +250,18 @@ function outputSection(request: AssistRequest): string {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * What the model is for, per kind. It used to say "writes twenty options" in
+ * every prompt, including the one asking for a single hook and the one asking
+ * for verdicts (M11 review, finding 14).
+ */
+const ROLE_JOB: Record<AssistRequest["kind"], string> = {
+  titles: "writes the options so they can choose one",
+  concepts: "writes the options so they can choose one",
+  hooks: "drafts the opening lines so they can choose one",
+  thumbnail_critique: "judges the thumbnails before one is shipped",
+};
+
+/**
  * Everything a prompt says about *the job*, as opposed to the shape of the
  * answer: who this is for, how the channel sounds, what it has published, and
  * the craft rules for this kind.
@@ -249,16 +274,19 @@ function outputSection(request: AssistRequest): string {
  * answer is exactly as well-informed as one the key paid for.
  * `lib/assist/manual.test.ts` holds both to that.
  */
-export function briefSections(request: AssistRequest): string[] {
+export function briefSections(
+  request: AssistRequest,
+  images: ImageDelivery = "inline",
+): string[] {
   return [
     [
-      "You are helping one creator package a YouTube video on their own channel. You are not a brand, a copywriter or an assistant with a personality; you are the part of their process that writes twenty options so they can choose one.",
+      `You are helping one creator package a YouTube video on their own channel. You are not a brand, a copywriter or an assistant with a personality; you are the part of their process that ${ROLE_JOB[request.kind]}.`,
       "",
       `The channel is ${request.channel.name}.`,
     ].join("\n"),
     voiceSection(request.channel),
     pastTitlesSection(request.channel),
-    craftSection(request),
+    craftSection(request, images),
   ].filter((section): section is string => section !== null);
 }
 

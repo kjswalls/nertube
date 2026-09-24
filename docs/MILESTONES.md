@@ -10995,5 +10995,9 @@ and no egress; no other agent was writing.
 | Bundle | grep of the fresh `.next/static` vs `.next/server` | **0 static files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `@anthropic-ai`, `anthropic-ai/sdk`, `claude-opus`, `claude-fable`, `claude-sonnet`, `claude-haiku`, `server-side-fallback`, `structured-outputs`, `anthropic-beta`, `ASSIST_PROVIDER`, `NERTUBE_TEST_ASSIST_MODE`, `NERTUBE_TEST_ANTHROPIC_STUB`, the stub key, `PRICES_PER_MILLION`, `record_assist_usage`, `assist_budget`, and the prompt's prose (`You are helping one creator package`, `Rules of the craft`, `VOICE GUIDE`, `What this channel has published`, `I will copy your answer into an app`, `How to answer — please follow this exactly`) and the reader's (`It expects one per line`); **each found in 2–7 `.next/server` files**. `claude.ai/new`: one static chunk, as it must be |
 | Database | `./scripts/verify-db.sh m11_check` | **OK — migrations applied (0001–0011), 19 SQL test files passed** |
 | Unit | `npx vitest run` | **38 files, 683 tests passed** (+1: `capReachedOf`) |
-| M11 specs | `E2E_REUSE=0 npx playwright test m11-walk spend-cap assist-manual` | **19 passed** before the fold; after it, `m11-walk` **6 passed** and the three together re-run in the full suite |
-| Browser suite | `E2E_REUSE=0 npm run e2e` | FULL_SUITE_RESULT |
+| M11 specs | `E2E_REUSE=0 npx playwright test m11-walk spend-cap assist-manual` | **19 passed** before the fold; after it, `m11-walk` **6 passed**, and all three again in the full suite below |
+| Browser suite | `E2E_REUSE=0 npm run e2e` (production build) | **363 passed, 1 skipped (`session-refresh`, as since M1), 0 failed — 16.2 min, exit 0.** 357 before M11's integration + the 6 walk tests; `assist-manual` and `spend-cap` included |
+
+The server log carries M10's "The destination stream closed early" line 84
+times over the run (a navigation abandoning a streamed response); no spec
+failed with it.

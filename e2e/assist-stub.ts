@@ -34,6 +34,10 @@ export interface StubRequest {
 
 export interface AssistStub {
   readonly requests: StubRequest[];
+  /** How long each answer waits before it is sent — for asks in flight together. */
+  delayMs: number;
+  /** When set, every request is answered with this error status and no usage. */
+  errorStatus: number | null;
   close(): Promise<void>;
 }
 
@@ -51,6 +55,7 @@ function answer(): string {
 
 export async function startAssistStub(): Promise<AssistStub> {
   const requests: StubRequest[] = [];
+  const control: { delayMs: number; errorStatus: number | null } = { delayMs: 0, errorStatus: null };
   const server = http.createServer((req, res) => {
     let raw = '';
     req.on('data', (chunk) => {
@@ -64,19 +69,28 @@ export async function startAssistStub(): Promise<AssistStub> {
         body = {};
       }
       requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          id: `msg_stub_${requests.length}`,
-          type: 'message',
-          role: 'assistant',
-          model: STUB_MODEL,
-          content: [{ type: 'text', text: answer() }],
-          stop_reason: 'end_turn',
-          stop_sequence: null,
-          usage: { ...STUB_USAGE, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-        }),
-      );
+      const send = () => {
+        if (control.errorStatus !== null) {
+          res.writeHead(control.errorStatus, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'stubbed failure' } }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: `msg_stub_${requests.length}`,
+            type: 'message',
+            role: 'assistant',
+            model: STUB_MODEL,
+            content: [{ type: 'text', text: answer() }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { ...STUB_USAGE, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          }),
+        );
+      };
+      if (control.delayMs > 0) setTimeout(send, control.delayMs);
+      else send();
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -85,6 +99,18 @@ export async function startAssistStub(): Promise<AssistStub> {
   });
   return {
     requests,
+    get delayMs() {
+      return control.delayMs;
+    },
+    set delayMs(value: number) {
+      control.delayMs = value;
+    },
+    get errorStatus() {
+      return control.errorStatus;
+    },
+    set errorStatus(value: number | null) {
+      control.errorStatus = value;
+    },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

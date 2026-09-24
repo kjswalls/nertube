@@ -5,13 +5,14 @@ import { useState } from "react";
 import { assist } from "@/app/actions/assist";
 import { assistPrompt, readPastedReply } from "@/app/actions/assist-manual";
 import type { AssistMode } from "@/lib/assist/select";
-import { MANUAL_PROVIDER, type CapReached } from "@/lib/assist/types";
+import type { CapReached } from "@/lib/assist/types";
 import { sameLabel } from "@/lib/text";
 
 import {
   AssistCapNote,
   AssistFailure,
   AssistFixtureNotice,
+  AssistManualEntry,
   AssistMetaLine,
   AssistNoticeLine,
   AssistPanel,
@@ -21,7 +22,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
-import { OpenInClaude } from "./manual";
+import { OpenInClaude, useManualRoute } from "./manual";
 import { useAssistTarget } from "./packaging-assist";
 import { useAssistRun } from "./run";
 import type { StoredAssistEntryValue, StoredBrainstormView } from "./stored";
@@ -109,27 +110,37 @@ export function ConceptAssist({
 
   const ask = () => {
     setReading(false);
+    route.clearCap();
     void run.ask(() => assist({ videoId, kind: "concepts" }));
   };
 
   /** A reply pasted back from claude.ai, into the same run. See the brainstorm. */
-  const read = async (reply: string): Promise<boolean> => {
+  const read = async (reply: string): Promise<number | null> => {
     setReading(true);
-    let ok = false;
+    let count: number | null = null;
     await run.ask(async () => {
       const answer = await readPastedReply({ videoId, kind: "concepts", reply });
-      ok = answer.ok;
+      count = answer.ok ? answer.data.suggestions.length : null;
       return answer;
     });
-    return ok;
+    if (count !== null) route.clearCap();
+    return count;
   };
 
-  const pasteFailure =
-    state.failure && state.failure.provider === MANUAL_PROVIDER ? state.failure : null;
-  const apiFailure = state.failure && !pasteFailure ? state.failure : null;
-  // The cap's refusal: drawn above Open in Claude, which it opens. See the brainstorm.
-  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
-  const manualFirst = mode === "manual" || capFailure !== null;
+  /** Opened with "or Open in Claude": nothing was asked (review, finding 8). */
+  const [manualEntry, setManualEntry] = useState(false);
+
+  // Which failure belongs to which box, and whether Open in Claude leads —
+  // the one rule, in manual.tsx. See the brainstorm.
+  const route = useManualRoute({ mode, failure: state.failure, reading, manualEntry });
+  const { pasteFailure, apiFailure, capFailure, manualFirst } = route;
+
+  function openManual() {
+    setNow(Date.now());
+    setManualEntry(true);
+    setOpen(true);
+    setNonce((previous) => previous + 1);
+  }
 
   function press() {
     if (open) {
@@ -137,6 +148,7 @@ export function ConceptAssist({
       return;
     }
     setNow(Date.now());
+    setManualEntry(false);
     setOpen(true);
     setNonce((previous) => previous + 1);
     // The pill is the ask when there is nothing to show, and free when there
@@ -170,6 +182,8 @@ export function ConceptAssist({
         open ? "w-full" : "ml-auto",
       ].join(" ")}
     >
+      <div className="flex flex-wrap items-center justify-end gap-1">
+      {mode === "api" && !open ? <AssistManualEntry prefix={PREFIX} onClick={openManual} /> : null}
       <AssistPillButton
         verb="Suggest concepts"
         title={
@@ -181,6 +195,7 @@ export function ConceptAssist({
         badge={entry && !open ? "saved" : undefined}
         onClick={press}
       />
+      </div>
 
       {open ? (
         <AssistPanel
@@ -250,7 +265,6 @@ export function ConceptAssist({
 
           {/* Open in Claude (M11). See `components/assist/manual.tsx`. */}
           <OpenInClaude
-            key={manualFirst ? "first" : "quiet"}
             prefix={PREFIX}
             primary={manualFirst}
             what="four thumbnail concepts"
@@ -274,7 +288,7 @@ export function ConceptAssist({
             />
           ) : null}
 
-          {apiFailure && !capFailure ? (
+          {apiFailure ? (
             <>
               <AssistFailure
                 prefix={PREFIX}

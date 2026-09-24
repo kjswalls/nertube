@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 
 import { TITLE_WARN_LENGTH } from "@/lib/packaging";
-import { MANUAL_PROVIDER, type CapReached } from "@/lib/assist/types";
+import type { CapReached } from "@/lib/assist/types";
 import type { AssistMode } from "@/lib/assist/select";
 import { sameLabel } from "@/lib/text";
 
@@ -20,7 +20,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
-import { OpenInClaude, type ManualPromptAnswer } from "./manual";
+import { OpenInClaude, useManualRoute, type ManualPromptAnswer } from "./manual";
 import { useAssistTarget } from "./packaging-assist";
 import type { AssistNotice, AssistRunState } from "./run";
 import type { StoredAssistEntryValue } from "./stored";
@@ -117,6 +117,7 @@ export function BrainstormPanel({
   mode = "api",
   capReached = null,
   reading = false,
+  manualEntry = false,
   getPrompt,
   onRead,
   otherHasAnswer,
@@ -136,12 +137,14 @@ export function BrainstormPanel({
   mode?: AssistMode;
   /** Set when the mode is `manual` because the spending cap was reached. */
   capReached?: CapReached | null;
-  /** The run in flight is a pasted reply being read, not an API ask. */
+  /** The last attempt on this question was a pasted reply being read. */
   reading?: boolean;
+  /** Opened with "or Open in Claude": the steps lead, nothing was asked. */
+  manualEntry?: boolean;
   /** The manual prompt for this question, fetched when Open in Claude is pressed. */
   getPrompt: () => Promise<ManualPromptAnswer>;
-  /** Read a pasted reply into this question's run. */
-  onRead: (reply: string) => Promise<boolean>;
+  /** Read a pasted reply into this question's run: how many it became, or null. */
+  onRead: (reply: string) => Promise<number | null>;
   /** Whether the other question already has an answer, for the tab's badge. */
   otherHasAnswer: boolean;
   onAsk: () => void;
@@ -179,19 +182,30 @@ export function BrainstormPanel({
   const capacity = capacityLine(candidateRoom, hookRoom);
 
   /*
-    Which failure belongs to which box (M11). A paste that could not be read
-    is shown under the paste box, beside the text it is about, with no "Try
-    again" — reading the same text again gives the same answer. Everything
-    else is an API failure and keeps the block and the retry it always had.
+    Which failure belongs to which box, and whether Open in Claude leads:
+    `useManualRoute` in manual.tsx, the one rule all three panels use. A paste
+    that could not be read — or never reached the server — is shown under the
+    paste box, and its retry is Read; everything else is an API failure with
+    the block and "Try again" it always had. The cap's refusal is drawn above
+    Open in Claude and stays until the next ask or a reply that reads.
   */
-  const pasteFailure =
-    view.failure && view.failure.provider === MANUAL_PROVIDER ? view.failure : null;
-  const apiFailure = view.failure && !pasteFailure ? view.failure : null;
-  // The spending cap's refusal names Open in Claude as the way on, so the
-  // steps open by themselves rather than behind a disclosure, and the refusal
-  // is drawn above them — the reason first, then the way on.
-  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
-  const manualFirst = mode === "manual" || capFailure !== null;
+  const route = useManualRoute({
+    mode,
+    failure: view.failure,
+    reading,
+    manualEntry,
+    latchKey: kind,
+  });
+  const { pasteFailure, apiFailure, capFailure, manualFirst } = route;
+  const ask = () => {
+    route.clearCap();
+    onAsk();
+  };
+  const readReply = async (reply: string) => {
+    const count = await onRead(reply);
+    if (count !== null) route.clearCap();
+    return count;
+  };
 
   const addOne = (text: string, rationale: string) => {
     if (!target) return;
@@ -248,7 +262,7 @@ export function BrainstormPanel({
             <button
               type="button"
               data-testid="brainstorm-ask-again"
-              onClick={onAsk}
+              onClick={ask}
               disabled={view.pending}
               className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
             >
@@ -302,26 +316,27 @@ export function BrainstormPanel({
 
       {/*
         Open in Claude (M11): the panel's action when there is no API key, a
-        quiet disclosure beside "Ask" when there is. Keyed by question, so the
-        prompt copied and the reply pasted belong to the tab they were for.
+        quiet disclosure beside "Ask" when there is. Keyed by question only, so
+        the prompt copied and the reply pasted belong to the tab they were for
+        — and never by whether it leads, which remounted it mid-read (review).
       */}
       {capReached ? <AssistCapNote prefix="brainstorm" capReached={capReached} /> : null}
       {capFailure ? (
         <AssistFailure
           prefix="brainstorm"
           failure={capFailure}
-          onRetry={onAsk}
+          onRetry={ask}
           disabled={view.pending}
         />
       ) : null}
 
       <OpenInClaude
-        key={`${kind}:${manualFirst ? "first" : "quiet"}`}
+        key={kind}
         prefix="brainstorm"
         primary={manualFirst}
         what={MANUAL_WHAT[kind]}
         getPrompt={getPrompt}
-        onRead={onRead}
+        onRead={readReply}
         reading={view.pending && reading}
         busy={view.pending}
         failure={pasteFailure}
@@ -336,12 +351,12 @@ export function BrainstormPanel({
         />
       ) : null}
 
-      {apiFailure && !capFailure ? (
+      {apiFailure ? (
         <>
           <AssistFailure
             prefix="brainstorm"
             failure={apiFailure}
-            onRetry={onAsk}
+            onRetry={ask}
             disabled={view.pending}
           />
           {/*
