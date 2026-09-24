@@ -534,18 +534,10 @@ found.
 
 - **It is deployed, but nothing here was tested against the deployment.** There
   is a hosted Supabase project and a Vercel project, both created by hand on
-  17 September. Migrations 0001–0009 were applied to the hosted database, one
-  at a time, through Supabase's management API (the MCP connector), and each
-  was read back afterwards; M11's brief states that `0010_time_zone.sql` (M10)
-  has since been applied there too, so the hosted database has 0001–0010.
-  **`0011_assist_spend.sql` (M11) has not been applied there.** Until it is,
-  a deployed build with a key refuses every real API call with "this month's
-  API spending could not be read" (a cap that cannot be checked is not
-  enforced by skipping it) — the refusal opens Open in Claude on the same
-  panel, so the brainstorm still works by hand — and Settings says the
-  spending cannot be read; the fixtures and Open in Claude are unaffected.
-  (No hosted row was read from this container to confirm 0010: the claim is
-  the brief's.) But no test
+  17 September. All eleven migrations, 0001–0011, were applied to
+  the hosted database one at a time, through Supabase's management API (the
+  MCP connector). Each one was read back afterwards, including its grants and
+  row-level security. The last two landed on 23 and 24 September. But no test
   in this repository has run against either one:
   - no spec has signed in to the live site;
   - no upload has gone to a hosted bucket (M1's one unfinished acceptance
@@ -572,9 +564,7 @@ found.
   added in M9. `scripts/seed-demo.ts` has never run (the harness has no admin
   API). `lib/database.types.ts` is hand-written.
 - **The SQL tests have never run on Postgres 17.** The hosted database is
-  17.6, and 0001–0009 applied to it cleanly; per M11's brief 0010 is there
-  too. 0011 has been run only on the local Postgres 16 and uses nothing newer
-  than `hashtextextended` (Postgres 11). `supabase/config.toml`
+  17.6, and all eleven migrations applied to it cleanly. `supabase/config.toml`
   pins `major_version = 17` to match. `supabase/tests/` has only ever run on
   PostgreSQL 16 (16.15, the harness's version). Nothing in the tests is known to
   behave differently on 17, but nothing has checked.
