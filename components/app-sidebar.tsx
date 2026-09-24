@@ -635,8 +635,24 @@ function SidebarLink({
   children: React.ReactNode;
 }) {
   return (
+    /*
+      `prefetch` (full), not the default. Every signed-in route is dynamic and
+      has no `loading.tsx`, and for such a route the default prefetches
+      nothing, so every click on this sidebar waited for the whole page to be
+      rendered on the server. Full prefetch renders the handful of sidebar
+      destinations in the background once they are on screen, and a click
+      shows the prefetched page at once.
+
+      What it costs: a few background renders per page view, one per distinct
+      destination, and a prefetched page can be up to five minutes old
+      (`staleTimes.static`) when opened. That only matters for a change made
+      somewhere else, another tab or the phone: a server action here calls
+      `revalidatePath`, which clears the prefetched pages, and a hover
+      refetches an expired one.
+    */
     <Link
       href={href}
+      prefetch
       title={title}
       aria-current={current === false ? undefined : current}
       aria-keyshortcuts={keyShortcut}
