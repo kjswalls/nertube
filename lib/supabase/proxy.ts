@@ -8,7 +8,7 @@ import { supabaseEnv } from "./env";
  *
  * Called from the root `proxy.ts` (Next 16's renamed middleware). Two jobs:
  *
- * 1. Call `getUser()`, which refreshes an expired access token and writes the
+ * 1. Call `getClaims()`, which refreshes an expired access token and writes the
  *    new cookies onto the outgoing response. Server components cannot write
  *    cookies, so if this did not happen here the session would quietly expire.
  * 2. Send anyone without a user to `/login`.
@@ -19,8 +19,14 @@ import { supabaseEnv } from "./env";
  * consuming the refresh token and signing the user out by visiting the page
  * they came to sign in on.
  *
- * `getUser()` — never `getSession()`: `getSession()` trusts whatever is in the
- * cookie, `getUser()` verifies it with the auth server.
+ * `getClaims()` — never `getSession()`: `getSession()` trusts whatever is in the
+ * cookie, `getClaims()` verifies the token's signature. It refreshes an expired
+ * token first, exactly as `getUser()` did, so job 1 is unchanged. With
+ * asymmetric signing keys it verifies locally against the cached
+ * public key instead of asking the auth server; with a legacy shared secret it
+ * falls back to `getUser()` itself, so it is never slower. This is only the
+ * gate: every page and action still authorizes with `requireUser()`'s
+ * `getUser()`, and every query with RLS.
  */
 export async function updateSession(request: NextRequest) {
   // Reassigned by `setAll` below, so that refreshed cookies ride along.
@@ -59,9 +65,8 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims.sub ? data.claims : null;
 
   const onLoginPage = request.nextUrl.pathname === "/login";
 
