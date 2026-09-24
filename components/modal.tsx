@@ -67,6 +67,7 @@ export function Modal({
   testId,
   placement = "center",
   width = "default",
+  chrome = "titled",
   children,
 }: {
   title: string;
@@ -108,6 +109,13 @@ export function Modal({
    * columns, and at one column it ran past the bottom of a laptop screen.
    */
   width?: "default" | "wide";
+  /**
+   * `"titled"` draws the heading and the close button above the content.
+   * `"bare"` is the capture bar: the box is the content, edge to edge, and the
+   * content draws its own way out. The heading is still rendered — visually
+   * hidden — because it is what names the dialog.
+   */
+  chrome?: "titled" | "bare";
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -182,6 +190,7 @@ export function Modal({
   }
 
   const sheet = placement === "start";
+  const bare = !sheet && chrome === "bare";
 
   return createPortal(
     <div
@@ -192,7 +201,11 @@ export function Modal({
           ? // `overscroll-contain` so a swipe on the backdrop does not scroll
             // the page underneath the sheet.
             "fixed inset-0 z-50 flex justify-start overscroll-contain bg-black/40"
-          : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]"
+          : bare
+            ? // The capture bar's scrim is heavier, and the bar sits higher:
+              // it is a command line over the page, not a form on it.
+              "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim p-4 pt-[12vh] sm:pt-[18vh]"
+            : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[10vh]"
       }
       onMouseDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -219,36 +232,47 @@ export function Modal({
               // what a thumb taps to dismiss it, and what says the page is
               // still there underneath.
               "flex h-dvh w-[min(20rem,calc(100vw-3rem))] flex-col overflow-y-auto overscroll-contain border-r border-border bg-sidebar px-3 py-4 shadow-xl"
-            : [
-                "w-full rounded-card border border-border bg-surface p-4 shadow-xl sm:p-5",
-                width === "wide" ? "max-w-3xl" : "max-w-lg",
-              ].join(" ")
+            : bare
+              ? "w-full max-w-[660px] overflow-hidden rounded-[14px] border border-edge bg-raised shadow-[0_28px_70px_rgba(0,0,0,0.58),0_2px_8px_rgba(0,0,0,0.42)]"
+              : [
+                  "w-full rounded-card border border-border bg-surface p-4 shadow-xl sm:p-5",
+                  width === "wide" ? "max-w-3xl" : "max-w-lg",
+                ].join(" ")
         }
       >
-        <div
-          className={[
-            "mb-3 flex items-baseline justify-between gap-3",
-            sheet ? "px-1" : "",
-          ].join(" ")}
-        >
-          <h2 id={headingId} className="text-base font-semibold tracking-tight">
+        {bare ? (
+          <h2 id={headingId} className="sr-only">
             {title}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
+        ) : (
+          <div
+            className={[
+              "mb-3 flex items-baseline justify-between gap-3",
+              sheet ? "px-1" : "",
+            ].join(" ")}
           >
-            {/*
-              A touchscreen has no Escape key, so there the button says what it
-              does rather than which key does it. `display: none` takes the
-              other word out of the accessibility tree too, so the name is
-              exactly one of the two.
-            */}
-            <span className="pointer-coarse:hidden">Escape to close</span>
-            <span className="hidden pointer-coarse:inline">Close</span>
-          </button>
-        </div>
+            <h2
+              id={headingId}
+              className="text-base font-semibold tracking-tight"
+            >
+              {title}
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-button px-2 py-1 text-sm text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3"
+            >
+              {/*
+                A touchscreen has no Escape key, so there the button says what it
+                does rather than which key does it. `display: none` takes the
+                other word out of the accessibility tree too, so the name is
+                exactly one of the two.
+              */}
+              <span className="pointer-coarse:hidden">Escape to close</span>
+              <span className="hidden pointer-coarse:inline">Close</span>
+            </button>
+          </div>
+        )}
 
         {children}
       </div>
@@ -282,9 +306,10 @@ function focusable(root: HTMLElement): HTMLElement[] {
     (element) =>
       // A radio group is one tab stop; the browser tabs to the checked radio
       // (or the first, when none is). Ours is always one of `channelId`.
-      !(element instanceof HTMLInputElement &&
+      !(
+        element instanceof HTMLInputElement &&
         element.type === "radio" &&
-        !element.checked) &&
-      element.offsetParent !== null,
+        !element.checked
+      ) && element.offsetParent !== null,
   );
 }

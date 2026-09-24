@@ -166,6 +166,7 @@ export function CaptureCell({
         <Modal
           title={prompt}
           testId="matrix-capture"
+          chrome="bare"
           returnFocusRef={returnFocus}
           onClose={() => setOpen(false)}
           onClosed={() => {
@@ -179,6 +180,7 @@ export function CaptureCell({
             initialChannelId={channel.id}
             preferLastUsed={false}
             variant="modal"
+            onDismiss={() => setOpen(false)}
             prefill={{
               verticalId: vertical.id,
               verticalName: vertical.name,

@@ -51,6 +51,15 @@
   --text: #151a17;
   --muted: #5d6a63;
 
+  /* Overlay tier (the capture bar, from the Quick capture artboard): a box
+     that floats above the page is one step lighter than a surface, with a
+     firmer edge, a filled chip and a recessed footer. */
+  --raised: #ffffff;
+  --edge: #cfd7ce;
+  --chip: #eef1ec;
+  --well: #f3f5f1;
+  --scrim: rgba(21, 26, 23, 0.4);
+
   /* Meaning */
   --accent: #8a6520;
   --ready: #35624a;
@@ -69,6 +78,12 @@
     --text: #e9ede9;
     --muted: #8d9a92;
 
+    --raised: #19211d;
+    --edge: #36423a;
+    --chip: #212a25;
+    --well: #151b17;
+    --scrim: rgba(7, 10, 8, 0.64);
+
     --accent: #d3a25e;
     --ready: #7fa88a;
     --attention: #e0b878;
@@ -85,6 +100,12 @@
   --hairline: #222a26;
   --text: #e9ede9;
   --muted: #8d9a92;
+
+  --raised: #19211d;
+  --edge: #36423a;
+  --chip: #212a25;
+  --well: #151b17;
+  --scrim: rgba(7, 10, 8, 0.64);
 
   --accent: #d3a25e;
   --ready: #7fa88a;
@@ -116,6 +137,11 @@
   --color-border: var(--hairline);
   --color-foreground: var(--text);
   --color-muted: var(--muted);
+  --color-raised: var(--raised);
+  --color-edge: var(--edge);
+  --color-chip: var(--chip);
+  --color-well: var(--well);
+  --color-scrim: var(--scrim);
 
   --color-accent: var(--accent);
   --color-ready: var(--ready);
