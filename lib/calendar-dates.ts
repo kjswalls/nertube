@@ -552,6 +552,30 @@ export function lastOfMonth(month: CalendarMonth): DateColumn {
   return columnOfStamp(Date.UTC(month.year, month.month, 0));
 }
 
+/**
+ * The calendar month `ms` falls in, in `zone`, as the two instants that bound
+ * it: `[from, to)`, epoch milliseconds — from the first instant of its first
+ * day to the first instant of the next month's.
+ *
+ * This is "this month" for anything measured in instants rather than dates
+ * (M11: the brainstorm's month-to-date spend, whose rows are stamped with
+ * `now()`). It is `todayColumn` for the month, `startOfDay` for each end, so a
+ * month turns over at the user's midnight on the 1st exactly when their
+ * calendar does — in Kiritimati that is 10:00 UTC on the last day of the
+ * previous month, in Pago Pago 11:00 UTC on the 1st.
+ */
+export function monthInstants(
+  ms: number,
+  zone: TimeZone,
+): { readonly month: CalendarMonth; readonly from: number; readonly to: number } {
+  // `todayColumn` always produces a day `monthOf` accepts; the fallback is
+  // the type system's, not a case that happens.
+  const month = monthOf(todayColumn(ms, zone)) ?? { year: 1970, month: 1 };
+  const from = startOfDay(firstOfMonth(month), zone) ?? ms;
+  const to = startOfDay(firstOfMonth(shiftMonth(month, 1)), zone) ?? ms;
+  return { month, from, to };
+}
+
 /** One cell of the month grid. */
 export interface GridCell {
   readonly date: DateColumn;

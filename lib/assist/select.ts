@@ -85,3 +85,49 @@ export function assistFallbackWarning(env: AssistEnvironment): string | null {
   if (env.NODE_ENV === "production") return null;
   return "[assist] No ANTHROPIC_API_KEY, so the brainstorm is answering from lib/assist/fake.ts. Set ANTHROPIC_API_KEY to ask Claude, or ASSIST_PROVIDER=fake to silence this.";
 }
+
+/* -------------------------------------------------------------------------- */
+/* Which path is primary: the API, or Open in Claude (M11)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What each assist's primary action is.
+ *
+ * - `api` — the pill asks whichever provider {@link selectAssistProvider}
+ *   picks, as it has since M8, and "Open in Claude" is a quiet secondary
+ *   action on the same panel.
+ * - `manual` — nothing is asked of an API at all. The primary action is
+ *   "Open in Claude": the app writes the prompt on the server, the person runs
+ *   it in their own claude.ai conversation and pastes the reply back.
+ *
+ * | `ASSIST_PROVIDER` | key present | mode |
+ * |---|---|---|
+ * | `manual` | either | manual |
+ * | `fake` | either | api (the fixtures answer, exactly as before M11) |
+ * | anything else non-empty | either | api |
+ * | unset | yes | api |
+ * | unset | no | manual, in every `NODE_ENV` |
+ *
+ * The last row is the point of M11: with no key the brainstorm costs nothing
+ * and still works, instead of failing with "no API key configured" in
+ * production and answering from fixtures everywhere else. `fake` written
+ * explicitly still outranks it, for the same reason it always has — the
+ * browser suite and `.env.local` state it, and a statement outranks an
+ * inference — so no existing behaviour moves. A person running locally
+ * reaches the manual mode by setting `ASSIST_PROVIDER=manual` (or by leaving
+ * it unset with no key).
+ *
+ * `ASSIST_PROVIDER=manual` with a key present means "never spend the key from
+ * the panels"; `selectAssistProvider` still reads `manual` as "not fake", so
+ * the API action itself is not removed — the panels simply never call it, and
+ * the spend ceiling is what bounds a hand-made request.
+ */
+export type AssistMode = "api" | "manual";
+
+export function selectAssistMode(env: AssistEnvironment): AssistMode {
+  const chosen = (env.ASSIST_PROVIDER ?? "").trim().toLowerCase();
+  if (chosen === "manual") return "manual";
+  if (chosen !== "") return "api";
+  const hasKey = (env.ANTHROPIC_API_KEY ?? "").trim() !== "";
+  return hasKey ? "api" : "manual";
+}

@@ -361,7 +361,13 @@ export type AssistErrorCode =
   /** A 200 that parsed as JSON but is not the shape we asked for. */
   | "wrong_shape"
   /** A well-formed answer with nothing in it. */
-  | "empty";
+  | "empty"
+  /**
+   * Not sent: this month's API spending has reached the user's cap (M11,
+   * `lib/assist/spend.ts`). The sentence names the cap and the spend; the
+   * panel adds a link to Settings. Never produced by the fixtures.
+   */
+  | "spend_cap";
 
 /**
  * The default sentence for each code. Plain, second person, no jargon.
@@ -404,6 +410,8 @@ const MESSAGES: Record<AssistErrorCode, string> = {
   malformed: "The answer was not readable. Try again.",
   wrong_shape: "The answer came back in a shape this panel cannot read. Try again.",
   empty: "Nothing came back this time. Try again.",
+  spend_cap:
+    "This month's API spending has reached its cap, so this was not sent. Raise the cap in Settings, or use Open in Claude instead.",
 };
 
 /**
@@ -489,4 +497,48 @@ export function toAssistError(value: unknown): AssistError {
     detail: value instanceof Error ? value.message : String(value),
     cause: value,
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* The answer a person pasted (M11)                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `meta.provider` — and `brainstorm_last`'s `provider` — for an answer the
+ * person asked claude.ai for themselves and pasted back.
+ *
+ * Here rather than beside the parser (`lib/assist/reply.ts`) because the
+ * panels compare against it to say where an answer came from, and this is the
+ * one module in `lib/assist` a client component may import. The app never
+ * talks to claude.ai: it writes a prompt, the person runs it in their own
+ * conversation, and this names what came back.
+ */
+export const MANUAL_PROVIDER = "manual";
+
+/** `meta.model` for a pasted answer: the app cannot know which model wrote it. */
+export const MANUAL_MODEL = "claude.ai";
+
+/* -------------------------------------------------------------------------- */
+/* The cap, already reached when the page was drawn (M11 integration)          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a panel says when this month's API spending had already reached the
+ * cap before anything was pressed — `readAssistView` in `lib/assist/mode.ts`
+ * finds it on the server, and the page then serves the panels in the
+ * `manual` mode with this beside Open in Claude.
+ *
+ * Formatted strings only: the amounts are worked out by `lib/assist/spend.ts`,
+ * which is server-only because it carries the price table, and a browser
+ * needs the sentence's numbers, not the arithmetic behind them.
+ */
+export interface CapReached {
+  /** This month's spend, as money: `$10.00`. */
+  readonly spent: string;
+  /** The cap, in whole dollars: `$10`. */
+  readonly cap: string;
+  /** True when the cap is the default the person never chose. */
+  readonly defaultCap: boolean;
+  /** The day the count starts again, in the user's zone: `1 Oct`. */
+  readonly resets: string;
 }

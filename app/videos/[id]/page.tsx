@@ -31,6 +31,7 @@ import {
   BrainstormHookPill,
 } from "@/components/assist/brainstorm-assist";
 import { readStoredBrainstorm } from "@/components/assist/stored";
+import { readAssistView } from "@/lib/assist/mode";
 import { ConceptAssist } from "@/components/assist/concept-assist";
 import { ThumbnailCritiqueAssist } from "@/components/assist/critique-assist";
 import { TitleTruncationWarning } from "@/components/preview/truncation-warning";
@@ -180,6 +181,11 @@ export default async function VideoDetailPage({
     same column twice per render to produce the same object.
   */
   const storedBrainstorm = readStoredBrainstorm(video.brainstorm_last);
+  /* M11: which of the API and "Open in Claude" is each assist's primary
+     action — one word for the three controls, decided on the server — and,
+     when the answer is "Open in Claude" because this month's API spending has
+     reached the cap, the amounts the panels say it with. */
+  const { mode: assistMode, capReached } = await readAssistView(supabase);
 
   const variantPaths: Readonly<Record<ThumbnailRole, string | null>> = {
     wild_card: video.thumb_wild_card_path,
@@ -721,6 +727,8 @@ export default async function VideoDetailPage({
                           key="assist-candidates"
                           videoId={video.id}
                           initial={storedBrainstorm}
+                          mode={assistMode}
+                          capReached={capReached}
                         />
                       ),
                       /* M8: the concept pill M2 placed now proposes concepts
@@ -734,6 +742,8 @@ export default async function VideoDetailPage({
                           key="assist-concept"
                           videoId={video.id}
                           initial={storedBrainstorm}
+                          mode={assistMode}
+                          capReached={capReached}
                         />
                       ),
                       /* The same panel, opened at the spoken hooks it
@@ -824,6 +834,8 @@ export default async function VideoDetailPage({
                     <ThumbnailCritiqueAssist
                       key="assist-critique"
                       videoId={video.id}
+                      mode={assistMode}
+                      capReached={capReached}
                     />
                   }
                 />

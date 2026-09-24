@@ -7,11 +7,20 @@ import {
   timeZoneGroups,
   todayColumn,
 } from "@/lib/calendar-dates";
+import { SpendingForm, type SpendingView } from "@/components/settings/spending-form";
+import {
+  DEFAULT_CAP_DOLLARS,
+  formatMicros,
+  meanCallMicros,
+  MOST_EXPENSIVE,
+  readBudget,
+  type SpendBudget,
+} from "@/lib/assist/spend";
 import { requireUser } from "@/lib/supabase/require-user";
 import { readTimeZone } from "@/lib/time-zone-data";
 import { readClock } from "@/lib/request-clock";
 
-export const metadata = { title: "Time zone · settings · NerTube" };
+export const metadata = { title: "Time zone and spending · settings · NerTube" };
 
 /**
  * `/settings/account` — the user's time zone (M10).
@@ -30,13 +39,22 @@ export const metadata = { title: "Time zone · settings · NerTube" };
  * clock read, as the plain confirmation that the setting did what it says.
  */
 export default async function AccountSettingsPage() {
-  await requireUser();
+  const { supabase } = await requireUser();
 
   // The page's one clock read, and the zone, once each.
   const now = await readClock();
   const timeZone = await readTimeZone();
 
   const today = todayColumn(now, timeZone.zone);
+
+  // M11: this month's API spending, in the same zone and from the same clock
+  // read as the "today" line above it.
+  let budget: SpendBudget | null = null;
+  try {
+    budget = await readBudget(supabase, now, timeZone.zone);
+  } catch {
+    budget = null;
+  }
 
   return (
     <AppShell section="settings" gutter="reading" now={now}>
@@ -49,7 +67,8 @@ export default async function AccountSettingsPage() {
             The zone your day is counted in: when the calendar turns over to
             tomorrow, when a scheduled video is due, and the dates on anything
             you published, swapped or captured. It is saved to your account, so
-            every device you sign in on uses the same one.
+            every device you sign in on uses the same one. Below it, what the
+            brainstorm has cost on the API this month, and the cap on it.
           </p>
         </SettingsHeader>
 
@@ -61,7 +80,40 @@ export default async function AccountSettingsPage() {
           todayLabel={formatDateColumn(today, "full") ?? today}
           timeLabel={formatInstant(now, timeZone.zone, "time") ?? ""}
         />
+
+        {budget ? (
+          <SpendingForm view={spendingView(budget)} />
+        ) : (
+          <section
+            id="spending"
+            data-testid="settings-spending-unreadable"
+            className="rounded-card border border-border bg-surface px-4 py-4 text-[13px] leading-5 text-muted"
+          >
+            This month&rsquo;s API spending could not be read, so the cap cannot be shown or
+            changed right now. While it cannot be read, the brainstorm does not call the API at
+            all — Open in Claude still works. Reload to try again.
+          </section>
+        )}
       </div>
     </AppShell>
   );
+}
+
+/** The numbers the spending section shows, formatted here on the server. */
+function spendingView(budget: SpendBudget): SpendingView {
+  const mean = meanCallMicros(budget);
+  const cap = budget.cap.dollars;
+  return {
+    monthLabel: budget.month.label,
+    resets: budget.month.resets,
+    spent: formatMicros(budget.spendMicros),
+    calls: budget.calls,
+    mean: mean === null ? null : formatMicros(mean),
+    assumedCalls: budget.assumedCalls,
+    capDollars: cap,
+    capSource: budget.cap.source,
+    defaultCap: DEFAULT_CAP_DOLLARS,
+    used: cap === null ? null : cap === 0 ? 1 : budget.spendMicros / (cap * 1_000_000),
+    assumedRate: `$${MOST_EXPENSIVE.input} in and $${MOST_EXPENSIVE.output} out per million tokens`,
+  };
 }

@@ -12,13 +12,16 @@ import Anthropic, {
   UnprocessableEntityError,
 } from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { BetaMessage } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 
 import { assemble } from "./clamp";
+import { measureCall, type CallOutcome, type MeasuredCall } from "./spend";
 import { buildSystemPrompt, buildUserMessage } from "./prompts";
 import { parseModelText, payloadSchemaFor } from "./schema";
 import {
   AssistError,
   DEFAULT_ASSIST_TIMEOUT_MS,
+  isAssistError,
   toAssistError,
   type AssistCallOptions,
   type AssistProvider,
@@ -151,6 +154,21 @@ export interface AnthropicProviderOptions {
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Promise<Response>;
+  /**
+   * Told about every response that came back from the API (M11): what it
+   * cost, priced by `measureCall` in `spend.ts`, and how the call ended —
+   * `answered`, `refused` (`stop_reason: "refusal"`), or `failed` (a 200 whose
+   * body could not be used: not JSON, the wrong shape, empty, cut off). All
+   * three were billed, so all three are reported. A request that got no
+   * response at all — a 4xx or 5xx, a dropped socket, our own timeout — has
+   * no usage to report and is not.
+   *
+   * Awaited before `run()` settles, so a recorder that writes to the
+   * database has written by the time the answer is shown. Whatever it
+   * throws is logged and swallowed: a call that has been made and paid for
+   * must still hand back its answer.
+   */
+  readonly onUsage?: (call: MeasuredCall, outcome: CallOutcome) => unknown;
 }
 
 /**
@@ -226,6 +244,45 @@ async function callAnthropic(
 
   const elapsedMs = Date.now() - startedAt;
 
+  // From here on the call has been billed, whatever happens to the answer.
+  const measured = measureCall(message, model);
+  let outcome: CallOutcome = "failed";
+  try {
+    const result = readMessage(request, message, model, elapsedMs);
+    outcome = "answered";
+    return result;
+  } catch (error) {
+    if (isAssistError(error) && error.code === "refused") outcome = "refused";
+    throw error;
+  } finally {
+    await reportUsage(options.onUsage, measured, outcome);
+  }
+}
+
+/** Hand a priced call to the caller's recorder, never letting it fail the call. */
+async function reportUsage(
+  onUsage: AnthropicProviderOptions["onUsage"],
+  measured: MeasuredCall,
+  outcome: CallOutcome,
+): Promise<void> {
+  if (!onUsage) return;
+  try {
+    await onUsage(measured, outcome);
+  } catch (error) {
+    console.error(
+      "[assist] a billed call could not be recorded:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/** Turn a response the API sent back into an answer, or the error it is. */
+function readMessage(
+  request: AssistRequest,
+  message: BetaMessage,
+  model: string,
+  elapsedMs: number,
+): AssistResult {
   // A refusal carries no JSON, so it is checked before the content is read.
   // With `fallbacks: "default"` this means the substitute declined as well —
   // the whole chain said no.

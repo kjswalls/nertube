@@ -6,6 +6,7 @@ import {
   GATEWAY_URL,
 } from './scripts/dev-stack/shared';
 import { apiKey } from './scripts/dev-stack/jwt';
+import { ASSIST_STUB_ORIGIN } from './e2e/assist-stub';
 
 /**
  * End-to-end configuration.
@@ -182,6 +183,24 @@ export default defineConfig({
           it (`lib/request-clock.ts`). Nothing else in the suite sends one.
         */
         NERTUBE_TEST_CLOCK: '1',
+        /*
+          M11: a request may choose which of the API and "Open in Claude" is
+          primary on its own page, through the `nertube-test-assist-mode`
+          cookie (`lib/assist/mode.ts`). The server keeps `ASSIST_PROVIDER=fake`
+          above, so every M8 spec still gets its fixtures, and
+          `e2e/assist-manual.spec.ts` can see the page a keyless deployment
+          serves without a second server. Nothing else sends the cookie.
+        */
+        NERTUBE_TEST_ASSIST_MODE: '1',
+        /*
+          The real provider against a stub, for one spec (M11). With this set,
+          a request carrying the `nertube-test-assist=stub` cookie is answered
+          by `lib/assist/anthropic.ts` pointed at `e2e/assist-stub.ts` (which
+          `e2e/spend-cap.spec.ts` starts), with a dummy key — so the spending
+          cap can be shown recording, refusing and letting through real calls.
+          Every other request still gets the fixtures above.
+        */
+        NERTUBE_TEST_ANTHROPIC_STUB: ASSIST_STUB_ORIGIN,
       },
     },
   ],

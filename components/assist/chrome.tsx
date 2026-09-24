@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useLayoutEffect,
@@ -10,7 +11,7 @@ import {
 } from "react";
 
 import { formatAge } from "@/components/video-detail/age";
-import type { AssistMeta } from "@/lib/assist/types";
+import { MANUAL_PROVIDER, type AssistMeta, type CapReached } from "@/lib/assist/types";
 import { useDismiss } from "@/lib/shortcuts";
 
 import { describeMeta } from "./acceptance";
@@ -159,6 +160,10 @@ export function AssistFailure({
       <p data-testid={`${prefix}-failure-message`} className="text-xs">
         {failure.message}
       </p>
+      {failure.code === "spend_cap" ? (
+        // M11: the one refusal that is fixed somewhere else, so it says where.
+        <SpendCapSettingsLink prefix={prefix} />
+      ) : null}
       <p className="text-xs text-muted">
         Nothing was changed, and nothing was added to your fields.
         {failure.retryAfterSeconds
@@ -176,6 +181,65 @@ export function AssistFailure({
           {failure.retryable ? "Try again" : "Try anyway"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The spending cap (M11)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** Where the cap is changed. One link, for the refusal and for the note. */
+function SpendCapSettingsLink({ prefix }: { prefix: string }) {
+  return (
+    <p className="text-xs">
+      <Link
+        href="/settings/account#spending"
+        data-testid={`${prefix}-spend-cap-settings`}
+        className="rounded-button font-medium text-foreground underline decoration-border underline-offset-2 outline-none hover:decoration-accent focus-visible:ring-2 focus-visible:ring-accent thumb:inline-flex thumb:min-h-11 thumb:items-center"
+      >
+        See this month&rsquo;s spending and change the cap in Settings
+      </Link>
+    </p>
+  );
+}
+
+/**
+ * The cap, reached before anything was pressed.
+ *
+ * `readAssistView` (`lib/assist/mode.ts`) found this month's API spending at
+ * or over the cap when the page was drawn, so the page serves the panel in the
+ * `manual` mode and this sits directly above Open in Claude: why the panel is
+ * leading with it, what the month has cost, and where the cap is changed.
+ * It is not a failure — nothing was asked and nothing failed — so it is drawn
+ * as a quiet note, not the attention block a refused ask gets. The amounts
+ * are measured numbers, so they are set in the mono face.
+ */
+export function AssistCapNote({
+  prefix,
+  capReached,
+}: {
+  prefix: string;
+  capReached: CapReached;
+}) {
+  return (
+    <div
+      data-testid={`${prefix}-cap-note`}
+      className="flex flex-col gap-1 rounded-input border border-border bg-surface px-3 py-2"
+    >
+      <p className="text-xs">
+        This month&rsquo;s API spending is{" "}
+        <span data-testid={`${prefix}-cap-spent`} className="font-mono">
+          {capReached.spent}
+        </span>
+        , which has reached {capReached.defaultCap ? "the default cap of" : "your cap of"}{" "}
+        <span className="font-mono">{capReached.cap}</span> a month, so the
+        brainstorm will not call the API
+        {capReached.resets ? ` until ${capReached.resets}` : " this month"}.
+        Open in Claude asks the same question in your own claude.ai
+        conversation, at no cost to this app.
+      </p>
+      <SpendCapSettingsLink prefix={prefix} />
     </div>
   );
 }
@@ -336,6 +400,13 @@ export function AssistProvenance({
       ? "This channel has no voice guide, so this is generic advice — write one in settings and ask again."
       : "It was written without a voice guide.";
 
+  /*
+    A pasted answer (M11) says so: it came from the person's own claude.ai
+    conversation, not from a call this app made, and "asked for" would be a
+    claim about a request that never left this server.
+  */
+  const pasted = entry?.provider === MANUAL_PROVIDER;
+
   return (
     <>
       <p data-testid={`${prefix}-provenance`} className="text-xs text-muted">
@@ -343,9 +414,13 @@ export function AssistProvenance({
           ? "Asking now…"
           : entry === null
             ? "Nothing asked for yet."
-            : fresh
-              ? `Fresh, just now. ${voice}`
-              : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${voice}`}
+            : pasted
+              ? fresh
+                ? `Read from your claude.ai reply just now. ${voice}`
+                : `From earlier — pasted from claude.ai ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${voice}`
+              : fresh
+                ? `Fresh, just now. ${voice}`
+                : `From earlier — asked for ${formatAge(entry.at, now) ?? "a while"} ago and kept, so reopening costs nothing. ${voice}`}
       </p>
       <AssistFixtureNotice prefix={prefix} provider={entry?.provider ?? null} />
     </>

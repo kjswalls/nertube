@@ -10326,3 +10326,674 @@ script now starts about 540px down, and about six lines show on arrival.
 the summary before and after a choice, and the fields' 16px and 44px once
 open.
 
+
+---
+
+## M11 — The spending cap: every real call priced, and a ceiling on the month
+
+> Scope: this slice of M11 (a second agent built "Open in Claude", the manual
+> path, in the same tree at the same time). **Owned and new:**
+> `supabase/migrations/0011_assist_spend.sql` (the milestone's one migration),
+> `supabase/tests/87_assist_spend.test.sql`, `lib/assist/spend.ts` and
+> `spend.test.ts`, `lib/assist/test-stub.ts`, `app/actions/spend.ts`,
+> `components/settings/spending-form.tsx`, `e2e/assist-stub.ts`,
+> `e2e/spend-cap.spec.ts`. **Shared files, smallest additive changes:**
+> `lib/assist/anthropic.ts` (an `onUsage` option and the call to it; the
+> message reading moved into `readMessage` unchanged), `lib/assist/anthropic.test.ts`
+> (a new `describe` at the end), `lib/assist/types.ts` (the `spend_cap` code
+> and its default sentence), `app/actions/assist.ts` (`provider()` takes the
+> caller's client, video and kind, checks the cap and records usage;
+> `chooseProvider()` for the test stub; `failure()` takes the provider name;
+> the critique uses the same), `lib/calendar-dates.ts` (`monthInstants`) and
+> `calendar-dates.zone.test.ts`, `lib/database.types.ts` (two tables, three
+> functions), `app/settings/account/page.tsx` (the section under the time
+> zone), `components/settings/settings-nav.tsx` (the label), `playwright.config.ts`
+> (one variable), `supabase/tests/90_schema_contract.test.sql` (two tables, two
+> functions, the privilege checks), `README.md`. **In `components/assist/**`,
+> exactly one thing:** `chrome.tsx`'s `AssistFailure` draws a link to
+> `/settings/account#spending` under the message when the code is `spend_cap`
+> (and imports `next/link` for it). Nothing else in that directory was touched
+> by this slice. No new runtime dependency.
+
+### Why
+
+The user wants the brainstorm to cost nothing by default (the manual path,
+the other half of M11) and to be able to turn the API on later with a hard
+monthly ceiling. M8's review had left exactly that open: "no per-user counter,
+no asks-per-hour ceiling and no daily cap … on the day this app has a second
+user, a counter is the first thing to add". This is the counter and the cap.
+Nothing here stores, forwards or uses claude.ai credentials; the only
+credential in play is `ANTHROPIC_API_KEY`, as before.
+
+### What was built
+
+- **`assist_usage`** (0011): one row per real API call that billed anything —
+  user, `created_at`, video (tenant-bound composite FK, `on delete set null
+  (video_id)` so a deleted video keeps its spend), kind, outcome
+  (`answered | failed | refused`), requested model, **served** model,
+  `price_assumed`, input / output / cache-read / cache-write tokens, and
+  `cost_micros` (bigint, integer micro-dollars). RLS select for the owner; no
+  INSERT, UPDATE or DELETE for any client.
+- **`assist_caps`** (0011): one row per user, `cap_dollars integer` (0 to
+  100,000), null meaning "no cap". No row means the default. Written only by
+  `set_assist_cap()`.
+- **`record_assist_usage(...)`**, security definer: stamps `user_id =
+  auth.uid()` and `created_at = now()` itself; every number is held to CHECKs
+  (tokens 0–10M, cost 0–$1,000); another tenant's video is a 23503.
+- **`assist_budget(p_from, p_to)`**, security *invoker*: the caller's spend,
+  call count and assumed-price count in `[from, to)`, plus whether a cap row
+  exists and its amount — everything the pre-call check and Settings need in
+  one round trip, read through the caller's own RLS.
+- **`lib/assist/spend.ts`** (`server-only`): the price table, `measureCall()`
+  (a response's `usage` → tokens and micro-dollars), `readBudget()` (the month
+  via `monthInstants`, the `assist_budget` call, the $10 default),
+  `isOverCap()`, `capRefusalMessage()`, `recordCall()`, and the money
+  formatting.
+- **`lib/assist/anthropic.ts`**: `onUsage(call, outcome)`, called — and
+  awaited — for every response that came back, whether it was answered,
+  refused, or unreadable (not JSON, the wrong shape, empty, cut off at
+  `max_tokens`): all were billed. A 4xx/5xx, a dropped socket or our own
+  timeout have no usage to report and report nothing. A recorder that throws
+  is logged and swallowed; the answer still comes back.
+- **`app/actions/assist.ts`**: before every real call, `readBudget()`; at or
+  over the cap, `AssistError("spend_cap")` with the sentence, thrown before the
+  SDK client is built. The fixtures skip the check and record nothing. The
+  critique goes through the same `provider()`.
+- **Settings → Time zone & spending** (`/settings/account#spending`): spend
+  this month (JetBrains Mono, dollars and cents), calls, the cap (marked
+  "default" when it is), a thin meter, the mean cost of a call once there is
+  one, a note when any call was priced by assumption, and the cap field (whole
+  dollars, empty for no cap, Save through `useSaveQueue`). 16px field and 44px
+  targets under a thumb; nothing scrolls sideways at 390.
+- **The refusal**: "This month's API spending is $10.00, which has reached the
+  default cap of $10 a month, so this was not sent and nothing was spent.
+  Raise the cap in Settings, or use Open in Claude to ask with your claude.ai
+  subscription instead. The count starts again on 1 Oct." — and, under it in
+  the panel, a link to the section.
+
+### The arithmetic
+
+A dollar per million tokens is a micro-dollar per token, so every price is an
+integer number of micro-dollars per token. Cache writes (1.25×) and reads
+(0.1×) are carried as hundredths so that every product is an integer, summed
+over the billed attempts, and rounded **up** once at the end. Worked examples
+are in `spend.test.ts` beside each assertion.
+
+**Which attempts are billed** was read from the installed SDK's types
+(`BetaUsage.iterations`, `BetaFallbackMessageIterationUsage`) and the bundled
+`claude-api` skill (`shared/model-migration.md`, "Billing"): `usage.iterations`
+is the per-attempt source of truth; the top-level `usage` covers only the
+attempt that produced the message; each attempt bills at its own model's
+rate; an attempt that declined before producing output is reported but not
+billed. So: when `iterations` is present every entry is priced by its own
+`model` (null → the requested model), and an entry with zero output that was
+followed by another hop, or that is last on a `refusal`, is left out. The
+served model (the row's `model`) is the top-level `model`.
+
+### Who can forge a row
+
+The task asked for a write path "the client cannot call with made-up numbers".
+In this architecture there is none. The app has no service-role key (README:
+the service-role key never goes to Vercel), so the server action records a call
+with the signed-in user's own session — exactly the credential the browser
+holds. Any function the server action can call, the browser can call.
+Closing that needs a secret the server holds and the browser does not: a
+service-role key in Vercel, or a signing secret stored in the database and
+in the deployment. Both are infrastructure changes the user has not asked for,
+so neither was made.
+
+What 0011 guarantees instead is that forgery only hurts the forger: rows are
+append-only from the client's side (no UPDATE, DELETE or TRUNCATE), so a real
+row cannot be lowered or removed; the owner and time are the database's, so a
+row cannot be charged to someone else or backdated into last month; every
+number is non-negative and bounded, so no row can subtract. A made-up row adds
+to the forger's own month and can at worst lock them out of API calls until
+they raise the cap. Asserted in `87_assist_spend.test.sql` §§1, 3–5, 8–10.
+
+### The month
+
+`monthInstants(ms, zone)` in `lib/calendar-dates.ts` — `todayColumn` for the
+month, `startOfDay` for each end — gives `[first instant of the month, first
+instant of the next)`, and `assist_budget` sums between them. The zone is
+0010's `profiles.time_zone` through `readTimeZone()`, UTC when unknown; the
+clock is `readClock()`. The same six boundary instants are pinned twice: in
+`calendar-dates.zone.test.ts` (Kiritimati, UTC+14, turns over at 10:00 UTC on
+the 30th; Pago Pago, UTC−11, at 11:00 UTC on the 1st) and in
+`87_assist_spend.test.sql` §12, where four rows straddling both boundaries sum
+to the right month in each zone and in UTC.
+
+### Testing the real provider in a browser
+
+`e2e/spend-cap.spec.ts` needs the real provider, and the whole suite runs one
+server with `ASSIST_PROVIDER=fake`. The seam is the M10 test clock's twin:
+`playwright.config.ts` sets `NERTUBE_TEST_ANTHROPIC_STUB` to a local origin, and
+a request carrying `nertube-test-assist=stub` then gets
+`createAnthropicProvider({ baseURL, apiKey: STUB_API_KEY })` — the installed
+SDK, the real request, the real usage parsing, pricing and database write —
+with `e2e/assist-stub.ts` answering at the far end and counting what reaches it.
+The address never comes from the request, and the key sent to it is never
+`ANTHROPIC_API_KEY`. Five walks: a call records its cost (row read back from
+Postgres) and Settings shows `$0.09`, one call, `$10 (default)`, the mean and
+the mono face; at exactly $10.00 a call is refused with the cap, the spend,
+Settings and Open in Claude named, **and the stub's request count does not
+move**; raising the cap to $25 in Settings lets the next call through and it is
+counted ($10.09, three calls); $0 refuses and an empty box is no cap; the
+section at 390×844 (16px field, 44px targets, no sideways scroll).
+
+### Decisions taken without the user
+
+1. **The cap lives in a sibling table, `assist_caps`, not on `profiles`.**
+   `set_time_zone()` reads "a profiles row exists" as "a zone was recorded", and
+   a detected zone never overwrites a row. A cap saved before any zone would
+   have created that row and silently switched time-zone detection off. The
+   sibling table also gives the three states their natural shapes: no row
+   (default $10), a row with null (no cap), a row with a number.
+2. **The default ($10) is in code, not in the database.** One constant,
+   `DEFAULT_CAP_DOLLARS`, is both what Settings states and what the check
+   enforces. Changing it later needs no migration.
+3. **A $0 cap is allowed and means "never call the API".** It is the natural
+   reading of the number, and a person who wants the manual path only can say
+   so without unsetting the key.
+4. **An unreadable budget refuses the call.** A deployment without 0011, or a
+   database hiccup, answers "this month's API spending could not be read, so
+   this was not sent". The alternative — call anyway — would make the ceiling
+   something that disappears exactly when nothing can see it. The cost: until
+   0011 is applied to the hosted database, a deployed M11 build with a key
+   cannot use the API at all (README, Deploying and Never proven).
+5. **Only calls that billed something are recorded.** A refusal before any
+   output bills nothing and writes no row, so "calls" and "a typical call"
+   count what cost money. Refused-mid-answer and unreadable answers are billed
+   and recorded (`refused`, `failed`).
+6. **The cost is computed in the app and trusted by the database.** The price
+   table is in code, as asked; a second copy in SQL to recompute the cost from
+   the tokens would be a second table to keep in step, and (see "Who can forge
+   a row") would not stop a made-up row anyway.
+7. **Rounded up, per call.** A fraction of a micro-dollar is always charged,
+   never dropped — the safe direction for a ceiling.
+8. **The flat cache multipliers were kept although the skill lists lower rates
+   for two models.** The signed-off table says cache reads are 0.1× input; the
+   bundled skill lists Opus 5.5's at $0.20 (0.05×) and Fable 5.1's at $0.25
+   (0.025×), and a one-hour cache write is 2× rather than 1.25×. The spec was
+   followed; the reads err towards over-counting (safe for a cap), the
+   one-hour write would under-count. The app sends no `cache_control`, so
+   none of it arises today; it is in the README.
+9. **The unknown-model price is the entry with the highest output price
+   (ties by input)** — Fable 5.1's $10/$50 — and Settings states that rate
+   rather than naming a model: the rate is what the person needs to judge the
+   number, and the price table stays out of anything a browser loads.
+10. **Settings' nav entry became "Time zone & spending"**, on the existing
+    per-user page, rather than a sixth entry. `e2e/m7-acceptance.spec.ts`
+    counts five settings links and `e2e/m9-week.spec.ts` finds the entry by
+    the text "Time zone"; both still hold without being edited.
+11. **The refusal's Settings link is a separate line under the sentence**, not
+    a link inside the server's sentence: the message is plain text from the
+    server (it must work in any panel), and the panel owns links.
+12. **The meter turns to the attention colour at the cap and says so in
+    words** ("Cap reached…"), so the state is never carried by colour alone.
+
+### Deviations from the task, stated plainly
+
+- **"A security-definer function the client cannot call with made-up
+  numbers"** is not achievable without a server-only secret this deployment
+  does not have; what was built, and why, is under "Who can forge a row".
+- **One SQL function is security invoker** (`assist_budget`), not definer: it
+  only reads, and reading through the caller's RLS is the stronger guarantee.
+  `90_schema_contract.test.sql` asserts it stays that way.
+
+### Honest limits
+
+- **No request has been sent to Anthropic, still.** Everything about pricing
+  real responses is proved against the SDK's types, the skill's billing notes
+  and a stub. Whether real `usage.iterations` look as documented on a
+  fallback-served call is the first thing to check with a key (log one row of
+  `assist_usage` beside the Console's usage page for the same call).
+- **The cap counts this app's arithmetic, not the invoice.** A call that timed
+  out on our side may still be billed by the API and is not recorded; the
+  account's real usage is never read.
+- **Checked, not reserved.** Two calls that start together can both pass the
+  check; a call in flight when the cap is crossed finishes and is counted.
+  Both are in the README.
+- **0011 is not on the hosted database** (see decision 4 for what that means
+  for a deployed build with a key).
+- The README's "0010 has not been applied there" paragraph predates this
+  milestone; this task's brief says the hosted database now has 0001–0010,
+  which this container cannot check, so that sentence was left as it was and
+  the 0011 note added beside it.
+
+### Gates
+
+Run after the last code edit of this slice, in this container, with no
+`ANTHROPIC_API_KEY` and no egress. The other M11 agent was writing in the same
+tree throughout, so the full browser run was made on a snapshot copy of the
+tree (its in-progress files included) on its own ports and databases
+(`DEV_STACK_PORT=54341`, `E2E_PORT=3131`, `NERTUBE_DEV_DB=nertube_e2e_m11spend`,
+`NERTUBE_TEST_DB=nertube_test_m11spend`, `E2E_ASSIST_STUB_PORT=54378`) so the
+two agents' runs could not reset each other's databases.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npx tsc --noEmit` and `-p tsconfig.harness.json` | clean |
+| Lint | `npx eslint .` | clean |
+| Database | `./scripts/verify-db.sh m11_spend` | **OK — 0001–0011 applied, 19 SQL test files passed** (`87_assist_spend.test.sql` new, twelve blocks; `90_schema_contract` now expects the two new tables, eleven definer functions and the new privileges) |
+| Unit | `npx vitest run` | **38 files, 682 tests passed** (this slice: `spend.test.ts` 25, seven new in `anthropic.test.ts`, three in `calendar-dates.zone.test.ts`) |
+| Browser, this spec | `E2E_REUSE=0 npx playwright test spend-cap` | **5 passed** (twice, on the main tree) |
+| Browser, full suite | `E2E_REUSE=0 npx playwright test` (snapshot copy) | **357 passed, 0 failed, 1 skipped** (`session-refresh`), 21.4 min |
+| Bundle | grep of `.next/static` after the build | **0 files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `claude-opus`, `claude-fable`, `server-side-fallback`, `structured-outputs`, `ASSIST_PROVIDER`, `@anthropic-ai/sdk`, `PRICES_PER_MILLION`, `record_assist_usage`, `NERTUBE_TEST_ANTHROPIC_STUB`, the stub key, and two prompt phrases; the same grep of `.next/server` finds each of them (2–7 files), the control that makes the zeroes mean something |
+
+The server log during the runs carries the "The destination stream closed
+early" lines M10 recorded; no spec fails on them. Screenshots of the section
+(desktop and 390px) and of the refusal are written to the gitignored
+`e2e/screenshots/m11-*.png` by the spec.
+
+---
+
+## M11 — Open in Claude: every assist, answered in your own conversation
+
+> Scope: this slice of M11 (a second agent built the spending cap in the same
+> tree at the same time). **Owned and new:** `lib/assist/manual.ts` (the
+> manual prompt) and `manual.test.ts`, `lib/assist/reply.ts` (the reply
+> reader and `createPastedProvider`) and `reply.test.ts`, `lib/assist/load.ts`
+> (the prompt's inputs, read with the caller's client), `lib/assist/mode.ts`
+> (the mode for a request), `app/actions/assist-manual.ts` (four actions),
+> `components/assist/manual.tsx` (the block every panel renders),
+> `e2e/assist-manual.spec.ts`. **Changed, in `components/assist/**`:**
+> `brainstorm-assist.tsx`, `brainstorm-panel.tsx`, `concept-assist.tsx`,
+> `critique-assist.tsx` (a `mode`, the block, the paste's failure routed to
+> it) and `chrome.tsx` (`AssistProvenance` says "pasted from claude.ai").
+> **Shared files, smallest additive changes:** `lib/assist/prompts.ts`
+> (`briefSections` and `videoParts` exported so both prompts share one brief;
+> the craft rules no longer say "give its index" or "return an empty string",
+> which moved into the API prompt's output section where they belong),
+> `lib/assist/types.ts` (`MANUAL_PROVIDER`, `MANUAL_MODEL` appended),
+> `lib/assist/select.ts` (`selectAssistMode` appended; `selectAssistProvider`
+> untouched) and `select.test.ts` (a `describe` appended),
+> `app/videos/[id]/page.tsx` (reads the mode, passes it to the three
+> controls), `playwright.config.ts` (one variable), `README.md`,
+> `.env.example`. **`app/actions/assist.ts` was not touched by this slice.**
+> No migration (the spend slice owns 0011), no new runtime dependency.
+
+### Why, and the one rule that shaped everything
+
+The user wants the brainstorm to cost nothing by default, using their
+claude.ai subscription by hand, and to turn the API on later under a ceiling.
+Anthropic does not allow a claude.ai subscription to power a server-side app,
+so the subscription path is manual: **the app writes the prompt, the person
+runs it in claude.ai, the person pastes the reply back.** No code in this
+slice stores, forwards or uses anything of claude.ai's — no cookie, no token,
+no credential, no request to claude.ai at all. The only thing that crosses is
+text the person carries across themselves, and the only thing the app ever
+does with claude.ai is `window.open("https://claude.ai/new")`.
+
+### What it delivers
+
+- **A mode, decided on the server.** `selectAssistMode` (`lib/assist/select.ts`)
+  returns `manual` when there is no key (any `NODE_ENV`) or when
+  `ASSIST_PROVIDER=manual`, and `api` otherwise — including
+  `ASSIST_PROVIDER=fake`, so the fixtures answer every pill exactly as before
+  and **no existing spec changed behaviour.** `lib/assist/mode.ts` reads it for
+  the request and the video page hands one word to the three controls.
+- **Open in Claude on every assist.** In `manual` mode each pill opens its
+  panel without asking anything; the panel's action is Open in Claude, and
+  its "Ask" button is gone. In `api` mode the pill asks as always and Open in
+  Claude is a quiet disclosure ("Open in Claude…") on the same panel — which
+  opens by itself when the spend slice's `spend_cap` refusal arrives, because
+  that sentence names Open in Claude as the way on.
+- **The prompt, built on the server from the same brief.** `briefSections`
+  in `prompts.ts` — role, voice guide (fenced, first, "the voice wins"), the
+  last fifty published titles, the craft rules — is now what *both* prompts
+  are made of; `videoParts` is the video, for both. `buildManualPrompt` ends
+  differently: a plain-text shape (`1. <proposal> || <why>` per line, then
+  `PICK: <n> || <why>`; for the critique `WILD CARD || reads: yes || adds: no
+  || <note>` per image and `SHIP: <role | none>`), under a heading that says
+  "I will copy your answer into an app that reads it line by line", placed
+  last, after the video. `manual.test.ts` asserts that for every kind both
+  prompts carry the voice guide and each past title, that the manual prompt
+  begins with the API prompt's brief byte for byte, and that it asks for JSON
+  nowhere. The inputs come from `lib/assist/load.ts`, which reads exactly what
+  `assist()` reads (it is lifted from `askFor`, see below).
+- **The flow.** Pressing Open in Claude calls `assistPrompt` /
+  `critiquePrompt` (the prompt reaches the browser only then), copies it with
+  `navigator.clipboard.writeText`, then `window.open`s claude.ai/new and
+  severs `opener`. One sentence says what to do next. The clipboard refused →
+  the prompt in a read-only box, focused and selected. The tab blocked → a
+  plain `target="_blank"` link, which is never blocked. The "Paste Claude's
+  reply" box and Read follow.
+- **The reply, read into the same machine.** `readPastedReply` /
+  `readPastedCritique` run the text through `createPastedProvider` — a third
+  implementation of the one `AssistProvider` seam — whose `run()` parses it
+  and hands the payload to the same `assemble()` in `clamp.ts`. So a pasted
+  answer gets the same caps (twenty titles, six concepts, the missing hooks),
+  the same column-length clamps, the same de-duplication against what the
+  video already has, the same "nothing usable" refusal, and the same meta line
+  ("dropped 1 that repeated something already on this video"). The actions
+  return exactly `AssistState` / `CritiqueState`, so each panel feeds it to its
+  own `useAssistRun` and draws the same proposal list with the same Accept
+  buttons through the same save queue. Nothing new renders proposals.
+- **Stored the same way.** A pasted text answer is written to
+  `videos.brainstorm_last` through `merge_brainstorm_entry` with the entry
+  shape `assist()` writes, `provider: "manual"`, `model: "claude.ai"`; the
+  panel reopened (or the page reloaded) says "From earlier — pasted from
+  claude.ai …". A pasted critique is **not** stored, as the API's is not (M8:
+  a verdict is about the bytes in the bucket when it was written).
+- **The critique's images.** The app cannot attach anything to claude.ai, so
+  the prompt says "I have attached N thumbnail images … in this order" and
+  names them, and the panel links to each uploaded file (signed with the
+  caller's client, an hour's life) numbered in that order.
+- **A reply that cannot be read** comes back as data — never an exception —
+  with a sentence saying what was expected (`It expects one per line, like
+  "1. The title || why it works" …`), shown under the paste box with "What you
+  pasted is still in the box", and no "Try again" (reading the same text again
+  gives the same answer). Nothing is written.
+- **The phone.** Open in Claude, Read and every Accept are 44px under a thumb;
+  the paste box and the fallback box are 16px there (no zoom on focus). In the
+  keyless mode the paste box is on screen from the start, so a page the phone
+  reloaded while the person was in claude.ai still takes the reply.
+
+### The reader, and how forgiving it is
+
+`lib/assist/reply.ts`, 28 unit tests. In order: fences, blockquotes, bold,
+inline code and heading marks are stripped, and anything that is not shaped
+like a proposal — "Sure! Here are twenty…", "Want me to…?" — is ignored.
+Lines carrying `||` are the proposals, numbered or not. With no `||` anywhere,
+numbered or bulleted lines are read, split on ` | `, an em or en dash, `--` or
+` - `, or with the reason on the line(s) underneath ("Why: …"). A markdown
+table is read as cells (header and rule rows skipped). The pick is a
+`PICK:`/`Recommended:`/`My pick:` line, by the number a line was *given* (so a
+list numbered 1, 2, 4 resolves "PICK: 4" to the third line) or by its text; a
+reply with no pick marks nothing and says nothing, rather than letting the
+clamp mark the first and claim the pick "pointed at something that was
+dropped". The critique needs, per role, both "reads" and "adds" answered —
+`reads: yes`, bare yes/no in order, or a table row — because a guessed "reads
+at tile size" is the one answer that panel must never invent; a role line
+without both is not a verdict. Empty → `empty`, garbage → `wrong_shape`,
+longer than 40,000 characters → `rejected`, each with its sentence.
+
+### Decisions taken without the user
+
+1. **No key means Open in Claude everywhere, not only in production.** M8
+   split the keyless case on `NODE_ENV` (production failed with "no API key
+   configured"; development answered from fixtures). With a real no-cost path
+   neither is right: a keyless deployment now works, and a fresh clone with no
+   key behaves like that deployment. `ASSIST_PROVIDER=fake` still wins, and
+   `.env.local` and the browser suite both say it, so nothing that ran before
+   changed. `selectAssistProvider` itself is untouched — it still answers "who
+   answers when the pill asks", which in the keyless mode no panel does.
+2. **A person running locally reaches the manual mode with
+   `ASSIST_PROVIDER=manual`** (or by removing the `fake` line with no key).
+   `manual` with a key present means "the panels never call the API"; the
+   API action itself still exists, and the spend cap is what bounds a
+   hand-made request to it (recorded under Honest limits).
+3. **In `api` mode Open in Claude is a disclosure, and opening it copies
+   nothing.** One press that copied the prompt immediately would overwrite a
+   reply the person may already have on the clipboard. In the keyless mode the
+   steps are open from the start, for the same reason and for the reload.
+4. **The prompt is fetched when Open in Claude is pressed, not when the panel
+   opens**, so it reaches the browser only when asked for. The copy happens
+   after that round trip and before the tab opens: `writeText` needs the
+   document focused and a new tab takes focus. Every current browser keeps the
+   click's activation across a round trip this short; where one does not, the
+   fallbacks above are what the person sees.
+5. **A paste's failure is shown under the paste box, not in the API failure
+   block**, and offers no retry: the failure carries `provider: "manual"`,
+   which is how the panels route it. The API's block and its "Try again" are
+   unchanged.
+6. **Read is disabled while anything is in flight on that question**, API ask
+   included: two answers racing for one panel and one `brainstorm_last` key
+   would leave whichever landed last.
+7. **Switching the brainstorm's tab (titles ↔ hooks) resets the manual block**
+   — it is keyed by question, so a prompt copied for titles is never read as
+   hooks. A half-pasted reply in the other tab is lost with it.
+8. **`lib/assist/load.ts` duplicates `askFor`'s reads instead of replacing
+   them.** `app/actions/assist.ts` was being rewritten by the spend slice at
+   the same time; the task allowed only additive changes there. The copy is
+   field for field, and the obvious follow-up — `askFor` calling
+   `loadTextRequest` — is one edit for the integration pass. Until then the
+   two agree by hand, which this project has learned to distrust; it is the
+   first thing to collapse.
+9. **The test switch is a cookie behind an environment variable**
+   (`NERTUBE_TEST_ASSIST_MODE`, `nertube-test-assist-mode`), the same shape as
+   M10's test clock, so the browser suite can see the keyless page while the
+   server keeps the fixtures, without a second server.
+10. **The image links carry `download` but will usually open the image**:
+    signed Storage URLs are another origin, where browsers ignore `download`.
+    The person saves from there (on a phone, long-press); fetching the bytes
+    into a same-origin blob would have needed CORS on Storage that nothing
+    here can check.
+
+### Deviations from PLAN.md, stated plainly
+
+- PLAN.md has no manual path and no mode: its brainstorm is the API, and its
+  keyless production state is an error. M11 is the user's own new
+  requirement; PLAN.md was not edited. The one-interface rule holds: the
+  pasted reply is a third `AssistProvider`, not a second pipeline.
+- The API prompt's wording changed by two clauses ("give its index", "return
+  an empty string"), which moved from the shared craft rules into its own
+  output section. Every `prompts.test.ts` assertion is unchanged and passes.
+
+### Honest limits
+
+- **Nothing here has reached claude.ai.** No egress, and the task forbids it:
+  the suite stubs `window.open` and the clipboard and writes the replies. What
+  is proved is what the app hands those two calls and what it does with a
+  reply — not how claude.ai answers this prompt, nor how often a real reply
+  reads first time. The reader was written against the shapes a model tends to
+  drift into; a real one will find the next.
+- **Clipboard and pop-up behaviour after a server round trip** is asserted
+  only against stubs. Real Safari on iOS is the browser most likely to refuse
+  one of them; both refusals have a visible way on, but neither has been seen
+  on a device.
+- **A pasted reply is taken as Claude's.** The app cannot know what wrote the
+  text; it says "pasted from claude.ai" and stores `model: "claude.ai"`.
+- **The critique is read by role name.** A reply that swaps two images' names
+  is taken at its word; the prompt names the order the person attaches them
+  in, and that is all the app can do.
+- **`load.ts` and `askFor` are two copies of one read** (decision 8).
+- **Phone:** Chromium at 390×844 with touch, not a phone. "Come back" is a
+  visibility change in the page, not a real app switch.
+
+### Gates
+
+Run after the last code edit of this slice, in this container, with no
+`ANTHROPIC_API_KEY`. The browser suite ran in a copy of the working tree (own
+`.next`, `DEV_STACK_PORT=54361`, `NERTUBE_DEV_DB=nertube_e2e_manual`,
+`E2E_PORT=3121`, `E2E_REUSE=0`) so it could not share a build directory or a
+stack with the spend slice; the copy held both slices' work as it stood.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npm run typecheck` | clean, both programs |
+| Lint | `npx eslint .` | clean |
+| Unit | `npx vitest run` | **682 passing in 38 files** — `reply.test.ts` (28) and `manual.test.ts` (16) are this slice's, plus 5 `selectAssistMode` cases in `select.test.ts`; the rest includes the spend slice's new suites |
+| Database | `./scripts/verify-db.sh m11_manual_check` | OK — migrations applied, 19 test files passed. This slice adds no migration |
+| This slice's walk | `npx playwright test assist-manual` | **8 passed** (titles, hooks, concepts, critique — each open, paste, read, accept, reopen; clipboard refused + tab blocked; a malformed paste; the API-primary disclosure; the phone at 390×844 with touch) |
+| Browser suite | `npx playwright test` (production build) | **357 passed, 1 skipped, 0 failed (20.7 min)**, exit 0. The skip is `session-refresh`, as since M1 |
+| Bundle | grep of `.next/static` | **0 files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `@anthropic-ai`, `claude-opus`, `ASSIST_PROVIDER`, `NERTUBE_TEST_ASSIST_MODE`, and the prompt's own prose (`Rules of the craft`, `VOICE GUIDE`, `What this channel has published`, `I will copy your answer into an app`) and the reader's (`It expects one per line`); the same grep over `.next/server` finds each of them. `claude.ai/new` is in one static chunk, as it must be |
+
+`[WebServer] ⨯ Error: The destination stream closed early.` appears once in
+the slice's run: a navigation abandoning a streamed response, the same line
+earlier milestones' logs carry; no spec failed with it.
+
+---
+
+## M11 — Integration: one button that is never a dead end, one read, one choice
+
+> Scope: the integration pass over the two M11 slices above ("The spending
+> cap" and "Open in Claude"), which landed concurrently in one tree. The
+> user's request, verbatim: *"let's build the button for now, but also add the
+> api key cap to the app"*. Both are built; this pass makes them one feature.
+> **Changed:** `lib/assist/mode.ts` (now the one place that chooses a provider
+> and decides what a panel leads with), `app/actions/assist.ts` (its reads
+> collapsed onto `lib/assist/load.ts`; `chooseProvider` moved out),
+> `lib/assist/load.ts` (the only copy now; doc and the "how many" reasoning
+> moved in), `lib/assist/spend.ts` (`capReachedOf`) and `spend.test.ts`,
+> `lib/assist/types.ts` (`CapReached`), `components/assist/chrome.tsx`
+> (`AssistCapNote`; the Settings link shared), `components/assist/manual.tsx`
+> (folds after a read), `brainstorm-assist.tsx`, `brainstorm-panel.tsx`,
+> `concept-assist.tsx`, `critique-assist.tsx` (a `capReached` prop; the cap's
+> refusal drawn above Open in Claude), `app/videos/[id]/page.tsx`
+> (`readAssistView`), `e2e/spend-cap.spec.ts` (test 2 and 4 for the new
+> behaviour), `e2e/assist-manual.spec.ts` (one assertion, the fold), **new**
+> `e2e/m11-walk.spec.ts`, `README.md`. No migration beyond the milestone's one
+> (`0011_assist_spend.sql`); no new runtime dependency.
+
+### What was found, verifying the two reports
+
+Both reports were accurate about what they built. Three things did not yet
+add up to one feature:
+
+1. **With a key and the cap reached, the panel was a round trip from a dead
+   end.** The pill asked, the server refused, and only then did Open in
+   Claude open — under an attention block with "Try anyway", which would be
+   refused again. The panel led with the failure, not the way on.
+2. **Two copies of one read.** `askFor` and `critiqueThumbnails` in
+   `app/actions/assist.ts` and `loadTextRequest` / `loadCritiqueRequest` in
+   `lib/assist/load.ts` read the same video, channel and past titles field
+   for field, by hand. The manual slice flagged it as the first thing to
+   collapse; the prompt's one source of truth (`briefSections`, `videoParts`)
+   was only one source if its inputs were too.
+3. **Two places decided who answers.** The page asked `selectAssistMode`; the
+   action asked its own private `chooseProvider` (which knows about the test
+   stub). A page could not know whether the real provider — and so the cap —
+   was in play.
+
+### What was done
+
+- **The cap reached leads with Open in Claude, before anything is pressed.**
+  `readAssistView(supabase)` in `lib/assist/mode.ts`: when the mode is `api`
+  *and* `chooseProvider()` says the real provider would answer, the page
+  reads the month's budget (`readBudget`, the same one-RPC read the action
+  uses) and, at or over the cap, serves the panels in the `manual` mode with a
+  `CapReached` — the spend, the cap, whether it is the default, the reset day,
+  all already formatted by `capReachedOf` (the price table stays server-only).
+  Each panel then draws `AssistCapNote` above Open in Claude: "This month's
+  API spending is **$10.00**, which has reached the default cap of **$10** a
+  month, so the brainstorm will not call the API until 1 Oct. Open in Claude
+  asks the same question in your own claude.ai conversation, at no cost to
+  this app." (amounts in JetBrains Mono), and the link to
+  `/settings/account#spending`. "Ask" is hidden, and the pill asks nothing.
+- **The cap crossed mid-session** (page drawn under it) is still refused by
+  the action's own check, which runs before every real call regardless of
+  what the page decided. That refusal is now drawn **above** Open in Claude,
+  which it opens — the reason, then the way on — instead of below it. Other
+  API failures keep their place.
+- **One read.** `askFor` calls `loadTextRequest`; `critiqueThumbnails` calls
+  `loadCritiqueRequest` and downloads only the slots it names. The `WANT`
+  table and its M8 review reasoning moved into `load.ts`; `videoContext`,
+  `conceptTexts`, `pastTitlesOf`, `textsOf` and `VARIANT_PATH_COLUMN` left
+  `assist.ts`. Every sentence a refusal shows is unchanged (the "nothing to
+  critique yet" one now comes from `load.ts`, word for word).
+- **One choice.** `chooseProvider` and `ChosenProvider` live in
+  `lib/assist/mode.ts`; the action imports them.
+- **The fold** (from the walk, below): after a pasted reply has become
+  proposals, the Open in Claude block folds to one row — "Open in Claude
+  again" and "Paste another reply" — so the proposals lead.
+
+### The walk
+
+`e2e/m11-walk.spec.ts`, six tests: three configurations × laptop (1280×900)
+and phone (390×844, `isMobile`, `hasTouch`, every press a tap), on its own
+account. `window.open` and the clipboard are stubbed; nothing reached
+claude.ai.
+
+| Configuration | How the suite gets it | What was done |
+|---|---|---|
+| **No key** — manual primary | `nertube-test-assist-mode=manual` | Every assist once by hand: Generate 20 (a chatty reply with bold and a trailing question → 6 proposals, the pick marked, one added as a candidate), Draft a third (a reply under a `###` heading → 3 hooks, one used), Suggest concepts (4 → one used as the concept), Critique at tile size (two uploaded variants linked in order before the paste, two verdicts, the moderate shipped). Each accept read back from Postgres; no `assist_usage` row written. |
+| **Key, under the cap** — API primary, manual secondary | `nertube-test-assist=stub` (the real provider against `e2e/assist-stub.ts`) | The pill asked the stub (12 proposals, one request); Open in Claude was the quiet disclosure; opening it copied nothing; the manual path then replaced the answer and accepted, and the stub's count did not move. |
+| **Key, at the cap** — refused, manual offered | the stub cookie and a $10.00 month | All four panels opened on the cap note and a primary Open in Claude, no "Ask"; concepts done by hand at the cap and accepted; **the stub received nothing** across four panels. |
+
+On the phone every Open in Claude, Read, paste box, "Paste another reply",
+image link, Ship and the Settings link was measured at ≥ 44 px and inside
+390 px; the paste box at 16 px; nothing scrolls sideways.
+
+**What was awkward**, from the screenshots:
+
+1. *Fixed:* after a read, the spent "The prompt is copied…" sentence and an
+   empty four-row paste box sat between the tabs and the proposals — about a
+   third of a phone screen. Now folded (above).
+2. *Fixed:* at the cap, the panel opened on a refusal with "Try anyway" and
+   "Ask", both of which could only be refused again. Now it opens on the note.
+3. *Left:* the mid-session refusal still offers "Try anyway" beside a primary
+   Open in Claude. Kept because it is the right button after raising the cap
+   in another tab; it costs nothing when refused.
+4. *Left:* on a phone the brainstorm's header stacks Close above the tabs, so
+   Open in Claude starts ~200 px down. It is the M10 header, not M11's.
+5. *Left:* folding means a second reply is one press more ("Paste another
+   reply"). The keyless reload case is unaffected: a freshly loaded panel
+   always opens unfolded with the box showing.
+6. *Left:* the critique's provenance line after a pasted read still says "so
+   ask again after you change one" — true, but in the keyless mode "ask" is
+   Open in Claude.
+
+### The prompt reaches the browser only on a press
+
+The walk records every response whose body contains the manual prompt's own
+words ("I will copy your answer into an app"). With the page loaded and the
+panel open, there are none and the DOM does not contain them; after one press
+of Open in Claude there is exactly one, and it is a POST (the server action).
+The fresh-build grep below finds the same words in `.next/server` only.
+
+### Decisions taken without the user
+
+1. **The cap is checked twice: when the page is drawn (to decide what leads)
+   and in the action before every call (to hold the line).** Only the second
+   is a guarantee; the first is a UX decision and fails open to the API if
+   the budget cannot be read, because the action then refuses with its own
+   sentence and that refusal opens Open in Claude. Drawing a page must not
+   fail over a number only one button needs.
+2. **The page-level read happens only when it can matter** — `api` mode and
+   the real provider. Fixtures and the keyless mode never read the spend. With
+   a key it is one more RPC per video page render.
+3. **At the cap the mode is `manual`, not a third mode.** The panels already
+   know how to lead with Open in Claude; the note is the only new drawing.
+   The consequence: raising the cap takes effect on the next page load, not on
+   the open page (README, Honest limits).
+4. **The note is not a failure.** Nothing was asked and nothing failed, so it
+   is a quiet bordered note, not the attention block; the mid-session refusal,
+   which *is* a refused ask, keeps the attention block.
+5. **`CapReached` carries formatted strings only**, so `lib/assist/spend.ts`
+   (the price table) stays `server-only` and out of the bundle.
+6. **The fold happens only after a successful read**, never on a failed one
+   (the pasted text stays in the box to fix) and never on first open (so a
+   phone that reloaded mid-trip still shows the box).
+7. **`e2e/spend-cap.spec.ts` changed meaning in two places, not strength.**
+   Test 2 now draws the page under the cap, crosses it in the database, and
+   presses the pill without reloading — proving the action's refusal, the
+   zero requests to the stub and the refusal-above-Open-in-Claude order — and
+   then reloads to prove the page-level lead. Test 4's $0 cap now expects the
+   note (a $0 cap is reached before anything is spent).
+8. **The README's stale "0010 has not been applied there"** is kept as the
+   last thing verified from here, with the brief's claim beside it
+   attributed, rather than rewritten on an unchecked claim.
+
+### Deviations, stated plainly
+
+- None from PLAN.md or BRIEF.md beyond those the two slices recorded.
+- `components/assist/manual.tsx` belongs to the manual slice; the fold was
+  added to it here because it was the walk's main finding.
+
+### Honest limits (new in this pass)
+
+- **What a panel leads with is decided when the page is drawn**; a page left
+  open across a cap change is corrected by its first ask (mid-session) or by a
+  reload (cap raised).
+- **Still nothing has reached claude.ai or Anthropic.** Configurations 2 and
+  3 are the real provider against a local stub; configuration 1 is stubbed
+  `window.open` and clipboard. Phone = Chromium at 390×844 with touch.
+- The two follow-ups the slices listed are closed (`askFor` → `load.ts`) or
+  carried unchanged (hosted 0011 not applied; self-forgeable usage rows).
+
+### Gates
+
+Run after the last code edit, in this container, with no `ANTHROPIC_API_KEY`
+and no egress; no other agent was writing.
+
+| Gate | Command | Result |
+|---|---|---|
+| Types | `npx tsc --noEmit` (and `-p tsconfig.harness.json`) | clean |
+| Lint | `npm run lint` | clean |
+| Build | `rm -rf .next && npm run build` | OK |
+| Bundle | grep of the fresh `.next/static` vs `.next/server` | **0 static files** for `ANTHROPIC_API_KEY`, `api.anthropic.com`, `x-api-key`, `@anthropic-ai`, `anthropic-ai/sdk`, `claude-opus`, `claude-fable`, `claude-sonnet`, `claude-haiku`, `server-side-fallback`, `structured-outputs`, `anthropic-beta`, `ASSIST_PROVIDER`, `NERTUBE_TEST_ASSIST_MODE`, `NERTUBE_TEST_ANTHROPIC_STUB`, the stub key, `PRICES_PER_MILLION`, `record_assist_usage`, `assist_budget`, and the prompt's prose (`You are helping one creator package`, `Rules of the craft`, `VOICE GUIDE`, `What this channel has published`, `I will copy your answer into an app`, `How to answer — please follow this exactly`) and the reader's (`It expects one per line`); **each found in 2–7 `.next/server` files**. `claude.ai/new`: one static chunk, as it must be |
+| Database | `./scripts/verify-db.sh m11_check` | **OK — migrations applied (0001–0011), 19 SQL test files passed** |
+| Unit | `npx vitest run` | **38 files, 683 tests passed** (+1: `capReachedOf`) |
+| M11 specs | `E2E_REUSE=0 npx playwright test m11-walk spend-cap assist-manual` | **19 passed** before the fold; after it, `m11-walk` **6 passed** and the three together re-run in the full suite |
+| Browser suite | `E2E_REUSE=0 npm run e2e` | FULL_SUITE_RESULT |

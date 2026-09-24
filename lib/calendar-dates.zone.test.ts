@@ -5,6 +5,7 @@ import {
   canonicalTimeZone,
   formatInstant,
   isTimeZone,
+  monthInstants,
   offsetLabel,
   startOfDay,
   timeZoneCity,
@@ -301,5 +302,65 @@ describe("formatInstant", () => {
     expect(formatInstant(null, UTC)).toBeNull();
     expect(formatInstant(undefined, UTC)).toBeNull();
     expect(formatInstant("yesterday", UTC)).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The month, as instants (M11)                                                */
+/* -------------------------------------------------------------------------- */
+
+describe("monthInstants", () => {
+  /*
+    The same six instants `supabase/tests/87_assist_spend.test.sql` pins on the
+    database side: the SQL sums between these bounds, and this is what computes
+    them, so the two tests together are the month-to-date spend in the
+    farthest-east and farthest-west zones there are.
+  */
+  const KIRITIMATI = "Pacific/Kiritimati"; // UTC+14, no DST
+  const PAGO_PAGO = "Pacific/Pago_Pago"; // UTC-11, no DST
+
+  it("turns over at local midnight on the 1st, at both ends of the clock", () => {
+    // 10:00 UTC on 30 September is 00:00 on 1 October in Kiritimati.
+    expect(monthInstants(at("2026-09-30T09:59:00Z"), KIRITIMATI)).toEqual({
+      month: { year: 2026, month: 9 },
+      from: at("2026-08-31T10:00:00Z"),
+      to: at("2026-09-30T10:00:00Z"),
+    });
+    expect(monthInstants(at("2026-09-30T10:00:00Z"), KIRITIMATI)).toEqual({
+      month: { year: 2026, month: 10 },
+      from: at("2026-09-30T10:00:00Z"),
+      to: at("2026-10-31T10:00:00Z"),
+    });
+    // 11:00 UTC on 1 October is 00:00 on 1 October in Pago Pago.
+    expect(monthInstants(at("2026-10-01T10:59:00Z"), PAGO_PAGO)).toEqual({
+      month: { year: 2026, month: 9 },
+      from: at("2026-09-01T11:00:00Z"),
+      to: at("2026-10-01T11:00:00Z"),
+    });
+    expect(monthInstants(at("2026-10-01T11:00:00Z"), PAGO_PAGO)).toEqual({
+      month: { year: 2026, month: 10 },
+      from: at("2026-10-01T11:00:00Z"),
+      to: at("2026-11-01T11:00:00Z"),
+    });
+  });
+
+  it("is the UTC month when the zone is UTC, across a year end", () => {
+    expect(monthInstants(at("2026-12-31T23:59:59Z"), UTC)).toEqual({
+      month: { year: 2026, month: 12 },
+      from: at("2026-12-01T00:00:00Z"),
+      to: at("2027-01-01T00:00:00Z"),
+    });
+  });
+
+  it("follows a clock change inside the month rather than a fixed offset", () => {
+    // Los Angeles is UTC-7 on 1 October and UTC-8 on 1 November.
+    expect(monthInstants(at("2026-10-15T12:00:00Z"), LA)).toMatchObject({
+      from: at("2026-10-01T07:00:00Z"),
+      to: at("2026-11-01T07:00:00Z"),
+    });
+    expect(monthInstants(at("2026-11-15T12:00:00Z"), LA)).toMatchObject({
+      from: at("2026-11-01T07:00:00Z"),
+      to: at("2026-12-01T08:00:00Z"),
+    });
   });
 });

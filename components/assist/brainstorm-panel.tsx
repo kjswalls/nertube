@@ -3,10 +3,13 @@
 import { useCallback } from "react";
 
 import { TITLE_WARN_LENGTH } from "@/lib/packaging";
+import { MANUAL_PROVIDER, type CapReached } from "@/lib/assist/types";
+import type { AssistMode } from "@/lib/assist/select";
 import { sameLabel } from "@/lib/text";
 
 import { capacityLine, describeAcceptance } from "./acceptance";
 import {
+  AssistCapNote,
   AssistFailure,
   AssistFixtureNotice,
   AssistMetaLine,
@@ -17,6 +20,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
+import { OpenInClaude, type ManualPromptAnswer } from "./manual";
 import { useAssistTarget } from "./packaging-assist";
 import type { AssistNotice, AssistRunState } from "./run";
 import type { StoredAssistEntryValue } from "./stored";
@@ -99,11 +103,22 @@ const WAITING: Record<PanelKind, string> = {
     "Thinking. The hooks it writes have to fit the title and the concept you already chose — the rest of the page still works while it does.",
 };
 
+/** What Open in Claude asks for, per question (M11). */
+const MANUAL_WHAT: Record<PanelKind, string> = {
+  titles: "twenty title candidates",
+  hooks: "the spoken hooks this video is missing",
+};
+
 export function BrainstormPanel({
   kind,
   nonce,
   now,
   view,
+  mode = "api",
+  capReached = null,
+  reading = false,
+  getPrompt,
+  onRead,
   otherHasAnswer,
   onAsk,
   onCancel,
@@ -117,6 +132,16 @@ export function BrainstormPanel({
   /** The clock, read in the handler that opened this. See the parent. */
   now: number;
   view: KindView;
+  /** M11: `manual` makes Open in Claude the panel's action and hides "Ask". */
+  mode?: AssistMode;
+  /** Set when the mode is `manual` because the spending cap was reached. */
+  capReached?: CapReached | null;
+  /** The run in flight is a pasted reply being read, not an API ask. */
+  reading?: boolean;
+  /** The manual prompt for this question, fetched when Open in Claude is pressed. */
+  getPrompt: () => Promise<ManualPromptAnswer>;
+  /** Read a pasted reply into this question's run. */
+  onRead: (reply: string) => Promise<boolean>;
   /** Whether the other question already has an answer, for the tab's badge. */
   otherHasAnswer: boolean;
   onAsk: () => void;
@@ -152,6 +177,21 @@ export function BrainstormPanel({
   );
 
   const capacity = capacityLine(candidateRoom, hookRoom);
+
+  /*
+    Which failure belongs to which box (M11). A paste that could not be read
+    is shown under the paste box, beside the text it is about, with no "Try
+    again" — reading the same text again gives the same answer. Everything
+    else is an API failure and keeps the block and the retry it always had.
+  */
+  const pasteFailure =
+    view.failure && view.failure.provider === MANUAL_PROVIDER ? view.failure : null;
+  const apiFailure = view.failure && !pasteFailure ? view.failure : null;
+  // The spending cap's refusal names Open in Claude as the way on, so the
+  // steps open by themselves rather than behind a disclosure, and the refusal
+  // is drawn above them — the reason first, then the way on.
+  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
+  const manualFirst = mode === "manual" || capFailure !== null;
 
   const addOne = (text: string, rationale: string) => {
     if (!target) return;
@@ -204,15 +244,17 @@ export function BrainstormPanel({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            data-testid="brainstorm-ask-again"
-            onClick={onAsk}
-            disabled={view.pending}
-            className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
-          >
-            {entry === null ? "Ask" : "Ask again"}
-          </button>
+          {mode === "api" ? (
+            <button
+              type="button"
+              data-testid="brainstorm-ask-again"
+              onClick={onAsk}
+              disabled={view.pending}
+              className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
+            >
+              {entry === null ? "Ask" : "Ask again"}
+            </button>
+          ) : null}
           <button
             type="button"
             data-testid="brainstorm-close"
@@ -258,20 +300,47 @@ export function BrainstormPanel({
         ))}
       </div>
 
+      {/*
+        Open in Claude (M11): the panel's action when there is no API key, a
+        quiet disclosure beside "Ask" when there is. Keyed by question, so the
+        prompt copied and the reply pasted belong to the tab they were for.
+      */}
+      {capReached ? <AssistCapNote prefix="brainstorm" capReached={capReached} /> : null}
+      {capFailure ? (
+        <AssistFailure
+          prefix="brainstorm"
+          failure={capFailure}
+          onRetry={onAsk}
+          disabled={view.pending}
+        />
+      ) : null}
+
+      <OpenInClaude
+        key={`${kind}:${manualFirst ? "first" : "quiet"}`}
+        prefix="brainstorm"
+        primary={manualFirst}
+        what={MANUAL_WHAT[kind]}
+        getPrompt={getPrompt}
+        onRead={onRead}
+        reading={view.pending && reading}
+        busy={view.pending}
+        failure={pasteFailure}
+      />
+
       {view.pending ? (
         <AssistPending
           prefix="brainstorm"
           startedAt={view.startedAt}
-          what={WAITING[kind]}
+          what={reading ? "Reading Claude’s reply." : WAITING[kind]}
           onCancel={onCancel}
         />
       ) : null}
 
-      {view.failure ? (
+      {apiFailure && !capFailure ? (
         <>
           <AssistFailure
             prefix="brainstorm"
-            failure={view.failure}
+            failure={apiFailure}
             onRetry={onAsk}
             disabled={view.pending}
           />
@@ -284,7 +353,7 @@ export function BrainstormPanel({
           */}
           <AssistFixtureNotice
             prefix="brainstorm"
-            provider={view.failure.provider}
+            provider={apiFailure.provider}
             variant="failure"
           />
         </>
@@ -312,9 +381,9 @@ export function BrainstormPanel({
       {entry === null ? (
         view.pending ? null : (
           <p className="text-xs text-muted">
-            Nothing here yet. “Ask” reads this video’s notes, its tags and the
-            channel’s voice guide, and comes back with proposals and a reason for
-            each.
+            {mode === "manual"
+              ? "Nothing here yet. Open in Claude copies a prompt built from this video’s notes, its tags and the channel’s voice guide; paste Claude’s reply above and its proposals appear here, each with a reason."
+              : "Nothing here yet. “Ask” reads this video’s notes, its tags and the channel’s voice guide, and comes back with proposals and a reason for each."}
           </p>
         )
       ) : (

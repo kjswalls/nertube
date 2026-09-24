@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAnthropicProvider, DEFAULT_MODEL } from "./anthropic";
+import type { CallOutcome, MeasuredCall } from "./spend";
 import { critiqueRequest, titlesRequest, VOICE_GUIDE_ALPHA } from "./test-fixtures";
 import {
   AssistError,
@@ -502,5 +503,155 @@ describe("every failure maps to a typed error", () => {
 
     expect(error).toBeInstanceOf(AssistError);
     expect((error as AssistError).message.length).toBeGreaterThan(10);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* What each call cost (M11)                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe("every billed response is reported to onUsage", () => {
+  type Reported = { call: MeasuredCall; outcome: CallOutcome };
+
+  function recorded(
+    handler: (init: RequestInit) => Response | Promise<Response>,
+    onUsage?: (call: MeasuredCall, outcome: CallOutcome) => unknown,
+  ) {
+    const reports: Reported[] = [];
+    const { calls, fetchStub } = stub(handler);
+    return {
+      calls,
+      reports,
+      provider: createAnthropicProvider({
+        apiKey: "sk-ant-test-key",
+        maxRetries: 0,
+        fetch: fetchStub,
+        onUsage:
+          onUsage ??
+          ((call, outcome) => {
+            reports.push({ call, outcome });
+          }),
+      }),
+    };
+  }
+
+  it("an answer, priced at the model that served it", async () => {
+    const { reports, provider: anthropic } = recorded(() =>
+      jsonResponse(message(suggestions(12))),
+    );
+    await anthropic.run(titlesRequest());
+
+    // 900 × 5 + 1,200 × 25 = 4,500 + 30,000 = 34,500 µ$.
+    expect(reports).toEqual([
+      {
+        outcome: "answered",
+        call: {
+          requestedModel: "claude-opus-5",
+          model: "claude-opus-5",
+          priceAssumed: false,
+          tokens: { input: 900, output: 1200, cacheRead: 0, cacheWrite: 0 },
+          costMicros: 34_500,
+        },
+      },
+    ]);
+  });
+
+  it("a fallback-served answer, at the fallback's own rates", async () => {
+    const { reports, provider: anthropic } = recorded(() =>
+      jsonResponse(
+        message(suggestions(12), {
+          model: "claude-opus-4-8",
+          usage: {
+            input_tokens: 900,
+            output_tokens: 1200,
+            iterations: [
+              { type: "message", model: "claude-opus-5", input_tokens: 900, output_tokens: 0 },
+              { type: "fallback_message", model: "claude-opus-4-8", input_tokens: 900, output_tokens: 1200 },
+            ],
+          },
+        }),
+      ),
+    );
+    const result = (await anthropic.run(titlesRequest())) as SuggestionsResult;
+
+    expect(result.meta.servedByFallback).toBe(true);
+    expect(reports[0].call.model).toBe("claude-opus-4-8");
+    expect(reports[0].call.requestedModel).toBe("claude-opus-5");
+    // Only the serving hop billed: 900 × 5 + 1,200 × 25.
+    expect(reports[0].call.costMicros).toBe(34_500);
+  });
+
+  it("cache tokens, at their multipliers", async () => {
+    const { reports, provider: anthropic } = recorded(() =>
+      jsonResponse(
+        message(suggestions(12), {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 100,
+            cache_read_input_tokens: 1000,
+            cache_creation_input_tokens: 200,
+          },
+        }),
+      ),
+    );
+    await anthropic.run(titlesRequest());
+    // 100 × 5 + 100 × 25 + 1,000 × 0.5 + 200 × 6.25 = 500 + 2,500 + 500 + 1,250.
+    expect(reports[0].call.costMicros).toBe(4_750);
+    expect(reports[0].call.tokens).toEqual({ input: 100, output: 100, cacheRead: 1000, cacheWrite: 200 });
+  });
+
+  it("a refusal, as refused — billed only for what it wrote", async () => {
+    const { reports, provider: anthropic } = recorded(() =>
+      jsonResponse(
+        message("", {
+          content: [],
+          stop_reason: "refusal",
+          stop_details: { type: "refusal", category: "cyber", explanation: "no" },
+          usage: { input_tokens: 900, output_tokens: 0 },
+        }),
+      ),
+    );
+    expect(await codeOf(() => anthropic.run(titlesRequest()))).toBe("refused");
+    expect(reports).toHaveLength(1);
+    expect(reports[0].outcome).toBe("refused");
+    expect(reports[0].call.costMicros).toBe(0);
+  });
+
+  it("an unusable 200, as failed — it was still billed", async () => {
+    const { reports, provider: anthropic } = recorded(() =>
+      jsonResponse(message(JSON.stringify({ nothing: "useful" }))),
+    );
+    expect(await codeOf(() => anthropic.run(titlesRequest()))).toBe("wrong_shape");
+    expect(reports).toHaveLength(1);
+    expect(reports[0].outcome).toBe("failed");
+    expect(reports[0].call.costMicros).toBe(34_500);
+  });
+
+  it("nothing for a request that got no response to price", async () => {
+    const { reports, provider: anthropic } = recorded(() => apiError(429, "rate_limit_error"));
+    expect(await codeOf(() => anthropic.run(titlesRequest()))).toBe("rate_limited");
+    expect(reports).toHaveLength(0);
+  });
+
+  it("waits for the recorder, and a recorder that throws does not cost the answer", async () => {
+    let finished = false;
+    const slow = recorded(
+      () => jsonResponse(message(suggestions(12))),
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        finished = true;
+      },
+    );
+    await slow.provider.run(titlesRequest());
+    expect(finished).toBe(true);
+
+    const broken = recorded(
+      () => jsonResponse(message(suggestions(12))),
+      () => {
+        throw new Error("database down");
+      },
+    );
+    const result = (await broken.provider.run(titlesRequest())) as SuggestionsResult;
+    expect(result.suggestions).toHaveLength(12);
   });
 });

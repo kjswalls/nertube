@@ -3,6 +3,9 @@
 import { useState } from "react";
 
 import { critiqueThumbnails, type CritiqueAnswer } from "@/app/actions/assist";
+import { critiquePrompt, readPastedCritique } from "@/app/actions/assist-manual";
+import type { AssistMode } from "@/lib/assist/select";
+import { MANUAL_PROVIDER, type CapReached } from "@/lib/assist/types";
 import {
   useThumbnailAssistTarget,
   type ThumbnailAssistVariant,
@@ -11,6 +14,7 @@ import { ROLE_LABEL } from "@/components/thumbnails/roles";
 import type { ThumbnailRole } from "@/lib/storage";
 
 import {
+  AssistCapNote,
   AssistFailure,
   AssistFixtureNotice,
   AssistMetaLine,
@@ -21,6 +25,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
+import { OpenInClaude } from "./manual";
 import { useAssistRun } from "./run";
 
 /**
@@ -65,7 +70,21 @@ import { useAssistRun } from "./run";
 
 const PREFIX = "critique";
 
-export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
+export function ThumbnailCritiqueAssist({
+  videoId,
+  mode = "api",
+  capReached = null,
+}: {
+  videoId: string;
+  /** M11: `manual` opens on Open in Claude and never asks an API. */
+  mode?: AssistMode;
+  /**
+   * M11 integration: set when the page found this month's API spending at
+   * the cap, which is why `mode` is `manual` — the panel says so above Open
+   * in Claude. `readAssistView` in `lib/assist/mode.ts`.
+   */
+  capReached?: CapReached | null;
+}) {
   const target = useThumbnailAssistTarget();
   const run = useAssistRun<CritiqueAnswer>();
   const [open, setOpen] = useState(false);
@@ -77,7 +96,36 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
   const ready = variants.filter((variant) => variant.hasAsset).length;
   const { state } = run;
 
-  const ask = () => void run.ask(() => critiqueThumbnails({ videoId }));
+  /** The last ask went to the API, or was a pasted reply being read (M11). */
+  const [reading, setReading] = useState(false);
+
+  const ask = () => {
+    setReading(false);
+    void run.ask(() => critiqueThumbnails({ videoId }));
+  };
+
+  /**
+   * A critique pasted back from claude.ai, into the same run. Not stored, as
+   * the API's is not: it judges the images as they are now.
+   */
+  const read = async (reply: string): Promise<boolean> => {
+    setReading(true);
+    let ok = false;
+    await run.ask(async () => {
+      const answer = await readPastedCritique({ videoId, reply });
+      ok = answer.ok;
+      return answer;
+    });
+    return ok;
+  };
+
+  const pasteFailure =
+    state.failure && state.failure.provider === MANUAL_PROVIDER ? state.failure : null;
+  const apiFailure = state.failure && !pasteFailure ? state.failure : null;
+  // The cap's refusal: drawn above Open in Claude, which it opens. See the brainstorm.
+  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
+  const manualFirst = mode === "manual" || capFailure !== null;
+  const pasted = state.meta?.provider === MANUAL_PROVIDER;
 
   function press() {
     if (open) {
@@ -90,7 +138,11 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
     // call, and pressing it again with an answer on screen must not spend
     // another one. Nothing is stored between sittings, so "an answer on screen"
     // is the only thing that can make this free.
-    if (state.data === null && !state.pending && state.failure === null) ask();
+    // With no API key there is nothing to ask (M11): the panel opens on
+    // Open in Claude.
+    if (mode === "api" && state.data === null && !state.pending && state.failure === null) {
+      ask();
+    }
   }
 
   function close() {
@@ -128,7 +180,9 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
         title={
           ready === 0
             ? "Nothing to judge yet — upload at least one variant first."
-            : "Judges each uploaded variant against the concept at the size a viewer meets it."
+            : mode === "manual"
+              ? "Writes a prompt to judge each uploaded variant at tile size, to run in your own claude.ai conversation with the images attached."
+              : "Judges each uploaded variant against the concept at the size a viewer meets it."
         }
         expanded={open}
         disabled={ready === 0}
@@ -163,7 +217,7 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                   ? "Looking now…"
                   : state.data === null
                     ? "Nothing asked for yet."
-                    : `Judged just now, against ${
+                    : `${pasted ? "Read from your claude.ai reply just now" : "Judged just now"}, against ${
                         target.hasConcept
                           ? "the concept above"
                           : "the title alone — no concept is written, so this is half the comparison"
@@ -182,15 +236,17 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                data-testid={`${PREFIX}-ask-again`}
-                onClick={ask}
-                disabled={state.pending}
-                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
-              >
-                {state.data === null ? "Ask" : "Ask again"}
-              </button>
+              {mode === "api" ? (
+                <button
+                  type="button"
+                  data-testid={`${PREFIX}-ask-again`}
+                  onClick={ask}
+                  disabled={state.pending}
+                  className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
+                >
+                  {state.data === null ? "Ask" : "Ask again"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 data-testid={`${PREFIX}-close`}
@@ -202,20 +258,52 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
             </div>
           </header>
 
+          {/*
+            Open in Claude (M11). The one assist whose manual path needs more
+            than a prompt: claude.ai has to see the images, and this app cannot
+            attach them, so the block links to each uploaded file.
+          */}
+          {capReached ? <AssistCapNote prefix={PREFIX} capReached={capReached} /> : null}
+          {capFailure ? (
+            <AssistFailure
+              prefix={PREFIX}
+              failure={capFailure}
+              onRetry={ask}
+              disabled={state.pending}
+            />
+          ) : null}
+
+          <OpenInClaude
+            key={manualFirst ? "first" : "quiet"}
+            prefix={PREFIX}
+            primary={manualFirst}
+            what="a verdict on each uploaded variant"
+            images
+            getPrompt={() => critiquePrompt({ videoId })}
+            onRead={read}
+            reading={state.pending && reading}
+            busy={state.pending}
+            failure={pasteFailure}
+          />
+
           {state.pending ? (
             <AssistPending
               prefix={PREFIX}
               startedAt={state.startedAt}
-              what="Looking at the images. This one sends pictures, so it is the slowest of them — the rest of the page still works while it does."
+              what={
+                reading
+                  ? "Reading Claude’s reply."
+                  : "Looking at the images. This one sends pictures, so it is the slowest of them — the rest of the page still works while it does."
+              }
               onCancel={() => run.cancel()}
             />
           ) : null}
 
-          {state.failure ? (
+          {apiFailure && !capFailure ? (
             <>
               <AssistFailure
                 prefix={PREFIX}
-                failure={state.failure}
+                failure={apiFailure}
                 onRetry={ask}
                 disabled={state.pending}
               />
@@ -223,7 +311,7 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
                   path either. See `AssistFixtureNotice`. */}
               <AssistFixtureNotice
                 prefix={PREFIX}
-                provider={state.failure.provider}
+                provider={apiFailure.provider}
                 variant="failure"
               />
             </>
@@ -260,10 +348,9 @@ export function ThumbnailCritiqueAssist({ videoId }: { videoId: string }) {
           {state.data === null ? (
             state.pending ? null : (
               <p className="text-xs text-muted">
-                Nothing here yet. “Ask” sends the variants you have uploaded,
-                with the title and the written concept, and comes back with a
-                verdict on each and the one it would ship. It never makes an
-                image — the concept is the description, these are the files.
+                {mode === "manual"
+                  ? "Nothing here yet. Open in Claude copies a prompt with the title and the written concept; attach the variants in claude.ai, paste its reply above, and a verdict on each appears here with the one it would ship. Nothing here ever makes an image."
+                  : "Nothing here yet. “Ask” sends the variants you have uploaded, with the title and the written concept, and comes back with a verdict on each and the one it would ship. It never makes an image — the concept is the description, these are the files."}
               </p>
             )
           ) : (

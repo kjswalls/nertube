@@ -377,6 +377,49 @@ export type Database = {
         };
         Relationships: [];
       };
+      /**
+       * 0011. One row per real API call that billed something. Readable by
+       * its owner; written only by `record_assist_usage()`, never updated or
+       * deleted by a client.
+       */
+      assist_usage: {
+        Row: {
+          id: string;
+          user_id: string;
+          created_at: string;
+          video_id: string | null;
+          kind: string;
+          outcome: "answered" | "failed" | "refused";
+          requested_model: string;
+          model: string;
+          price_assumed: boolean;
+          input_tokens: number;
+          output_tokens: number;
+          cache_read_input_tokens: number;
+          cache_creation_input_tokens: number;
+          cost_micros: number;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * 0011. The per-user monthly cap in whole dollars; no row means the
+       * application's default, a null amount means "no cap". Written only by
+       * `set_assist_cap()`.
+       */
+      assist_caps: {
+        Row: {
+          id: string;
+          user_id: string;
+          created_at: string;
+          updated_at: string;
+          cap_dollars: number | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       thumbnail_swaps: {
         Row: {
           id: string;
@@ -628,6 +671,39 @@ export type Database = {
       set_time_zone: {
         Args: { p_zone: string; p_detected?: boolean };
         Returns: Database["public"]["Tables"]["profiles"]["Row"];
+      };
+      /** 0011. Records one billed API call as the caller, stamped now(). */
+      record_assist_usage: {
+        Args: {
+          p_video: string | null;
+          p_kind: string;
+          p_outcome: string;
+          p_requested_model: string;
+          p_model: string;
+          p_price_assumed: boolean;
+          p_input: number;
+          p_output: number;
+          p_cache_read: number;
+          p_cache_write: number;
+          p_cost_micros: number;
+        };
+        Returns: string;
+      };
+      /** 0011. Sets the monthly cap in whole dollars; null means no cap. */
+      set_assist_cap: {
+        Args: { p_dollars: number | null };
+        Returns: Database["public"]["Tables"]["assist_caps"]["Row"];
+      };
+      /** 0011. The caller's spend in [p_from, p_to) and the cap as stored. */
+      assist_budget: {
+        Args: { p_from: string; p_to: string };
+        Returns: {
+          spend_micros: number;
+          calls: number;
+          assumed_calls: number;
+          cap_set: boolean;
+          cap_dollars: number | null;
+        }[];
       };
     };
     Enums: { [_ in never]: never };

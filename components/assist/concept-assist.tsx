@@ -3,9 +3,13 @@
 import { useState } from "react";
 
 import { assist } from "@/app/actions/assist";
+import { assistPrompt, readPastedReply } from "@/app/actions/assist-manual";
+import type { AssistMode } from "@/lib/assist/select";
+import { MANUAL_PROVIDER, type CapReached } from "@/lib/assist/types";
 import { sameLabel } from "@/lib/text";
 
 import {
+  AssistCapNote,
   AssistFailure,
   AssistFixtureNotice,
   AssistMetaLine,
@@ -17,6 +21,7 @@ import {
   Proposal,
   useAssistFocus,
 } from "./chrome";
+import { OpenInClaude } from "./manual";
 import { useAssistTarget } from "./packaging-assist";
 import { useAssistRun } from "./run";
 import type { StoredAssistEntryValue, StoredBrainstormView } from "./stored";
@@ -63,6 +68,8 @@ const PREFIX = "concept-assist";
 export function ConceptAssist({
   videoId,
   initial,
+  mode = "api",
+  capReached = null,
 }: {
   videoId: string;
   /**
@@ -70,6 +77,14 @@ export function ConceptAssist({
    * brainstorm panel reads, under its own key. Reopening this costs no call.
    */
   initial: StoredBrainstormView;
+  /** M11: `manual` opens on Open in Claude and never asks an API. */
+  mode?: AssistMode;
+  /**
+   * M11 integration: set when the page found this month's API spending at
+   * the cap, which is why `mode` is `manual` — the panel says so above Open
+   * in Claude. `readAssistView` in `lib/assist/mode.ts`.
+   */
+  capReached?: CapReached | null;
 }) {
   const target = useAssistTarget();
   const run = useAssistRun<StoredAssistEntryValue>(initial.concepts);
@@ -89,7 +104,32 @@ export function ConceptAssist({
   // No mapping: `assist()` already answers in the shape `useAssistRun`
   // consumes, which is the same shape `critiqueThumbnails()` answers in. One
   // result contract across every assist in the app.
-  const ask = () => void run.ask(() => assist({ videoId, kind: "concepts" }));
+  /** The last ask went to the API, or was a pasted reply being read (M11). */
+  const [reading, setReading] = useState(false);
+
+  const ask = () => {
+    setReading(false);
+    void run.ask(() => assist({ videoId, kind: "concepts" }));
+  };
+
+  /** A reply pasted back from claude.ai, into the same run. See the brainstorm. */
+  const read = async (reply: string): Promise<boolean> => {
+    setReading(true);
+    let ok = false;
+    await run.ask(async () => {
+      const answer = await readPastedReply({ videoId, kind: "concepts", reply });
+      ok = answer.ok;
+      return answer;
+    });
+    return ok;
+  };
+
+  const pasteFailure =
+    state.failure && state.failure.provider === MANUAL_PROVIDER ? state.failure : null;
+  const apiFailure = state.failure && !pasteFailure ? state.failure : null;
+  // The cap's refusal: drawn above Open in Claude, which it opens. See the brainstorm.
+  const capFailure = apiFailure?.code === "spend_cap" ? apiFailure : null;
+  const manualFirst = mode === "manual" || capFailure !== null;
 
   function press() {
     if (open) {
@@ -101,8 +141,10 @@ export function ConceptAssist({
     setNonce((previous) => previous + 1);
     // The pill is the ask when there is nothing to show, and free when there
     // is: `brainstorm_last` exists so that closing and reopening never costs a
-    // second call.
-    if (entry === null && !state.pending && state.failure === null) ask();
+    // second call. With no API key there is nothing to ask (M11).
+    if (mode === "api" && entry === null && !state.pending && state.failure === null) {
+      ask();
+    }
   }
 
   function close() {
@@ -130,7 +172,11 @@ export function ConceptAssist({
     >
       <AssistPillButton
         verb="Suggest concepts"
-        title="Proposes thumbnail concepts to film against — descriptions of a shot, never an image."
+        title={
+          mode === "manual"
+            ? "Writes a prompt for thumbnail concepts to film against, to run in your own claude.ai conversation."
+            : "Proposes thumbnail concepts to film against — descriptions of a shot, never an image."
+        }
         expanded={open}
         badge={entry && !open ? "saved" : undefined}
         onClick={press}
@@ -162,15 +208,17 @@ export function ConceptAssist({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                data-testid={`${PREFIX}-ask-again`}
-                onClick={ask}
-                disabled={state.pending}
-                className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
-              >
-                {entry === null ? "Ask" : "Ask again"}
-              </button>
+              {mode === "api" ? (
+                <button
+                  type="button"
+                  data-testid={`${PREFIX}-ask-again`}
+                  onClick={ask}
+                  disabled={state.pending}
+                  className="rounded-button border border-border px-2 py-1 text-xs font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 thumb:min-h-11"
+                >
+                  {entry === null ? "Ask" : "Ask again"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 data-testid={`${PREFIX}-close`}
@@ -190,20 +238,47 @@ export function ConceptAssist({
             publish.
           </p>
 
+          {capReached ? <AssistCapNote prefix={PREFIX} capReached={capReached} /> : null}
+          {capFailure ? (
+            <AssistFailure
+              prefix={PREFIX}
+              failure={capFailure}
+              onRetry={ask}
+              disabled={state.pending}
+            />
+          ) : null}
+
+          {/* Open in Claude (M11). See `components/assist/manual.tsx`. */}
+          <OpenInClaude
+            key={manualFirst ? "first" : "quiet"}
+            prefix={PREFIX}
+            primary={manualFirst}
+            what="four thumbnail concepts"
+            getPrompt={() => assistPrompt({ videoId, kind: "concepts" })}
+            onRead={read}
+            reading={state.pending && reading}
+            busy={state.pending}
+            failure={pasteFailure}
+          />
+
           {state.pending ? (
             <AssistPending
               prefix={PREFIX}
               startedAt={state.startedAt}
-              what="Thinking. Four concepts, each one a shot you could film — the rest of the page still works while it does."
+              what={
+                reading
+                  ? "Reading Claude’s reply."
+                  : "Thinking. Four concepts, each one a shot you could film — the rest of the page still works while it does."
+              }
               onCancel={() => run.cancel()}
             />
           ) : null}
 
-          {state.failure ? (
+          {apiFailure && !capFailure ? (
             <>
               <AssistFailure
                 prefix={PREFIX}
-                failure={state.failure}
+                failure={apiFailure}
                 onRetry={ask}
                 disabled={state.pending}
               />
@@ -211,7 +286,7 @@ export function ConceptAssist({
                   path either. See `AssistFixtureNotice`. */}
               <AssistFixtureNotice
                 prefix={PREFIX}
-                provider={state.failure.provider}
+                provider={apiFailure.provider}
                 variant="failure"
               />
             </>
@@ -233,9 +308,9 @@ export function ConceptAssist({
           {entry === null ? (
             state.pending ? null : (
               <p className="text-xs text-muted">
-                Nothing here yet. “Ask” reads the title, the notes and the
-                channel’s voice guide, and comes back with concepts and a reason
-                for each.
+                {mode === "manual"
+                  ? "Nothing here yet. Open in Claude copies a prompt built from the title, the notes and the channel’s voice guide; paste Claude’s reply above and its concepts appear here, each with a reason."
+                  : "Nothing here yet. “Ask” reads the title, the notes and the channel’s voice guide, and comes back with concepts and a reason for each."}
               </p>
             )
           ) : (

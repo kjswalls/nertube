@@ -1,13 +1,14 @@
 -- The shape PLAN.md's data model promises, asserted against the catalogue:
 -- the table set, the common columns, RLS on everything, unique (id, user_id) on
--- every parent, and the nine SQL functions being security definer with a pinned
--- search_path. Plus the delete cascades.
+-- every parent, and the eleven security-definer SQL functions with a pinned
+-- search_path (0011 added two). Plus the delete cascades.
 
 begin;
 
 do $$
 declare
-  expected text[] := array['buckets','channels','checklist_items','checklist_templates',
+  expected text[] := array['assist_caps','assist_usage',
+                           'buckets','channels','checklist_items','checklist_templates',
                            'filming_days','profiles','stages','thumbnail_swaps','videos'];
   actual text[];
   t text;
@@ -63,7 +64,8 @@ begin
             where ns.nspname = 'public'
               and p.proname in ('move_video','swap_thumbnail','capture_video','create_channel',
                                 'reorder_stages','set_stage_enabled','set_video_archived',
-                                'set_time_zone','move_video_versioned')
+                                'set_time_zone','move_video_versioned',
+                                'record_assist_usage','set_assist_cap')
   loop
     n := n + 1;
     if not f.prosecdef then raise exception 'FAILED: %() is not security definer', f.proname; end if;
@@ -71,7 +73,7 @@ begin
       raise exception 'FAILED: %() does not pin search_path (%)', f.proname, f.proconfig;
     end if;
   end loop;
-  if n <> 9 then raise exception 'FAILED: expected 9 SQL functions, found %', n; end if;
+  if n <> 11 then raise exception 'FAILED: expected 11 SQL functions, found %', n; end if;
 end $$;
 
 do $$
@@ -116,6 +118,26 @@ begin
      or has_table_privilege('authenticated', 'public.profiles', 'UPDATE')
      or has_table_privilege('authenticated', 'public.profiles', 'DELETE') then
     raise exception 'FAILED: a client can write public.profiles directly';
+  end if;
+
+  -- assist_usage and assist_caps (0011): readable by their owner, written only
+  -- by record_assist_usage() and set_assist_cap(); the month's sum is
+  -- assist_budget(), which reads through the caller's own RLS.
+  if has_table_privilege('authenticated', 'public.assist_usage', 'INSERT')
+     or has_table_privilege('authenticated', 'public.assist_usage', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.assist_usage', 'DELETE')
+     or has_table_privilege('authenticated', 'public.assist_caps', 'INSERT')
+     or has_table_privilege('authenticated', 'public.assist_caps', 'UPDATE')
+     or has_table_privilege('authenticated', 'public.assist_caps', 'DELETE') then
+    raise exception 'FAILED: a client can write assist_usage or assist_caps directly';
+  end if;
+  if has_function_privilege('anon', 'public.record_assist_usage(uuid,text,text,text,text,boolean,integer,integer,integer,integer,bigint)', 'execute')
+     or has_function_privilege('anon', 'public.set_assist_cap(integer)', 'execute')
+     or has_function_privilege('anon', 'public.assist_budget(timestamptz,timestamptz)', 'execute') then
+    raise exception 'FAILED: anon can execute an assist spend function';
+  end if;
+  if (select p.prosecdef from pg_proc p where p.oid = 'public.assist_budget(timestamptz,timestamptz)'::regprocedure) then
+    raise exception 'FAILED: assist_budget() must read through the caller''s RLS, not as definer';
   end if;
 
   -- The policy set: stages has its own delete policy, channels has none.

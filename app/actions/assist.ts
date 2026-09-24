@@ -6,6 +6,7 @@ import {
   AssistError,
   isAssistError,
   type AssistErrorCode,
+  type AssistKind,
   type AssistMeta,
   type AssistProvider,
   type AssistRequest,
@@ -19,13 +20,28 @@ import {
   MAX_SKETCH_BYTES,
   MAX_SKETCH_LABEL,
   parseThumbnailVariantPath,
-  THUMBNAIL_ROLES,
   visionMediaTypeFor,
   type ThumbnailRole,
 } from "@/lib/storage";
-import { CONCEPTS_WANT, TITLES_WANT } from "@/lib/assist/clamp";
+import {
+  loadCritiqueRequest,
+  loadTextRequest,
+  type LoadedCritique,
+  type LoadedText,
+} from "@/lib/assist/load";
+import { chooseProvider, type ChosenProvider } from "@/lib/assist/mode";
 import { assistFallbackWarning, selectAssistProvider } from "@/lib/assist/select";
+import {
+  capRefusalMessage,
+  isOverCap,
+  readBudget,
+  recordCall,
+  wasBilled,
+} from "@/lib/assist/spend";
+import { STUB_API_KEY } from "@/lib/assist/test-stub";
+import { readClock } from "@/lib/request-clock";
 import { requireUser } from "@/lib/supabase/require-user";
+import { readTimeZone } from "@/lib/time-zone-data";
 import {
   STORED_ASSIST_KINDS,
   type StoredAssistEntryValue,
@@ -70,29 +86,6 @@ import {
  * nothing on the screen.
  */
 const DEADLINE_MS = 45_000;
-
-/**
- * How many of each to ask for.
- *
- * PLAN.md: 10–20 title candidates. Concepts are four, which is
- * `CONCEPTS_WANT` in `lib/assist/clamp.ts` and the number this panel is built
- * around: the concept is a *single* field, so the job is to give somebody
- * three or four genuinely different pictures to choose between, not twenty
- * paragraphs to read.
- *
- * **Hooks are not in here**, and that is the fix for a review finding. This
- * used to pin them at `HOOKS_MAX`, which made `wantedFor`'s hooks branch in
- * `lib/assist/clamp.ts` unreachable from the app — that branch only runs when
- * `want` is left undefined. So a video with two hooks written was offered
- * three proposals, two of which the column has no room for: the person paid
- * for three hooks of generation and could use one. Leaving `want` out is what
- * makes "ask for how many are missing" — the rule both that function's doc
- * comment and this milestone's notes describe — the rule that actually ships.
- */
-const WANT: Record<"titles" | "concepts", number> = {
-  titles: TITLES_WANT,
-  concepts: CONCEPTS_WANT,
-};
 
 /**
  * What an ask comes back as.
@@ -148,26 +141,73 @@ const Input = z.object({
  * The rule itself, with every case and the reasoning for each, is
  * `selectAssistProvider` in `lib/assist/select.ts` — a pure function taking an
  * explicit environment, because it is the one part of this feature that cannot
- * be checked by running it here. In short: an explicit `ASSIST_PROVIDER=fake`
- * always wins; a key means Claude; no key in production still means Claude, and
- * therefore a "no API key configured" sentence rather than a silent
- * substitution; no key anywhere else means the fixtures, and the panel says so
- * on every answer.
+ * be checked by running it here; `chooseProvider` in `lib/assist/mode.ts` is
+ * where the page and this action both ask it. In short: an explicit
+ * `ASSIST_PROVIDER=fake` always wins; a key means Claude. With no key the
+ * panels are served in the `manual` mode (M11) and never call this action;
+ * a hand-made request still gets the old answer — "no API key configured" in
+ * production, the fixtures (said on every answer) anywhere else.
  *
  * Both are imported lazily, so a process running the fixtures never loads the
  * vendor SDK at all — and, more to the point, never reaches a module that reads
  * the key.
  */
-async function provider(): Promise<AssistProvider> {
-  if (selectAssistProvider(process.env) === "fake") {
+async function provider(
+  supabase: Supabase,
+  chosen: ChosenProvider,
+  videoId: string,
+  kind: AssistKind,
+): Promise<AssistProvider> {
+  if (chosen.name === "fake") {
     const warning = assistFallbackWarning(process.env);
     if (warning !== null) warnOnce(warning);
     const { createFakeProvider } = await import("@/lib/assist/fake");
     return createFakeProvider();
   }
+
+  /*
+    The monthly cap (M11), checked before every real call and never before a
+    fixture: the fixtures cost nothing. At or over the cap, nothing leaves
+    this server — the refusal is thrown here, inside the caller's `try`, and
+    becomes the panel's sentence. A budget that cannot be read refuses too: a
+    ceiling that is skipped whenever it is unreadable is not a ceiling.
+
+    Checked, not reserved (`isOverCap` in lib/assist/spend.ts says why two
+    calls can pass it together by one call's worth).
+  */
+  let budget;
+  try {
+    budget = await readBudget(supabase, await readClock(), (await readTimeZone()).zone);
+  } catch (error) {
+    throw new AssistError("spend_cap", {
+      message:
+        "This month's API spending could not be read, so this was not sent — a cap that cannot be checked would not be a cap. Try again in a moment, or use Open in Claude.",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (isOverCap(budget)) {
+    throw new AssistError("spend_cap", {
+      message: capRefusalMessage(budget),
+      detail: `spend ${budget.spendMicros} µ$ against a cap of $${budget.cap.dollars} (${budget.cap.source}).`,
+    });
+  }
+
   const { createAnthropicProvider } = await import("@/lib/assist/anthropic");
-  return createAnthropicProvider();
+  return createAnthropicProvider({
+    ...(chosen.stub ? { baseURL: chosen.stub.baseURL, apiKey: STUB_API_KEY } : {}),
+    // Every response that came back is priced and written to assist_usage —
+    // answered, refused or unreadable — before the answer is returned.
+    onUsage: async (call, outcome) => {
+      if (!wasBilled(call)) return;
+      const written = await recordCall(supabase, { videoId, kind, outcome, call });
+      if (!written.ok) {
+        console.error(`[assist] a ${kind} call costing ${call.costMicros} µ$ was not recorded: ${written.error}`);
+      }
+    },
+  });
 }
+
+type Supabase = Awaited<ReturnType<typeof requireUser>>["supabase"];
 
 /** Said once per server process, not once per brainstorm. */
 let warned = false;
@@ -239,7 +279,7 @@ export async function assist(input: {
   }
   IN_FLIGHT.add(lane);
   try {
-    return await askFor(supabase, videoId, kind);
+    return await askFor(supabase, videoId, kind, await chooseProvider());
   } finally {
     IN_FLIGHT.delete(lane);
   }
@@ -257,95 +297,36 @@ function requestedKind(value: unknown): StoredAssistKind {
 
 /** The ask itself, once the caller and the question are known to be sound. */
 async function askFor(
-  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  supabase: Supabase,
   videoId: string,
   kind: StoredAssistKind,
+  chosen: ChosenProvider,
 ): Promise<AssistState> {
-
-  const { data: video, error: videoError } = await supabase
-    .from("videos")
-    .select(
-      "id, title, one_line_hook, notes, tags, thumbnail_concept, title_candidates, hooks, channel_id",
-    )
-    .eq("id", videoId)
-    .maybeSingle();
-
-  if (videoError) {
-    return failure(kind, new AssistError("unreachable", { detail: videoError.message }));
-  }
-  // No row means no row *for this user*: RLS does not distinguish between
-  // somebody else's video and one that never existed, and neither does this.
-  // Nothing is spent on a video the caller cannot see.
-  if (!video) {
-    return failure(
-      kind,
-      new AssistError("rejected", {
-        message: "That video is not one you can ask about.",
-      }),
-    );
-  }
-
-  const [{ data: channel }, { data: published }] = await Promise.all([
-    supabase
-      .from("channels")
-      .select("name, voice_guide")
-      .eq("id", video.channel_id)
-      .maybeSingle(),
-    supabase
-      .from("videos")
-      .select("title, published_at")
-      .eq("channel_id", video.channel_id)
-      .not("published_at", "is", null)
-      .order("published_at", { ascending: false })
-      .limit(50),
-  ]);
-
-  const voiceGuide = channel?.voice_guide?.trim() ?? "";
-
   /*
-    What the video already has, so the module can drop a suggestion that
-    repeats it. The panel checks again at accept time — the list moves while
-    the panel is open — but a duplicate that never arrives is one the person
-    never has to read past.
+    What the prompt is built from — the video, the channel's voice guide, its
+    last fifty published titles, and what the video already has so the answer
+    does not repeat it — is read by `loadTextRequest` (lib/assist/load.ts),
+    with the caller's RLS-scoped client. It is the same function Open in
+    Claude's prompt is built from (M11), so the API and the manual path ask
+    from identical inputs by construction rather than by two copies agreeing.
+
+    No row means no row *for this user*: RLS does not distinguish somebody
+    else's video from one that never existed, and neither does this. Nothing
+    is spent on a video the caller cannot see. How many of each to ask for
+    (PLAN.md's 10–20 titles, four concepts, and — deliberately — no number
+    for hooks, so `wantedFor` asks for the ones missing) lives there too.
   */
-  const existing =
-    kind === "hooks"
-      ? textsOf(video.hooks)
-      : kind === "titles"
-        ? textsOf(video.title_candidates)
-        : /*
-            The concept is one field, not a list, so "what it already has" is
-            whatever is written in it — sent so the model proposes something
-            else rather than paraphrasing back the sentence on screen.
-          */
-          conceptTexts(video.thumbnail_concept);
-
-  const channelContext = {
-    name: channel?.name ?? "this channel",
-    voiceGuide: voiceGuide === "" ? null : voiceGuide,
-    pastTitles: pastTitlesOf(published),
-  };
-
-  const request: AssistRequest =
-    kind === "hooks"
-      ? {
-          // No `want`: `wantedFor` asks for the hooks that are missing.
-          kind: "hooks",
-          existing,
-          video: videoContext(video),
-          channel: channelContext,
-        }
-      : {
-          kind,
-          want: WANT[kind],
-          existing,
-          video: videoContext(video),
-          channel: channelContext,
-        };
+  let loaded: LoadedText;
+  try {
+    loaded = await loadTextRequest(supabase, videoId, kind);
+  } catch (error) {
+    return failure(kind, error);
+  }
+  const { request, voiceGuide } = loaded;
 
   let result: SuggestionsResult;
   try {
-    const answered = await (await provider()).run(request, {
+    const answered = await (await provider(supabase, chosen, videoId, kind)).run(request, {
       timeoutMs: DEADLINE_MS,
     });
     if (answered.kind === "thumbnail_critique") {
@@ -356,14 +337,14 @@ async function askFor(
     }
     result = answered;
   } catch (error) {
-    return failure(kind, error);
+    return failure(kind, error, chosen.name);
   }
 
   const entry: StoredAssistEntryValue = {
     at: new Date().toISOString(),
     provider: result.meta.provider,
     model: result.meta.model,
-    voiceGuide: voiceGuide !== "",
+    voiceGuide,
     suggestions: result.suggestions.map((suggestion) => ({
       text: suggestion.text,
       rationale: suggestion.rationale,
@@ -434,8 +415,12 @@ function failureOf(error: unknown): {
 }
 
 /** The same, carrying the kind the panel asked about. */
-function failure(kind: StoredAssistKind, error: unknown): AssistState {
-  return { ok: false, kind, provider: providerName(), ...failureOf(error) };
+function failure(
+  kind: StoredAssistKind,
+  error: unknown,
+  provider: string = providerName(),
+): AssistState {
+  return { ok: false, kind, provider, ...failureOf(error) };
 }
 
 /**
@@ -456,53 +441,6 @@ function failure(kind: StoredAssistKind, error: unknown): AssistState {
  */
 function providerName(): string {
   return selectAssistProvider(process.env);
-}
-
-/** The video, as the module's `VideoContext`. */
-function videoContext(video: {
-  title: string;
-  one_line_hook: string | null;
-  notes: string | null;
-  tags: string[] | null;
-  thumbnail_concept: string | null;
-}) {
-  return {
-    title: video.title,
-    oneLineHook: video.one_line_hook,
-    notes: video.notes,
-    tags: video.tags ?? [],
-    thumbnailConcept: video.thumbnail_concept,
-  };
-}
-
-/** The written concept, as the list of things not to repeat. */
-function conceptTexts(concept: string | null): string[] {
-  const written = (concept ?? "").trim();
-  return written === "" ? [] : [written];
-}
-
-function pastTitlesOf(rows: { title: string | null }[] | null): string[] {
-  return (rows ?? [])
-    .map((row) => row.title)
-    .filter((title): title is string => typeof title === "string" && title !== "");
-}
-
-/**
- * The `text` of every element in one of the two jsonb lists.
- *
- * Read directly rather than through `readTitleCandidates`: all this needs is
- * the strings, and the lenient reader's id repair would be work done for
- * nothing on a list that is about to be thrown away.
- */
-function textsOf(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((entry) =>
-      typeof entry === "object" && entry !== null && typeof (entry as { text?: unknown }).text === "string"
-        ? ((entry as { text: string }).text.trim())
-        : "",
-    )
-    .filter((text) => text !== "");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -576,13 +514,6 @@ export type CritiqueState =
 
 const CritiqueInput = z.object({ videoId: z.uuid() });
 
-/** Which column holds which role's object path. The schema's three slots. */
-const VARIANT_PATH_COLUMN = {
-  wild_card: "thumb_wild_card_path",
-  moderate: "thumb_moderate_path",
-  safe: "thumb_safe_path",
-} as const satisfies Record<ThumbnailRole, string>;
-
 /**
  * The ceiling on one image, before base64.
  *
@@ -611,35 +542,20 @@ export async function critiqueThumbnails(input: {
   const { videoId } = parsed.data;
 
   const { supabase } = await requireUser();
+  const chosen = await chooseProvider();
 
-  const { data: video, error: videoError } = await supabase
-    .from("videos")
-    .select(
-      "id, title, one_line_hook, notes, tags, thumbnail_concept, channel_id, thumb_wild_card_path, thumb_moderate_path, thumb_safe_path",
-    )
-    .eq("id", videoId)
-    .maybeSingle();
-
-  if (videoError) {
-    return { ok: false, provider: providerName(), ...failureOf(new AssistError("unreachable", { detail: videoError.message })) };
+  /*
+    The video, the channel and which slots hold an image, read by
+    `loadCritiqueRequest` (lib/assist/load.ts) — the same read Open in
+    Claude's critique prompt is built from. It refuses a video the caller
+    cannot see, and one with nothing uploaded, with the sentences below.
+  */
+  let loaded: LoadedCritique;
+  try {
+    loaded = await loadCritiqueRequest(supabase, videoId);
+  } catch (error) {
+    return { ok: false, provider: providerName(), ...failureOf(error) };
   }
-  if (!video) {
-    return {
-      ok: false,
-      provider: providerName(),
-      ...failureOf(
-        new AssistError("rejected", {
-          message: "That video is not one you can ask about.",
-        }),
-      ),
-    };
-  }
-
-  const { data: channel } = await supabase
-    .from("channels")
-    .select("name, voice_guide")
-    .eq("id", video.channel_id)
-    .maybeSingle();
 
   /*
     The images, read together — at most three, so one wait rather than three.
@@ -651,21 +567,18 @@ export async function critiqueThumbnails(input: {
     can act on and "it did not work" is not.
   */
   const fetched = await Promise.all(
-    THUMBNAIL_ROLES.map(
-      async (
+    // Only the slots that hold something: an empty slot is not a skip — there
+    // was nothing to judge and nothing went wrong, so it earns no sentence.
+    loaded.uploaded.map(
+      async ({
         role,
-      ): Promise<
+        path,
+      }): Promise<
         { role: ThumbnailRole } & (
           | { image: ThumbnailVariantImage; reason?: undefined }
           | { image?: undefined; reason: string }
-          | { image?: undefined; reason?: undefined }
         )
       > => {
-        const path = video[VARIANT_PATH_COLUMN[role]];
-        // An empty slot is not a skip: there was nothing to judge and nothing
-        // went wrong, so it earns no sentence.
-        if (typeof path !== "string" || path === "") return { role };
-
         const parsedPath = parseThumbnailVariantPath(path);
         const mediaType = parsedPath ? visionMediaTypeFor(parsedPath.extension) : null;
         if (!mediaType) {
@@ -710,40 +623,27 @@ export async function critiqueThumbnails(input: {
       provider: providerName(),
       ...failureOf(
         new AssistError("rejected", {
-          message:
-            skipped.length > 0
-              ? `${skipped[0].reason} There was nothing else to look at.`
-              : "There is nothing to critique yet — upload at least one of the three variants first.",
+          message: `${skipped[0].reason} There was nothing else to look at.`,
         }),
       ),
     };
   }
 
-  const voiceGuide = channel?.voice_guide?.trim() ?? "";
-
   /*
-    No past titles here, deliberately.
+    No past titles here, deliberately (`loadCritiqueRequest` reads none).
 
     `assist()` sends the channel's last fifty published titles as style
     evidence, because a title is written in a voice. A verdict about whether a
     face reads at 360 pixels is not, and fifty titles would be fifty lines of
-    prompt that change nothing about the answer — so this asks for the one
-    query it needs and no more.
+    prompt that change nothing about the answer.
   */
-  const request: AssistRequest = {
-    kind: "thumbnail_critique",
-    variants: images,
-    video: videoContext(video),
-    channel: {
-      name: channel?.name ?? "this channel",
-      voiceGuide: voiceGuide === "" ? null : voiceGuide,
-      pastTitles: [],
-    },
-  };
+  const request: AssistRequest = { ...loaded.request, variants: images };
 
   let result;
   try {
-    const answered = await (await provider()).run(request, { timeoutMs: DEADLINE_MS });
+    const answered = await (
+      await provider(supabase, chosen, videoId, "thumbnail_critique")
+    ).run(request, { timeoutMs: DEADLINE_MS });
     if (answered.kind !== "thumbnail_critique") {
       throw new AssistError("wrong_shape", {
         detail: `Asked for a critique, got ${answered.kind}.`,
@@ -751,7 +651,7 @@ export async function critiqueThumbnails(input: {
     }
     result = answered;
   } catch (error) {
-    return { ok: false, provider: providerName(), ...failureOf(error) };
+    return { ok: false, provider: chosen.name, ...failureOf(error) };
   }
 
   return {

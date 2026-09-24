@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { assist } from "@/app/actions/assist";
+import { assistPrompt, readPastedReply } from "@/app/actions/assist-manual";
+import type { AssistMode } from "@/lib/assist/select";
+import type { CapReached } from "@/lib/assist/types";
 
 import { AssistPillButton } from "./chrome";
 import { BrainstormPanel, type PanelKind } from "./brainstorm-panel";
@@ -65,10 +68,24 @@ const panelKind = (kind: StoredAssistKind): PanelKind =>
 export function BrainstormAssist({
   videoId,
   initial,
+  mode = "api",
+  capReached = null,
 }: {
   videoId: string;
   /** `videos.brainstorm_last`, read on the server. Never a second call. */
   initial: StoredBrainstormView;
+  /**
+   * M11: `manual` when there is no API key — the pill opens the panel on
+   * "Open in Claude" and never asks an API; `api` asks as it always has, with
+   * Open in Claude as a quiet secondary action. `lib/assist/mode.ts`.
+   */
+  mode?: AssistMode;
+  /**
+   * M11 integration: set when the page found this month's API spending at
+   * the cap, which is why `mode` is `manual` — the panel says so above Open
+   * in Claude. `readAssistView` in `lib/assist/mode.ts`.
+   */
+  capReached?: CapReached | null;
 }) {
   const panel = useAssistPanel();
   const target = useAssistTarget();
@@ -100,6 +117,15 @@ export function BrainstormAssist({
   const askTitles = titles.ask;
   const askHooks = hooks.ask;
 
+  /**
+   * Which way the last ask of each question went — to the API, or a pasted
+   * reply being read (M11) — so the waiting row says the right thing.
+   */
+  const [via, setVia] = useState<Record<PanelKind, "api" | "paste">>({
+    titles: "api",
+    hooks: "api",
+  });
+
   const ask = useCallback(
     (kind: PanelKind) => {
       /*
@@ -108,8 +134,31 @@ export function BrainstormAssist({
         assist in the app, so a new kind cannot invent a fifth way to say
         "it failed".
       */
+      setVia((previous) => ({ ...previous, [kind]: "api" }));
       const attempt = () => assist({ videoId, kind });
       void (kind === "hooks" ? askHooks(attempt) : askTitles(attempt));
+    },
+    [askHooks, askTitles, videoId],
+  );
+
+  /**
+   * A reply pasted back from claude.ai, read into the same run (M11).
+   *
+   * `readPastedReply` answers in the shape `assist()` does and writes
+   * `brainstorm_last` through the same function, so what lands here is an
+   * ordinary answer: same list, same accept, same "from earlier" next time.
+   */
+  const read = useCallback(
+    async (kind: PanelKind, reply: string): Promise<boolean> => {
+      setVia((previous) => ({ ...previous, [kind]: "paste" }));
+      let ok = false;
+      const attempt = async () => {
+        const answer = await readPastedReply({ videoId, kind, reply });
+        ok = answer.ok;
+        return answer;
+      };
+      await (kind === "hooks" ? askHooks(attempt) : askTitles(attempt));
+      return ok;
     },
     [askHooks, askTitles, videoId],
   );
@@ -152,9 +201,11 @@ export function BrainstormAssist({
       const kind = panelKind(requested);
       setNow(Date.now());
       panel?.show(kind);
-      if (!askedAlready(kind)) ask(kind);
+      // With no API key there is nothing to ask: the panel opens on Open in
+      // Claude, and the ask is the person's own, in claude.ai.
+      if (mode === "api" && !askedAlready(kind)) ask(kind);
     },
-    [ask, askedAlready, panel],
+    [ask, askedAlready, mode, panel],
   );
 
   /*
@@ -189,7 +240,11 @@ export function BrainstormAssist({
         <AssistPillButton
           verb="Generate 20"
           label={panel.open ? "Hide brainstorm" : "Generate 20"}
-          title="Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+          title={
+            mode === "manual"
+              ? "Writes a prompt for ten to twenty title candidates in this channel's voice, to run in your own claude.ai conversation."
+              : "Asks for ten to twenty title candidates in this channel's voice, each with a reason."
+          }
           expanded={panel.open}
           badge={titlesState.data && !panel.open ? "saved" : undefined}
           onClick={() => (panel.open ? panel.hide() : open("titles"))}
@@ -202,6 +257,11 @@ export function BrainstormAssist({
           nonce={panel.nonce}
           now={now}
           view={run.state}
+          mode={mode}
+          capReached={capReached}
+          reading={via[current] === "paste"}
+          getPrompt={() => assistPrompt({ videoId, kind: current })}
+          onRead={(reply) => read(current, reply)}
           otherHasAnswer={
             runs[current === "titles" ? "hooks" : "titles"].state.data !== null
           }
@@ -209,7 +269,7 @@ export function BrainstormAssist({
           onCancel={() => run.cancel()}
           onKind={(kind) => {
             panel.setKind(kind);
-            if (!askedAlready(kind)) ask(kind);
+            if (mode === "api" && !askedAlready(kind)) ask(kind);
           }}
           onNotice={(notice) => run.note(notice)}
           onClose={() => {

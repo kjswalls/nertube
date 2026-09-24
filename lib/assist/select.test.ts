@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assistFallbackWarning, selectAssistProvider } from "./select";
+import {
+  assistFallbackWarning,
+  selectAssistMode,
+  selectAssistProvider,
+} from "./select";
 
 /**
  * The one part of M8 that cannot be proved by running the feature.
@@ -68,5 +72,46 @@ describe("assistFallbackWarning", () => {
     expect(
       assistFallbackWarning({ ANTHROPIC_API_KEY: "sk-ant-not-a-real-key" }),
     ).toBeNull();
+  });
+});
+
+describe("selectAssistMode (M11)", () => {
+  it("makes Open in Claude primary whenever there is no key and nothing was said", () => {
+    expect(selectAssistMode({})).toBe("manual");
+    expect(selectAssistMode({ NODE_ENV: "production" })).toBe("manual");
+    expect(selectAssistMode({ NODE_ENV: "development", ANTHROPIC_API_KEY: "  " })).toBe(
+      "manual",
+    );
+  });
+
+  it("keeps the API primary when a key is present", () => {
+    expect(selectAssistMode({ ANTHROPIC_API_KEY: "sk-ant-not-a-real-key" })).toBe("api");
+    expect(
+      selectAssistMode({
+        ANTHROPIC_API_KEY: "sk-ant-not-a-real-key",
+        NODE_ENV: "production",
+      }),
+    ).toBe("api");
+  });
+
+  it("leaves an explicit fake exactly as it was: the fixtures answer the pill", () => {
+    expect(selectAssistMode({ ASSIST_PROVIDER: "fake" })).toBe("api");
+    expect(selectAssistMode({ ASSIST_PROVIDER: " FAKE ", NODE_ENV: "production" })).toBe(
+      "api",
+    );
+  });
+
+  it("takes manual when it is asked for, key or no key", () => {
+    expect(selectAssistMode({ ASSIST_PROVIDER: "manual" })).toBe("manual");
+    expect(
+      selectAssistMode({
+        ASSIST_PROVIDER: " Manual ",
+        ANTHROPIC_API_KEY: "sk-ant-not-a-real-key",
+      }),
+    ).toBe("manual");
+  });
+
+  it("reads any other value as the API, as selectAssistProvider does", () => {
+    expect(selectAssistMode({ ASSIST_PROVIDER: "anthropic" })).toBe("api");
   });
 });

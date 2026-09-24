@@ -26,7 +26,14 @@ export const SETTINGS_SECTIONS = [
   },
   { key: "buckets", label: "Buckets", title: "Buckets", path: "/settings/buckets" },
   { key: "channel", label: "Channel", title: "Channel", path: "/settings/channel" },
-  { key: "account", label: "Time zone", title: "Time zone", path: "/settings/account" },
+  // M11 added the API spending cap to the same per-user page; the label keeps
+  // "Time zone" first so the way people already find it still reads the same.
+  {
+    key: "account",
+    label: "Time zone & spending",
+    title: "Time zone and spending",
+    path: "/settings/account",
+  },
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["key"];

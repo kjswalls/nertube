@@ -65,7 +65,9 @@ decision taken without the user.
   core order, switch off, add your own), checklist templates with minute
   estimates, buckets and quotas, the voice guide, the script template, the WIP
   and stale thresholds, and the CTR the swap prompt measures against. For you:
-  your **time zone** (`/settings/account`), below.
+  your **time zone** (`/settings/account`), below, and on the same page what
+  the brainstorm has cost on the API this month and the **monthly cap** on it
+  ($10 unless you set another; see "The monthly spending cap").
 - **Your time zone** — "today" is your day. The calendar's today, the day
   `/now` offers "Confirm live" on, the board's batch-day date and the matrix's
   month all turn over at your local midnight, and published, swapped and
@@ -79,7 +81,12 @@ decision taken without the user.
   *Generate 20* (titles), *Draft hooks*, *Suggest concepts* and *Critique at
   tile size* (the three variants at feed size), conditioned on the channel's
   voice guide and past titles. Proposals, never edits: nothing lands in a field
-  until it is accepted. (The code calls each button an "assist".)
+  until it is accepted. (The code calls each button an "assist".) With no API
+  key each one is **Open in Claude**: the app writes the prompt, you run it in
+  your own claude.ai conversation and paste the reply back, and it becomes the
+  same proposals — at no cost to this app. With a key the API answers and Open
+  in Claude stays one press away; once the month's API spending reaches the
+  cap, every panel leads with Open in Claude again and says why (M11).
 - **Keys** — `?` on any page with the sidebar lists what works there (on a
   phone, "Keyboard shortcuts" in the menu opens the same list). `g` then a letter goes
   places, `j`/`k`/`Enter`/`Escape` work every list, `[`/`]` move a card, `x`
@@ -213,7 +220,9 @@ anything but a loopback `PGHOST`.
 | `npm run e2e:refresh` | The session-refresh spec on its own ports and database with a five-second access token, the only way to watch `proxy.ts` rotate a session. |
 
 The suite sets `ASSIST_PROVIDER=fake`, so it never spends money or depends on a
-third party.
+third party. The one exception, `e2e/spend-cap.spec.ts`, drives the real
+provider against a local stub it starts itself (`e2e/assist-stub.ts`), so
+nothing leaves the machine there either.
 
 **The suite runs against a production build.** Until the M9 review it ran
 against `next dev`, whose memory grows by about 20 MB per page pair; around two
@@ -244,15 +253,17 @@ this repository.
 |---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | the app | `.env.local`, Vercel | The project URL. Public by design. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the app | `.env.local`, Vercel | The anon/publishable key. Public by design: RLS is what protects the data. |
-| `ANTHROPIC_API_KEY` | `lib/assist/anthropic.ts` only | Vercel (server-side), optionally `.env.local` | **Secret.** Never with a `NEXT_PUBLIC_` prefix — that prefix inlines a value into the browser bundle. |
+| `ANTHROPIC_API_KEY` | `lib/assist/anthropic.ts` only | Vercel (server-side), optionally `.env.local` | **Secret.** Never with a `NEXT_PUBLIC_` prefix — that prefix inlines a value into the browser bundle. Every call it pays for is priced and counted against the monthly cap (below). |
 | `ANTHROPIC_MODEL` | `lib/assist/anthropic.ts` | Vercel, optional | Overrides the pinned model id (`claude-opus-5`). |
-| `ASSIST_PROVIDER` | `app/actions/assist.ts` | **Unset in production** | `fake` forces the built-in fixtures. See the table below. |
+| `ASSIST_PROVIDER` | `lib/assist/select.ts` (the action and the video page) | **Unset in production** | `fake` forces the built-in fixtures; `manual` makes Open in Claude every assist's only action, key or no key. Unset with no key is Open in Claude too. See the tables below. |
 | `ASSIST_FAKE_SCENARIO` | `lib/assist/fake.ts` only | dev and tests only | Makes the fixtures fail in a named way, to walk the error paths. |
 | `SUPABASE_SERVICE_ROLE_KEY` | `scripts/` only, never the app | a local shell, never Vercel | **Secret.** Used by `scripts/seed-demo.ts`. |
 | `SEED_EMAIL`, `SEED_PASSWORD` | `scripts/` only | a local shell | The account `seed-demo.ts` creates, and the harness's login. |
 | `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `NERTUBE_DB_URL` | `scripts/` only | a local shell | The local Postgres the harness and `db:verify` use (loopback only). |
 | `E2E_REUSE`, `E2E_PORT`, `DEV_STACK_*` | Playwright and the harness | a local shell | Test plumbing; `scripts/dev-stack/README.md` has the full table. |
 | `NERTUBE_TEST_CLOCK` | `lib/request-clock.ts` | **Unset everywhere but the browser suite** | `1` lets a request's `nertube-test-clock` cookie set the server's "now", so `e2e/timezone.spec.ts` can stand at an hour when two zones disagree about the date. Only `playwright.config.ts` sets it. |
+| `NERTUBE_TEST_ASSIST_MODE` | `lib/assist/mode.ts` | **Unset everywhere but the browser suite** | `1` lets a request's `nertube-test-assist-mode` cookie (`manual` or `api`) choose which of the API and Open in Claude is primary on its own page, so `e2e/assist-manual.spec.ts` can see the keyless page while the server keeps `ASSIST_PROVIDER=fake` (M11). It cannot pick a provider or reach a key. Only `playwright.config.ts` sets it. |
+| `NERTUBE_TEST_ANTHROPIC_STUB` | `lib/assist/test-stub.ts` | **Unset everywhere but the browser suite** | A local origin. A request carrying the `nertube-test-assist=stub` cookie then asks the **real** provider, pointed at that origin with a dummy key, so `e2e/spend-cap.spec.ts` can show the spending cap recording and refusing real calls (M11). The address comes only from the variable and the key sent there is never `ANTHROPIC_API_KEY`. Only `playwright.config.ts` sets it. |
 
 With no Supabase variables at all, the proxy answers every page with a readable
 503 setup page instead of an unexplained 500.
@@ -260,26 +271,120 @@ With no Supabase variables at all, the proxy answers every page with a readable
 ### Which assist implementation answers
 
 The suggestions are one feature behind one interface, `AssistProvider` in
-`lib/assist/types.ts`. `lib/assist/anthropic.ts` calls Claude;
-`lib/assist/fake.ts` returns deterministic fixtures with no network. The rule is
-one pure function, `selectAssistProvider` in `lib/assist/select.ts`, with a unit
-test per row:
+`lib/assist/types.ts`, with three implementations: `lib/assist/anthropic.ts`
+calls the API; `lib/assist/fake.ts` returns deterministic fixtures with no
+network; and `lib/assist/reply.ts` (M11) reads a reply **you** got from
+claude.ai and pasted back. Two pure functions in `lib/assist/select.ts`, each
+with a unit test per row, decide which.
+
+**First, what each assist's primary action is** (`selectAssistMode`, M11):
+
+| `ASSIST_PROVIDER` | key present | primary action | the other one |
+|---|---|---|---|
+| `manual` | either | **Open in Claude** | — the panels never call the API |
+| `fake` | either | the pill asks the fixtures, exactly as before M11 | Open in Claude, a quiet disclosure |
+| anything else non-empty | either | the pill asks the API | Open in Claude, a quiet disclosure |
+| unset | yes | the pill asks the API | Open in Claude, a quiet disclosure |
+| unset | **no** | **Open in Claude**, in every `NODE_ENV` | — |
+
+**And the cap.** Whenever the table says "the pill asks the API" and the API
+would really be called, the video page also reads this month's spend
+(`readAssistView` in `lib/assist/mode.ts`). If it is already at or over the
+cap, the page is drawn as in the `manual` rows instead: every panel opens on
+Open in Claude, with a note above it saying what the month has cost, what the
+cap is, the day it resets, and a link to Settings. The pill asks nothing, so
+there is no refusal to read first. If the cap is crossed while a page is
+already open, the pill's ask is refused by the server action's own check (it
+runs before every call regardless), and that refusal opens Open in Claude on
+the same panel, under the sentence. The fixtures and the keyless mode never
+read the spend.
+
+So with no key the brainstorm costs nothing and still works: that is the
+default a deployment gets. Running locally, `.env.local` says
+`ASSIST_PROVIDER=fake` (the fixtures, as the browser suite uses); set
+`ASSIST_PROVIDER=manual`, or leave it unset with no key, to use Open in Claude
+instead.
+
+**Open in Claude, the manual path.** Anthropic does not allow a claude.ai
+subscription to power a server-side app, so this path is done by hand and the
+app never talks to claude.ai. Pressing it asks the server for a prompt —
+built there, from the same brief as the API prompt (`briefSections` in
+`lib/assist/prompts.ts`: the channel's voice guide, its last fifty published
+titles, the craft rules, everything written on the video), ending in a
+plain-text answer shape instead of a JSON schema (`lib/assist/manual.ts`) —
+copies it, and opens `claude.ai/new` in a new tab. You paste it there, send
+it, copy Claude's reply, paste it into the panel's "Paste Claude's reply" box
+and press Read; the steps then fold to one row ("Open in Claude again",
+"Paste another reply") so the proposals lead. The reply goes through the same clamp, caps and
+de-duplication as an API answer, becomes the same proposal list with the same
+Accept buttons, and is stored in `brainstorm_last` the same way (with
+`provider: "manual"`, so a reopened panel says "pasted from claude.ai"). For
+the thumbnail critique the panel links to each uploaded image, because the app
+cannot attach them for you. If the browser refuses the copy, the prompt appears
+in a selected read-only box; if it blocks the tab, a plain link opens it.
+Nothing of claude.ai's — no cookie, no token, no credential — is ever read,
+stored or sent by this app, and nothing on this path spends the API key.
+
+**Then, when the pill does ask something, who answers**
+(`selectAssistProvider`, unchanged since M8; `chooseProvider` in
+`lib/assist/mode.ts` is the one place the page and the server action ask it):
 
 | `ASSIST_PROVIDER` | key present | `NODE_ENV` | answers |
 |---|---|---|---|
 | `fake` | either | any | the fixtures |
-| anything else non-empty | either | any | Claude |
+| anything else non-empty (including `manual`) | either | any | Claude |
 | unset | yes | any | Claude |
-| unset | no | `production` | Claude — and the panel says "no API key configured" |
-| unset | no | anything else | the fixtures |
+| unset | no | `production` | Claude — which fails with "no API key configured"; since M11 no panel asks in this state |
+| unset | no | anything else | the fixtures; likewise never asked by a panel since M11 |
 
-A production deployment with no key deliberately does **not** fall back: the
-fixtures return plausible titles with plausible reasons, and a deployment where
-the key was never pasted would let you believe a model wrote them. Wherever the
+A production deployment with no key deliberately does **not** fall back to the
+fixtures: they return plausible titles with plausible reasons, and a deployment
+where the key was never pasted would let you believe a model wrote them. Wherever the
 fixtures do answer, every panel says so on every answer, and which
 implementation answered is stored with the result, so a panel reopened tomorrow
 makes the same admission. `npm run build` followed by a grep of `.next/static`
-for `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` finds nothing.
+for `ANTHROPIC_API_KEY`, `api.anthropic.com` and `x-api-key` finds nothing
+(nor, since M11, a model name, the price table or the test stub's variable).
+
+Only Claude costs anything, so only Claude is counted and capped: the fixtures
+record nothing and are never refused, and neither is anything answered by
+hand. In the browser suite one spec asks the real provider against a local
+stub instead of the fixtures (`NERTUBE_TEST_ANTHROPIC_STUB`, above); nothing
+else in the suite does.
+
+#### The monthly spending cap (M11)
+
+Every response that comes back from the API is priced and recorded
+(`assist_usage`, migration 0011): who, when, the model that actually served it
+(a server-side fallback can answer with a different model from the one asked
+for), input, output, cache-read and cache-write tokens, and the cost in integer
+micro-dollars. Refused answers and unreadable ones are recorded too, because
+they were billed.
+
+- **Prices** are a table in code (`lib/assist/spend.ts`), per million tokens:
+  Opus 5 $5/$25, Opus 5.5 $4/$20, Sonnet 5 $2/$10, Haiku 4.5 $1/$5,
+  Fable 5.1 $10/$50, Opus 4.8 $5/$25; cache writes 1.25× input, cache reads
+  0.1× input. A model not in the table is priced at the most expensive entry,
+  never at zero, and Settings says the price was assumed. A fallback-served
+  call is priced attempt by attempt from `usage.iterations`, each at its own
+  model's rate; an attempt that declined before writing anything is not billed.
+- **The cap** is per user, in whole dollars a calendar month, set in
+  **Settings → Time zone & spending** (`/settings/account`). With no setting it
+  is **$10**; an empty box means no cap; $0 means never call the API. "This
+  month" is the calendar month in your time zone, turning over at your
+  midnight on the 1st.
+- **Before every real call** the month's spend is read. At or over the cap the
+  call is not made — nothing leaves the server — and the panel says the cap and
+  the spend, links to Settings, and opens Open in Claude under the sentence.
+  A page drawn when the cap is already reached leads with Open in Claude from
+  the start (above). If the spend
+  cannot be read, the call is refused the same way: a cap that is skipped
+  whenever it is unreadable would not be a cap.
+- **What it does not stop.** A call already in flight when the cap is crossed
+  finishes and is recorded, so the month can end a call's worth over. Two calls
+  started at the same moment both see the spend from before either landed, so
+  together they can pass the cap by one call's worth. The cap is checked, not
+  reserved.
 
 ## Where writes happen
 
@@ -307,6 +412,14 @@ what makes the invariants enforceable rather than conventional:
 - `profiles` (one row per user: the time zone) is readable by its owner and
   written only by `set_time_zone()`, which refuses a name the database's tz
   catalogue does not know and never lets a detected zone replace a chosen one.
+- `assist_usage` (what each real API call cost) is readable by its owner and
+  written only by `record_assist_usage()`, which stamps the owner and the time
+  itself and refuses negative or absurd numbers; no client can update or delete
+  a row, so a month's spend can only go up. `assist_caps` (the monthly cap) is
+  written only by `set_assist_cap()` (M11). The recording function *can* be
+  called by a signed-in client with made-up numbers — the app has no
+  service-role key, so the server holds nothing the browser does not — but a
+  forged row can only add to the forger's own month.
 
 Storage has one private bucket, `thumbnails`, with stable object paths
 (`{user_id}/{video_id}/{concept|wild_card|moderate|safe}.{ext}`, uploaded with
@@ -332,10 +445,14 @@ the runbook for someone who has the accounts; see
    project URL, the anon key and the service-role key. The service-role key
    stays in your shell; it never goes to Vercel.
 2. **Push the schema.** `npx supabase login`, `npx supabase link --project-ref
-   <ref>`, `npx supabase db push`. That applies `0001` to `0010`: every table,
+   <ref>`, `npx supabase db push`. That applies `0001` to `0011`: every table,
    policy, revoke and function, the private `thumbnails` bucket with its
-   policy and limits, and (0010) the per-user `profiles` row that holds the
-   time zone. `npx supabase migration list` should show all ten remotely.
+   policy and limits, (0010) the per-user `profiles` row that holds the
+   time zone, and (0011) the record of what API calls cost and the monthly
+   cap. `npx supabase migration list` should show all eleven remotely.
+   **Apply 0011 before deploying an M11 build that has a key:** without it
+   the spend cannot be read, and every real API call is refused rather than
+   made uncounted.
 3. **Create the one user** in the dashboard (Authentication → Users → *Add
    user*, auto-confirm), then turn sign-ups off (Authentication → Sign In /
    Providers → *Allow new users to sign up*). `supabase/config.toml` covers the
@@ -347,14 +464,17 @@ the runbook for someone who has the accounts; see
    `NERTUBE_DB_URL=<connection string> npm run db:types`, then
    `npm run typecheck`.
 5. **Deploy to Vercel** with `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `ANTHROPIC_API_KEY` set for production
-   (and preview, if you want previews to work). Leave `ASSIST_PROVIDER` unset.
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY` set for production (and preview, if you
+   want previews to work), and `ANTHROPIC_API_KEY` only if you want the API to
+   answer — without it every assist is Open in Claude and costs nothing. Leave
+   `ASSIST_PROVIDER` unset (or `manual` to keep the API off with a key present).
    The build fetches the four fonts from Google Fonts, so the build machine
    needs that egress.
 6. **Walk it.** Sign in; create a channel; capture an idea from a phone at
    `/capture`; drag it; refresh. Upload a concept sketch and confirm one object
    at the stable path. Curl the REST endpoint with the anon key and confirm zero
-   rows. Then the assist, in this order: that a brainstorm returns at all; that
+   rows. With no key: Open in Claude on Generate 20, paste the reply, accept
+   one. With a key, the assist in this order: that a brainstorm returns at all; that
    the outgoing request carries `effort: "medium"`, both `anthropic-beta` flags
    and `fallbacks: "default"`; that a refusal arrives as the panel's sentence
    rather than a crash; and that two opposite voice guides produce genuinely
@@ -392,7 +512,16 @@ found.
   when the read works and finds no row. The video page's stage select uses
   0010's `move_video_versioned` and, without it, falls back to M9's plain
   move (and M9's unconditional version adoption — see "Two tabs do not
-  merge"). But no test in this repository has run against either one:
+  merge"). **`0011_assist_spend.sql` (M11) has not been applied there
+  either.** Until it is, a deployed build with a key refuses every real API
+  call with "this month's API spending could not be read" (a cap that cannot
+  be checked is not enforced by skipping it) — the refusal opens Open in
+  Claude on the same panel, so the brainstorm still works by hand — and
+  Settings says the spending cannot be read; the fixtures and Open in Claude
+  are unaffected. (The M11 brief states that the hosted database now has
+  0001–0010; that could not be checked from this container, so the 0010
+  sentence above is left as the last thing verified here.) But no test
+  in this repository has run against either one:
   - no spec has signed in to the live site;
   - no upload has gone to a hosted bucket (M1's one unfinished acceptance
     item);
@@ -630,12 +759,67 @@ found.
   unmount the hidden ones, which would trade a lost click for a lost draft (M4,
   M8).
 - **The critique is the most expensive call in the app** (three images plus
-  a prompt) and nothing on screen shows what a call costs (M8).
-- **The assist has no spending ceiling.** It refuses the same question twice at
-  once, per server instance, but there is no per-hour or per-day cap, and
-  closing a panel stops the waiting, not the call, which runs to completion and
-  is billed (M8 review). Fine for one person paying their own bill; the first
-  thing to add if there is ever a second user.
+  a prompt). Settings shows this month's spend and the mean cost of a call,
+  but the panel does not say what the call it just made cost (M8, M11).
+- **The spending cap is monthly and checked, not reserved** (M11). Real API
+  calls stop at the cap — $10 a calendar month in your time zone unless you
+  set another — and the refusal says so before anything is sent. But a call
+  already running when the cap is crossed finishes and is billed and counted,
+  and two calls started at the same moment can pass the cap together by one
+  call's worth. There is still no per-hour or per-day limit, and closing a
+  panel stops the waiting, not the call, which runs to completion and is
+  billed (M8 review) — and counted.
+- **What the cap counts is this app's arithmetic, not Anthropic's invoice**
+  (M11). Each call is priced from the token counts in its response, with the
+  price table in `lib/assist/spend.ts`; the account's real bill is not read.
+  A request that timed out on this side, or lost its connection, may still
+  have been billed by the API and is not recorded, because no usage came
+  back. Cache reads on Opus 5.5 and Fable 5.1, and one-hour cache writes, are
+  priced above their list rate (the flat 1.25×/0.1× multipliers), which errs
+  towards stopping early; the app sends no cache control today, so neither
+  arises. A model missing from the table is priced at the dearest entry, and
+  Settings says so.
+- **Open in Claude has never reached claude.ai from here** (M11). There is no
+  egress from this container, so the browser suite stubs `window.open` and the
+  clipboard and writes the reply a person would paste. What is proved is what
+  the app hands those two calls — the prompt, built on the server with the
+  voice guide and past titles in it, and the address of a new conversation —
+  and what it does with a reply; not how claude.ai answers this prompt, nor
+  how often a real reply comes back in a shape the reader accepts first time.
+  The reader is forgiving (fences, bold, numbered lists without the `||`,
+  dashes, reasons on the next line, markdown tables, chatter around the list)
+  and a reply it cannot read keeps the pasted text and says what it expected.
+- **A pasted reply is taken on trust as Claude's.** The app cannot know what
+  wrote the text in the box, so the panel says "pasted from claude.ai"
+  rather than naming a model, and stores `model: "claude.ai"`. It is clamped
+  to the columns' limits like any answer, and it only ever lands in fields
+  after you press Accept, as with every proposal.
+- **The critique's images are attached by hand.** claude.ai cannot be handed
+  an image by this app, so the panel links to each uploaded file (a signed URL
+  that lasts an hour) and names the order to attach them in; the reply is read
+  by role name, so a reply that swaps two images' names is taken at its word.
+  As with the API's, a pasted critique is not kept.
+- **On a phone the steps rely on the page surviving the trip to claude.ai.**
+  The pasted-reply box is always there in the keyless mode, so a page the
+  browser reloaded while you were away still takes the reply; but with the API
+  primary the steps are behind "Open in Claude…", and pressing Open in Claude
+  again copies the prompt over whatever was on the clipboard. Once a reply has
+  been read the steps fold away, so pasting a second reply is one more press
+  ("Paste another reply"). Walked in
+  Chromium at 390×844 with touch, not on a real phone.
+- **What a panel leads with is decided when the page is drawn** (M11). With a
+  key, the video page reads the month's spend once per render to choose
+  between the API and Open in Claude — one more database read per video page,
+  and only then. Raising the cap in Settings takes effect on the next page
+  load; a page drawn at the cap keeps leading with Open in Claude (and hides
+  "Ask") until it is reloaded. If that read fails, the page leads with the API
+  and the pill's ask is what refuses.
+- **A signed-in session can add made-up spend to its own month** (M11).
+  `record_assist_usage()` has to be callable by the signed-in user, because
+  the server action that records a call holds only that user's session. Rows
+  cannot be edited, deleted, backdated or charged to anyone else, so the worst
+  a forged row can do is lock its own account out of API calls until the cap
+  is raised.
 - **A signed-out save is recognised in some places, not all.** When a session
   ends mid-edit (signed out in another tab, a revoked refresh token), the video
   page's fields, capture, checklist ticks and `/now`'s rows say "You have been

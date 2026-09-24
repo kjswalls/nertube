@@ -132,7 +132,7 @@ function craftSection(request: AssistRequest): string {
         "4. No promise the video cannot pay off, and no phrasing this channel would not use.",
         "5. Vary the angle across the list — different promises, different framings. Twenty rewordings of one title is one title.",
         "",
-        "Then pick the single strongest, give its index, and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
+        "Then pick the single strongest and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "concepts":
@@ -150,7 +150,7 @@ function craftSection(request: AssistRequest): string {
         "3. It has to be filmable by one person with the gear they already own.",
         "4. Range across the list: one riskier than the channel usually goes, one safe, the rest in between.",
         "",
-        "Then pick the strongest, give its index, and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
+        "Then pick the strongest and say in one sentence why that one beats the others in the list — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "hooks":
@@ -170,7 +170,7 @@ function craftSection(request: AssistRequest): string {
           ? "The hooks already written are listed below. Do not rewrite them and do not repeat their angle; write the ones that are missing."
           : "There are no hooks written yet.",
         "",
-        "Then pick the strongest of the ones you wrote, give its index, and say in one sentence why that one beats the others — a comparison, not a restatement of its own rationale.",
+        "Then pick the strongest of the ones you wrote and say in one sentence why that one beats the others — a comparison, not a restatement of its own rationale.",
       ].join("\n");
 
     case "thumbnail_critique":
@@ -187,7 +187,7 @@ function craftSection(request: AssistRequest): string {
         "2. Does it complement the title — add something — rather than repeating it?",
         "3. One or two sentences the creator can act on before publishing.",
         "",
-        "Then name the role you would ship. If none of them is shippable, return an empty string for it and say why in the notes.",
+        "Then name the role you would ship. If none of them is shippable, say so, and say why in the notes.",
       ].join("\n");
   }
 }
@@ -212,12 +212,54 @@ function outputSection(request: AssistRequest): string {
         ? `Return ${want} of them. Fewer is better than padding the list with weak ones; one or two more than ${want} is fine if they are genuinely different, and anything past ${cap} will be trimmed.`
         : `Return ${want} of them. Fewer is better than padding the list with weak ones; more than ${want} will be trimmed.`;
 
+  /*
+    How the pick is marked is a property of the answer's *form*, so it lives
+    here rather than in `craftSection` — which is shared, word for word, with
+    the prompt a person pastes into claude.ai (`lib/assist/manual.ts`), where
+    the pick is a `PICK:` line rather than a zero-based index.
+  */
+  const pick =
+    request.kind === "thumbnail_critique"
+      ? "Name the role you would ship in recommended_role, or an empty string if none is shippable."
+      : "Mark your pick with its zero-based index in recommended_index, and put the comparison in recommended_reason.";
+
   return [
     "## Output",
     "",
     counted,
+    pick,
     "Answer with the JSON object described by the schema and nothing else — no preamble, no commentary, no markdown fences.",
   ].join("\n");
+}
+
+/* -------------------------------------------------------------------------- */
+/* The brief both prompts share                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Everything a prompt says about *the job*, as opposed to the shape of the
+ * answer: who this is for, how the channel sounds, what it has published, and
+ * the craft rules for this kind.
+ *
+ * There are two prompts in this app. The API one (`buildSystemPrompt` below)
+ * ends in a JSON schema; the manual one a person pastes into claude.ai
+ * (`lib/assist/manual.ts`, M11) ends in a plain-text shape the app can read
+ * back. Both are built from this list, so the voice guide, the fifty past
+ * titles and the rules are one piece of prose in one place, and a manual
+ * answer is exactly as well-informed as one the key paid for.
+ * `lib/assist/manual.test.ts` holds both to that.
+ */
+export function briefSections(request: AssistRequest): string[] {
+  return [
+    [
+      "You are helping one creator package a YouTube video on their own channel. You are not a brand, a copywriter or an assistant with a personality; you are the part of their process that writes twenty options so they can choose one.",
+      "",
+      `The channel is ${request.channel.name}.`,
+    ].join("\n"),
+    voiceSection(request.channel),
+    pastTitlesSection(request.channel),
+    craftSection(request),
+  ].filter((section): section is string => section !== null);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -230,23 +272,31 @@ function outputSection(request: AssistRequest): string {
  * voice and the evidence sit at the top of it.
  */
 export function buildSystemPrompt(request: AssistRequest): string {
-  const sections = [
-    [
-      "You are helping one creator package a YouTube video on their own channel. You are not a brand, a copywriter or an assistant with a personality; you are the part of their process that writes twenty options so they can choose one.",
-      "",
-      `The channel is ${request.channel.name}.`,
-    ].join("\n"),
-    voiceSection(request.channel),
-    pastTitlesSection(request.channel),
-    craftSection(request),
-    outputSection(request),
-  ].filter((section): section is string => section !== null);
-
-  return sections.join("\n\n");
+  return [...briefSections(request), outputSection(request)].join("\n\n");
 }
 
 /** Everything the person has already written about this particular video. */
 export function buildUserMessage(request: AssistRequest): string {
+  const written = videoParts(request);
+
+  if (request.kind === "thumbnail_critique") {
+    written.push(
+      `The images follow, in this order: ${request.variants
+        .map((variant) => variant.role)
+        .join(", ")}.`,
+    );
+  }
+
+  return written.join("\n\n");
+}
+
+/**
+ * The video as the person has written it, as labelled paragraphs — shared by
+ * the API's user message above and the manual prompt, which differ only in
+ * how the thumbnail images arrive (inline blocks here, attachments the person
+ * adds by hand there).
+ */
+export function videoParts(request: AssistRequest): string[] {
   const video: VideoContext = request.video;
   const parts: (string | null)[] = [
     "Here is the video.",
@@ -281,14 +331,6 @@ export function buildUserMessage(request: AssistRequest): string {
     );
   }
 
-  if (request.kind === "thumbnail_critique") {
-    parts.push(
-      `The images follow, in this order: ${request.variants
-        .map((variant) => variant.role)
-        .join(", ")}.`,
-    );
-  }
-
   const written = parts.filter(
     (part): part is string => part !== null && part !== "",
   );
@@ -302,5 +344,5 @@ export function buildUserMessage(request: AssistRequest): string {
     );
   }
 
-  return written.join("\n\n");
+  return written;
 }
