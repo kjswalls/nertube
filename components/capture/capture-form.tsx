@@ -8,6 +8,7 @@ import {
   useId,
   useRef,
   useState,
+  type FormEvent,
   type KeyboardEvent,
 } from "react";
 
@@ -47,6 +48,7 @@ export function CaptureForm({
   variant,
   prefill,
   onSaved,
+  onDismiss,
   autoFocus = true,
 }: {
   channels: readonly CaptureChannel[];
@@ -84,6 +86,12 @@ export function CaptureForm({
   };
   /** Modal variant: called once a capture has been written. */
   onSaved?: (saved: { id: string; title: string; channelName: string }) => void;
+  /**
+   * Modal variant: close the box without saving. The bar draws its own
+   * "Esc to close" in its footer, where the mockup puts it, so the dialog
+   * around it has no header of its own.
+   */
+  onDismiss?: () => void;
   autoFocus?: boolean;
 }) {
   const router = useRouter();
@@ -317,69 +325,358 @@ export function CaptureForm({
   const current = channels.find((channel) => channel.id === channelId);
 
   const field =
-    "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    variant === "modal"
+      ? // Inside the bar: the density of the bar, not of a page form.
+        "w-full rounded-input border border-border bg-background px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      : "w-full rounded-input border border-border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  const fieldLabel =
+    variant === "modal" ? "text-xs text-muted" : "text-sm font-medium";
+
+  /** The buckets as hidden inputs, while the disclosure is closed — see the
+   * page variant's form below for why there is exactly one control per name. */
+  const hiddenBuckets =
+    !more && (verticalId !== "" || horizontalId !== "") ? (
+      <>
+        <input type="hidden" name="verticalId" value={verticalId} />
+        <input type="hidden" name="horizontalId" value={horizontalId} />
+      </>
+    ) : null;
+
+  /** Hook, notes, tags and the two buckets: the disclosure's fields. */
+  const disclosureFields = (
+    <>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={hookId} className={fieldLabel}>
+          One-line hook
+        </label>
+        <input
+          ref={hookRef}
+          id={hookId}
+          name="oneLineHook"
+          type="text"
+          className={field}
+          placeholder="The promise in one line"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={notesId} className={fieldLabel}>
+          Notes
+        </label>
+        <textarea id={notesId} name="notes" rows={3} className={field} />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={tagsId} className={fieldLabel}>
+          Tags
+        </label>
+        <input
+          id={tagsId}
+          name="tags"
+          type="text"
+          className={field}
+          placeholder="comma, separated"
+        />
+      </div>
+
+      {/* The two content buckets. One of each axis, this channel's only,
+        and nothing is asked of the server until this disclosure is
+        open. */}
+      <CaptureBuckets
+        channelId={channelId}
+        vertical={verticalId}
+        horizontal={horizontalId}
+        hintId={bucketsHintId}
+        onChange={(axis, value) => {
+          if (axis === "vertical") setVerticalId(value);
+          else setHorizontalId(value);
+        }}
+      />
+    </>
+  );
+
+  function submit(event: FormEvent<HTMLFormElement>): void {
+    // Refused here, before the action is ever called: an empty or
+    // whitespace-only title is not a network problem. (The server action
+    // validates the same rule with zod — this form is not the only caller,
+    // and a client check is a convenience, never a guarantee.)
+    if (title.trim() === "") {
+      event.preventDefault();
+      setClientError(
+        "Give the idea a title — anything you will recognise later.",
+      );
+      titleRef.current?.focus();
+      return;
+    }
+    setClientError(null);
+
+    // From here on this handler owns the submission — see `clientResult`.
+    // With no JavaScript none of this runs and the form posts to
+    // `formAction` exactly as it did before.
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    /*
+      The two buckets, taken from this form's own state rather than from
+      whatever the DOM happened to post.
+
+      `FormData` skips a **disabled** control, and both pickers are disabled
+      while `listBuckets` is in flight and while an axis has no options at
+      all — which is exactly the window a matrix capture opens in, because
+      `CaptureBuckets` mounts (and only then fetches) when the disclosure
+      does. Before this, opening the disclosure unmounted the hidden inputs
+      below and handed the two names to controls that were not going to
+      post, so an Enter during that window wrote the idea **unfiled** while
+      the "Filing it under X · Y" line was still on screen. Silently: the
+      capture succeeded, and the cell stayed drawn as a hole.
+
+      Setting them here makes the posted pair and the sentence one thing —
+      `verticalId`/`horizontalId` are the same state the line is derived
+      from. `""` is what the empty option holds and what the action reads as
+      "not sent"; `data.set` replaces the select's entry rather than adding
+      a second one, so there is still exactly one value per name.
+    */
+    data.set("verticalId", verticalId);
+    data.set("horizontalId", horizontalId);
+    setSubmitting(true);
+    void captureVideoAction(null, data)
+      .then((result) => setClientResult(result))
+      .catch(async () =>
+        setClientResult({
+          ok: false,
+          // Offline, signed out, or unreachable: `lib/write-failure.ts`.
+          error: failureSentence(
+            await diagnoseWriteFailure(),
+            "Could not reach the server, so nothing was saved. What you typed is still here — try again.",
+          ),
+        }),
+      )
+      .finally(() => setSubmitting(false));
+  }
+
+  if (variant === "modal") {
+    /*
+      The capture bar: the "Quick capture" artboard of the signed-off Moss &
+      Sand canvas. Three rows and nothing else on the fast path — the title
+      with its save, the channel it goes into, and a footer holding the
+      disclosure and the way out. The labels a form would have are here too,
+      but for assistive technology only: the bar is its own label, and every
+      key it answers to is printed beside the thing it does.
+    */
+    const kbd =
+      "rounded-[4px] border border-edge bg-chip px-1.5 py-px font-mono text-[10px] text-muted pointer-coarse:hidden";
+    return (
+      <form
+        ref={formRef}
+        action={formAction}
+        onSubmit={submit}
+        noValidate
+        className="flex flex-col"
+        autoComplete="off"
+      >
+        <div className="flex items-center gap-3.5 px-5 py-[19px] max-sm:gap-3 max-sm:px-4 max-sm:py-3">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="shrink-0 text-accent"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <label htmlFor={titleId} className="sr-only">
+            Idea
+          </label>
+          <input
+            ref={titleRef}
+            id={titleId}
+            name="title"
+            type="text"
+            required
+            maxLength={300}
+            autoFocus={autoFocus}
+            value={title}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              if (clientError) setClientError(null);
+            }}
+            onKeyDown={onTitleKeyDown}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={hintId}
+            placeholder="What is the video?"
+            className="min-w-0 flex-1 bg-transparent text-lg text-foreground outline-none placeholder:text-muted"
+          />
+          {/*
+            The mockup's "↵ save" hint, made a real button: a mouse and a
+            thumb need something to press, and a hint that is also the control
+            is one thing on screen rather than two. On a coarse pointer it
+            grows to a 44px target.
+          */}
+          <button
+            type="submit"
+            data-testid="capture-submit-inline"
+            disabled={submitting}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-[5px] border border-edge bg-chip px-[9px] py-[3px] font-mono text-[11px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 thumb:min-h-11 thumb:px-3.5 thumb:font-sans thumb:text-sm thumb:font-medium thumb:text-foreground"
+          >
+            <span aria-hidden="true" className="pointer-coarse:hidden">
+              ↵
+            </span>
+            {submitting ? "Saving…" : "Capture"}
+          </button>
+        </div>
+
+        <p id={hintId} className="sr-only">
+          Enter saves it as an idea{current ? ` in ${current.name}` : ""}.
+          Shift+Enter adds a hook, notes, tags, a topic pillar and a format.
+          {channels.length > 1 ? " Alt+1–9 picks the channel." : ""}
+        </p>
+
+        {/* Always rendered so a screen reader announces the message in
+            place; an empty paragraph takes no room in the bar. */}
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="px-5 pb-3 text-sm text-over-limit empty:p-0 max-sm:px-4"
+        >
+          {error}
+        </p>
+
+        {hiddenBuckets}
+
+        <fieldset className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-border px-5 py-3 max-sm:px-4">
+          <legend className="sr-only">Channel</legend>
+          <span aria-hidden="true" className="text-[11px] text-muted">
+            Into
+          </span>
+          {channels.map((channel, index) => {
+            const checked = channel.id === channelId;
+            return (
+              <label
+                key={channel.id}
+                data-chip=""
+                className={[
+                  "inline-flex cursor-pointer items-center gap-2 rounded-button border px-2.5 py-[5px] text-xs",
+                  "focus-within:ring-2 focus-within:ring-accent thumb:min-h-11 thumb:px-3.5 thumb:text-sm",
+                  checked
+                    ? "border-edge bg-chip font-medium text-foreground"
+                    : "border-transparent text-muted hover:text-foreground",
+                ].join(" ")}
+              >
+                <input
+                  type="radio"
+                  name="channelId"
+                  value={channel.id}
+                  checked={checked}
+                  onChange={() => aimAt(channel.id)}
+                  className="sr-only"
+                />
+                <span
+                  aria-hidden="true"
+                  className={[
+                    "size-1.5 shrink-0 rounded-[2px]",
+                    checked ? "bg-accent" : "bg-muted/50",
+                  ].join(" ")}
+                />
+                {channel.name}
+                {index < 9 && channels.length > 1 ? (
+                  <span
+                    aria-hidden="true"
+                    className="font-mono text-[10px] text-muted pointer-coarse:hidden"
+                  >
+                    ⌥{index + 1}
+                  </span>
+                ) : null}
+              </label>
+            );
+          })}
+          <span className="ml-auto text-[11px] text-muted">
+            lands in Idea
+            {prefill &&
+            verticalId === prefill.verticalId &&
+            horizontalId === prefill.horizontalId ? (
+              <span data-testid="capture-prefill">
+                {" "}
+                under{" "}
+                <span className="text-foreground">
+                  {prefill.verticalName}
+                </span>{" "}
+                ·{" "}
+                <span className="text-foreground">
+                  {prefill.horizontalName}
+                </span>
+              </span>
+            ) : null}
+          </span>
+        </fieldset>
+
+        {/* Unmounted, not hidden: an empty <textarea> that is merely invisible
+            still posts, and still collects a tab stop. */}
+        {more ? (
+          <div
+            id={moreId}
+            className="flex flex-col gap-3 border-t border-border px-5 py-4 max-sm:px-4"
+          >
+            {disclosureFields}
+          </div>
+        ) : null}
+
+        <div className="flex items-center gap-2.5 border-t border-border bg-well px-5 py-[11px] max-sm:px-4">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !more;
+              setMore(next);
+              if (next) requestAnimationFrame(() => hookRef.current?.focus());
+            }}
+            aria-expanded={more}
+            aria-controls={moreId}
+            className="inline-flex items-center gap-2.5 rounded-button text-xs text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              className={more ? "rotate-90" : undefined}
+            >
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            Hook, notes, tags
+            <kbd aria-hidden="true" className={kbd}>
+              ⇧↵
+            </kbd>
+          </button>
+          {onDismiss ? (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="ml-auto rounded-button text-[11px] text-muted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent thumb:min-h-11 thumb:px-3 thumb:text-sm"
+            >
+              {/* A touchscreen has no Escape key, so there the button says
+                  what it does rather than which key does it. */}
+              <span className="pointer-coarse:hidden">Esc to close</span>
+              <span className="hidden pointer-coarse:inline">Close</span>
+            </button>
+          ) : null}
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form
       ref={formRef}
       action={formAction}
-      onSubmit={(event) => {
-        // Refused here, before the action is ever called: an empty or
-        // whitespace-only title is not a network problem. (The server action
-        // validates the same rule with zod — this form is not the only caller,
-        // and a client check is a convenience, never a guarantee.)
-        if (title.trim() === "") {
-          event.preventDefault();
-          setClientError(
-            "Give the idea a title — anything you will recognise later.",
-          );
-          titleRef.current?.focus();
-          return;
-        }
-        setClientError(null);
-
-        // From here on this handler owns the submission — see `clientResult`.
-        // With no JavaScript none of this runs and the form posts to
-        // `formAction` exactly as it did before.
-        event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        /*
-          The two buckets, taken from this form's own state rather than from
-          whatever the DOM happened to post.
-
-          `FormData` skips a **disabled** control, and both pickers are disabled
-          while `listBuckets` is in flight and while an axis has no options at
-          all — which is exactly the window a matrix capture opens in, because
-          `CaptureBuckets` mounts (and only then fetches) when the disclosure
-          does. Before this, opening the disclosure unmounted the hidden inputs
-          below and handed the two names to controls that were not going to
-          post, so an Enter during that window wrote the idea **unfiled** while
-          the "Filing it under X · Y" line was still on screen. Silently: the
-          capture succeeded, and the cell stayed drawn as a hole.
-
-          Setting them here makes the posted pair and the sentence one thing —
-          `verticalId`/`horizontalId` are the same state the line is derived
-          from. `""` is what the empty option holds and what the action reads as
-          "not sent"; `data.set` replaces the select's entry rather than adding
-          a second one, so there is still exactly one value per name.
-        */
-        data.set("verticalId", verticalId);
-        data.set("horizontalId", horizontalId);
-        setSubmitting(true);
-        void captureVideoAction(null, data)
-          .then((result) => setClientResult(result))
-          .catch(async () =>
-            setClientResult({
-              ok: false,
-              // Offline, signed out, or unreachable: `lib/write-failure.ts`.
-              error: failureSentence(
-                await diagnoseWriteFailure(),
-                "Could not reach the server, so nothing was saved. What you typed is still here — try again.",
-              ),
-            }),
-          )
-          .finally(() => setSubmitting(false));
-      }}
+      onSubmit={submit}
       /* `required` still tells assistive technology the field is required;
          `noValidate` keeps the browser's own bubble out of the way, because it
          fires before this handler and cannot see the whitespace case. */
@@ -498,12 +795,7 @@ export function CaptureForm({
         where the disclosure cannot be open without a click that also runs the
         handler.
       */}
-      {!more && (verticalId !== "" || horizontalId !== "") ? (
-        <>
-          <input type="hidden" name="verticalId" value={verticalId} />
-          <input type="hidden" name="horizontalId" value={horizontalId} />
-        </>
-      ) : null}
+      {hiddenBuckets}
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="text-sm font-medium">Channel</legend>
@@ -575,53 +867,7 @@ export function CaptureForm({
             still posts, and still collects a tab stop. */}
         {more ? (
           <div id={moreId} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={hookId} className="text-sm font-medium">
-                One-line hook
-              </label>
-              <input
-                ref={hookRef}
-                id={hookId}
-                name="oneLineHook"
-                type="text"
-                className={field}
-                placeholder="The promise in one line"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={notesId} className="text-sm font-medium">
-                Notes
-              </label>
-              <textarea id={notesId} name="notes" rows={3} className={field} />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={tagsId} className="text-sm font-medium">
-                Tags
-              </label>
-              <input
-                id={tagsId}
-                name="tags"
-                type="text"
-                className={field}
-                placeholder="comma, separated"
-              />
-            </div>
-
-            {/* The two content buckets. One of each axis, this channel's only,
-                and nothing is asked of the server until this disclosure is
-                open. */}
-            <CaptureBuckets
-              channelId={channelId}
-              vertical={verticalId}
-              horizontal={horizontalId}
-              hintId={bucketsHintId}
-              onChange={(axis, value) => {
-                if (axis === "vertical") setVerticalId(value);
-                else setHorizontalId(value);
-              }}
-            />
+            {disclosureFields}
           </div>
         ) : null}
       </div>

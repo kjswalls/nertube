@@ -260,7 +260,7 @@ test('Escape closes the modal without saving, and gives focus back', async ({
 
 test('focus is trapped in the modal while it is open', async ({ page }) => {
   const dialog = await openModal(page);
-  await expect(dialog.getByRole('button', { name: 'More' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Hook, notes, tags' })).toBeVisible();
 
   // Round the tab order twice; focus never leaves the dialog.
   for (let press = 0; press < 12; press += 1) {

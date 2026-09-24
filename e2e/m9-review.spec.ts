@@ -520,11 +520,13 @@ test('under forced colors the chosen and focused capture chip, the current sideb
     expect(await chip.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('solid');
   }
 
-  // The capture box: Tab from the title onto the channel radio. The focus is
-  // drawn on the chip, not on the 1×1 clipped input.
+  // The capture box: Tab from the title, past the save beside it, onto the
+  // channel radio. The focus is drawn on the chip, not on the 1×1 clipped
+  // input.
   await page.keyboard.press('c');
   const dialog = page.getByRole('dialog', { name: 'Capture an idea' });
   await expect(dialog).toBeVisible();
+  await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   const focusedChip = dialog.locator('[data-chip]:has(> input:focus-visible)');
   await expect(focusedChip).toHaveCount(1);

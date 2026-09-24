@@ -40,6 +40,7 @@ export function CaptureDialog({
   return (
     <Modal
       title="Capture an idea"
+      chrome="bare"
       returnFocusRef={returnFocusRef}
       onClose={onClose}
       onClosed={onClosed}
@@ -49,6 +50,7 @@ export function CaptureDialog({
         initialChannelId={initialChannelId}
         preferLastUsed={preferLastUsed}
         variant="modal"
+        onDismiss={onClose}
         onSaved={(result) => {
           onClose();
           // The modal closes on save, so the confirmation has to outlive it
